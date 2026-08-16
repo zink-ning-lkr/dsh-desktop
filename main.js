@@ -26,6 +26,7 @@ let dshChild = null;
 let bootSeq = 0; // 递增序号:重启后,旧一次 boot 的回调不再生效
 let quitting = false;
 let cleaned = false;
+let dshWebUrl = null; // 当前 dsh web 服务地址(供"在浏览器中打开"使用)
 
 // ---------- 配置(记住上次的工作目录) ----------
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
@@ -316,6 +317,7 @@ function menuItems() {
   return [
     { type: 'item', id: 'open-workspace', label: '打开工作目录…', accel: 'Ctrl+O' },
     { type: 'item', id: 'restart-dsh', label: '重启 dsh 服务', accel: 'Ctrl+Shift+R' },
+    { type: 'item', id: 'open-browser', label: '在浏览器中打开' },
     { type: 'sep' },
     { type: 'item', id: 'fullscreen', label: '全屏', accel: 'F11' },
     { type: 'item', id: 'toggle-bar', label: barVisible ? '隐藏标题栏' : '显示标题栏', accel: 'Ctrl+Shift+B' },
@@ -363,6 +365,7 @@ ipcMain.on('m:action', (e, id) => {
     case 'show-main': showMainWindow(); break;
     case 'open-workspace': changeWorkspace(); break;
     case 'restart-dsh': bootDsh(); break;
+    case 'open-browser': if (dshWebUrl) shell.openExternal(dshWebUrl); break;
     case 'fullscreen': toggleFullscreen(); break;
     case 'toggle-bar': toggleTitlebar(!barVisible); break;
     case 'reload': dshView?.webContents.reload(); break;
@@ -490,6 +493,7 @@ async function bootDsh() {
     await killTree(old);
   }
   if (!dshView) return;
+  dshWebUrl = null; // 重启期间旧地址失效
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
 
   const cwd = loadConfig().workspace;
@@ -511,6 +515,7 @@ async function bootDsh() {
       else app.quit();
     });
     log(`服务地址: ${url},等待 HTTP 就绪…`);
+    dshWebUrl = url;
     const ready = await waitServerReady(url, () => seq !== bootSeq);
     if (!ready || quitting || seq !== bootSeq || !dshView) return;
     log(`加载 ${url}`);
