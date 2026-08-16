@@ -1,3 +1,4 @@
+// 标题栏与下拉把手共用的 IPC 桥:窗口控制、菜单、主题/最大化状态同步
 // 标题栏/把手页面与主进程之间的桥:仅暴露窗口控制与菜单事件,不开放其他能力。
 const { contextBridge, ipcRenderer } = require('electron');
 
