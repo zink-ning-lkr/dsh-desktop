@@ -1,3 +1,4 @@
+// 图标管线① 用 Electron 离屏渲染三张母版(蓝底白鲸/白鲸/黑鲸)
 // 第一步:用 Electron 离屏渲染三张"母版"(物理分辨率,约为标称值×系统缩放):
 //   assets/icon-src/master-icon.png      蓝渐变底 + 白鲸
 //   assets/icon-src/master-white.png     白鲸透明底
