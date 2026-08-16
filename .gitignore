@@ -1,0 +1,12 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 运行期/工具产生的临时文件
+CRASH.txt
+tools/.icon-tmp.html
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -1,0 +1,61 @@
+{
+  "name": "dsh-desktop",
+  "productName": "DSH Desktop",
+  "version": "0.4.2",
+  "description": "DeepSeek Harness (dsh) 的桌面壳:后台启动 dsh web,窗口加载其 UI,数据与本体完全共享",
+  "main": "main.js",
+  "author": "zink_ning",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zinkning/dsh-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zinkning/dsh-desktop/issues"
+  },
+  "homepage": "https://github.com/zinkning/dsh-desktop#readme",
+  "keywords": ["electron", "deepseek", "dsh", "deepseek-harness", "desktop-app", "wrapper"],
+  "scripts": {
+    "start": "electron .",
+    "icon": "electron tools/rasterize-icon.js && powershell -NoProfile -ExecutionPolicy Bypass -File tools/resize-icons.ps1 && node tools/gen-icon.js",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "@lobehub/icons-static-svg": "^1.94.0",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.zinkning.dsh-desktop",
+    "productName": "DSH Desktop",
+    "copyright": "© zinkning",
+    "files": [
+      "main.js",
+      "titlebar.html",
+      "titlebar-preload.js",
+      "reveal-tab.html",
+      "menu.html",
+      "menu-preload.js",
+      "loading.html",
+      "assets/**"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DSH Desktop"
+    },
+    "portable": {
+      "artifactName": "DSH-Desktop-Portable-${version}.exe"
+    }
+  }
+}

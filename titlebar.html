@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>titlebar</title>
+<style>
+  :root { --bg: #0d1117; --fg: #9aa0a6; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    display: flex;
+    align-items: center;
+    background: var(--bg);
+    color: var(--fg);
+    font: 12px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+    user-select: none;
+    -webkit-app-region: drag; /* 整条可拖动移动窗口;双击最大化/还原 */
+  }
+  button {
+    all: unset;
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+  }
+  #menuBtn { width: 32px; height: 22px; border-radius: 6px; margin-left: 5px; }
+  #menuBtn:hover { background: rgba(127, 127, 127, .25); }
+  #menuBtn svg { width: 13px; height: 13px; }
+  #collapseBtn { width: 34px; }
+  #collapseBtn svg { width: 11px; height: 11px; }
+  .title { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; }
+  .logo {
+    width: 16px; height: 16px; flex: none;
+    /* 白鲸 logo,透明底 */
+  }
+  .name { white-space: nowrap; opacity: .85; }
+  .workspace { opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  .spacer { flex: 1; }
+  .cap { display: flex; height: 100%; flex: none; }
+  .cap button { width: 44px; }
+  .cap button:hover { background: rgba(127, 127, 127, .18); }
+  #closeBtn:hover { background: #c42b1c; color: #fff; }
+  .cap svg { width: 11px; height: 11px; }
+</style>
+</head>
+<body>
+  <button id="menuBtn" title="菜单 (Ctrl+O 打开工作目录)">
+    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <line x1="2" y1="3.5" x2="12" y2="3.5"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="2" y1="10.5" x2="12" y2="10.5"/>
+    </svg>
+  </button>
+  <div class="title">
+    <img class="logo" src="assets/whale-white.png" alt="DSH"><span class="name">DSH</span>
+    <span class="workspace" id="workspace"></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="cap">
+    <button id="collapseBtn" title="隐藏标题栏">
+      <svg viewBox="0 0 11 11"><path d="M1.5 7.5 L5.5 3.5 L9.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
+    </button>
+    <button id="minBtn" title="最小化">
+      <svg viewBox="0 0 11 11"><line x1="1" y1="9.5" x2="10" y2="9.5" stroke="currentColor" stroke-width="1"/></svg>
+    </button>
+    <button id="maxBtn" title="最大化">
+      <svg id="icoMax" viewBox="0 0 11 11"><rect x="1" y="1" width="9" height="9" fill="none" stroke="currentColor"/></svg>
+      <svg id="icoRestore" viewBox="0 0 11 11" style="display:none"><rect x="0.5" y="2.5" width="8" height="8" fill="none" stroke="currentColor"/><path d="M2.5 2.5 V0.5 H10.5 V8.5 H8.5" fill="none" stroke="currentColor"/></svg>
+    </button>
+    <button id="closeBtn" title="关闭">
+      <svg viewBox="0 0 11 11"><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.1"/></svg>
+    </button>
+  </div>
+<script>
+  const t = window.__titlebar;
+  document.getElementById('menuBtn').onclick = () => t.openMenu();
+  document.getElementById('minBtn').onclick = () => t.minimize();
+  document.getElementById('maxBtn').onclick = () => t.toggleMaximize();
+  document.getElementById('closeBtn').onclick = () => t.close();
+  document.getElementById('collapseBtn').onclick = () => t.hideTitlebar();
+  t.onTheme(({ bg, fg }) => {
+    document.body.style.background = bg;
+    document.body.style.color = fg;
+  });
+  t.onMaximized((max) => {
+    document.getElementById('icoMax').style.display = max ? 'none' : '';
+    document.getElementById('icoRestore').style.display = max ? '' : 'none';
+    document.getElementById('maxBtn').title = max ? '还原' : '最大化';
+  });
+  t.onWorkspace((ws) => { document.getElementById('workspace').textContent = ws ? `— ${ws}` : ''; });
+</script>
+</body>
+</html>

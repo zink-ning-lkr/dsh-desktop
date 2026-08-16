@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DSH</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #0d1117;
+    color: #8b949e;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    user-select: none;
+  }
+  .spinner {
+    width: 34px;
+    height: 34px;
+    border: 3px solid #21262d;
+    border-top-color: #4d6bfe;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  p { margin: 0; font-size: 13px; }
+</style>
+</head>
+<body>
+  <img src="assets/whale-white.png" alt="DSH" style="width: 52px; height: 52px; opacity: .9;">
+  <div class="spinner"></div>
+  <p>正在启动 dsh web…(首次启动可能需要几十秒)</p>
+</body>
+</html>
