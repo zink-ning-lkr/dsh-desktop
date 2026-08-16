@@ -315,7 +315,7 @@ function createTray() {
 // ---------- 应用更新(对接 GitHub Releases,electron-updater) ----------
 const { autoUpdater } = require('electron-updater');
 autoUpdater.autoDownload = false;        // 由用户确认后再下载
-autoUpdater.autoInstallOnAppQuit = true; // 用户选"稍后"时,退出自动安装
+autoUpdater.autoInstallOnAppQuit = false; // 用户选"稍后"即本次跳过,下次启动检查时再提示
 
 let manualCheck = false;
 let pendingVersion = null; // 已发现/已下载的新版本号
@@ -349,7 +349,7 @@ autoUpdater.on('update-available', (info) => {
     type: 'info',
     title: '发现新版本',
     message: `新版本 v${info.version} 可用(当前 v${app.getVersion()})`,
-    detail: '选择"现在下载"将在下载完成后自动重启安装;选择"稍后"则在下次退出应用时自动安装。',
+    detail: '选择"现在下载"将在下载完成后自动重启安装;选择"稍后"则本次跳过,下次启动时再次提示。',
     buttons: ['现在下载', '稍后'],
     defaultId: 0, noLink: true,
   });
@@ -377,7 +377,7 @@ autoUpdater.on('update-downloaded', () => {
     title: '更新就绪',
     message: `v${pendingVersion} 已下载完成,现在重启并安装?`,
     detail: '安装程序会自动完成更新并重新启动应用。',
-    buttons: ['立即重启安装', '稍后(退出时自动安装)'],
+    buttons: ['立即重启安装', '稍后'],
     defaultId: 0, noLink: true,
   });
   if (choice === 0) autoUpdater.quitAndInstall(true, true);
