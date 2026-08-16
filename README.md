@@ -59,8 +59,7 @@ dsh-desktop/
 ├── reveal-tab.html       # 标题栏收起后的下拉把手
 ├── loading.html          # dsh 启动期间的加载页
 ├── assets/               # 图标(DeepSeek 官方鲸鱼,@lobehub/icons)
-├── tools/                # 开发工具:图标生成管线、演示截屏脚本
-├── docs/screenshots/     # README 配图
+└── tools/                # 开发工具:图标生成管线
 ```
 
 ## 开发
