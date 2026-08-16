@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DSH Desktop",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "DeepSeek Harness (dsh) 的桌面壳:后台启动 dsh web,窗口加载其 UI,数据与本体完全共享",
   "main": "main.js",
   "author": "zink_ning",
@@ -14,7 +14,14 @@
     "url": "https://github.com/zink-ning/dsh-desktop/issues"
   },
   "homepage": "https://github.com/zink-ning/dsh-desktop#readme",
-  "keywords": ["electron", "deepseek", "dsh", "deepseek-harness", "desktop-app", "wrapper"],
+  "keywords": [
+    "electron",
+    "deepseek",
+    "dsh",
+    "deepseek-harness",
+    "desktop-app",
+    "wrapper"
+  ],
   "scripts": {
     "start": "electron .",
     "icon": "electron tools/rasterize-icon.js && powershell -NoProfile -ExecutionPolicy Bypass -File tools/resize-icons.ps1 && node tools/gen-icon.js",
@@ -29,6 +36,11 @@
     "appId": "com.zinkning.dsh-desktop",
     "productName": "DSH Desktop",
     "copyright": "© zinkning",
+    "publish": {
+      "provider": "github",
+      "owner": "zink-ning",
+      "repo": "dsh-desktop"
+    },
     "files": [
       "main.js",
       "titlebar.html",
@@ -37,6 +49,7 @@
       "menu.html",
       "menu-preload.js",
       "loading.html",
+      "update.html",
       "assets/**"
     ],
     "win": {
@@ -52,10 +65,14 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DSH Desktop"
+      "shortcutName": "DSH Desktop",
+      "artifactName": "DSH-Desktop-Setup-${version}.exe"
     },
     "portable": {
       "artifactName": "DSH-Desktop-Portable-${version}.exe"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

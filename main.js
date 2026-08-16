@@ -312,6 +312,125 @@ function createTray() {
   tray.on('right-click', () => showTrayMenu());
 }
 
+// ---------- 应用更新(对接 GitHub Releases,electron-updater) ----------
+const { autoUpdater } = require('electron-updater');
+autoUpdater.autoDownload = false;        // 由用户确认后再下载
+autoUpdater.autoInstallOnAppQuit = true; // 用户选"稍后"时,退出自动安装
+
+let manualCheck = false;
+let pendingVersion = null; // 已发现/已下载的新版本号
+let updateDownloaded = false;
+let updateWin = null;      // 下载进度小窗
+
+function closeUpdateWin() {
+  updateWin?.destroy();
+  updateWin = null;
+}
+
+function showUpdateProgress(version) {
+  closeUpdateWin();
+  updateWin = new BrowserWindow({
+    width: 380, height: 130, useContentSize: true,
+    frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
+    webPreferences: { sandbox: true },
+  });
+  updateWin.setMenuBarVisibility(false);
+  updateWin.loadFile(path.join(__dirname, 'update.html')).then(() => {
+    if (!updateWin) return;
+    updateWin.webContents.executeJavaScript(`setVersion(${JSON.stringify(version)})`).catch(() => {});
+    updateWin.show();
+  });
+  updateWin.on('closed', () => { updateWin = null; });
+}
+
+autoUpdater.on('update-available', (info) => {
+  pendingVersion = info.version;
+  const choice = dialog.showMessageBoxSync(mainWindow, {
+    type: 'info',
+    title: '发现新版本',
+    message: `新版本 v${info.version} 可用(当前 v${app.getVersion()})`,
+    detail: '选择"现在下载"将在下载完成后自动重启安装;选择"稍后"则在下次退出应用时自动安装。',
+    buttons: ['现在下载', '稍后'],
+    defaultId: 0, noLink: true,
+  });
+  if (choice === 0 && !quitting) {
+    showUpdateProgress(info.version);
+    autoUpdater.downloadUpdate().catch((e) => {
+      closeUpdateWin();
+      log(`更新下载失败: ${e.message}`);
+    });
+  }
+});
+
+autoUpdater.on('download-progress', (p) => {
+  if (!updateWin) return;
+  updateWin.webContents.executeJavaScript(
+    `setProgress(${p.percent}, ${Math.round(p.transferred / 1048576)}, ${Math.round(p.total / 1048576)})`,
+  ).catch(() => {});
+});
+
+autoUpdater.on('update-downloaded', () => {
+  closeUpdateWin();
+  updateDownloaded = true;
+  const choice = dialog.showMessageBoxSync(mainWindow, {
+    type: 'info',
+    title: '更新就绪',
+    message: `v${pendingVersion} 已下载完成,现在重启并安装?`,
+    detail: '安装程序会自动完成更新并重新启动应用。',
+    buttons: ['立即重启安装', '稍后(退出时自动安装)'],
+    defaultId: 0, noLink: true,
+  });
+  if (choice === 0) autoUpdater.quitAndInstall(true, true);
+});
+
+autoUpdater.on('update-not-available', () => {
+  if (manualCheck) {
+    dialog.showMessageBoxSync(mainWindow, {
+      type: 'info', title: '检查更新',
+      message: `当前已是最新版本(v${app.getVersion()})。`,
+      buttons: ['好的'], noLink: true,
+    });
+  }
+});
+
+autoUpdater.on('error', (e) => {
+  closeUpdateWin();
+  log(`更新检查失败: ${e.message}`);
+  if (manualCheck) {
+    dialog.showMessageBoxSync(mainWindow, {
+      type: 'error', title: '检查更新',
+      message: `检查更新失败:${e.message}`,
+      detail: '请确认网络可用后重试。',
+      buttons: ['好的'], noLink: true,
+    });
+  }
+});
+
+function checkForUpdates(manual) {
+  manualCheck = manual;
+  if (!app.isPackaged) {
+    if (manual) {
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'info', title: '检查更新',
+        message: '开发模式下不支持在线更新,请使用打包后的应用。',
+        buttons: ['好的'], noLink: true,
+      });
+    }
+    return;
+  }
+  if (updateDownloaded) {
+    // 已下载过:直接询问是否重启安装
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'info', title: '更新就绪',
+      message: `v${pendingVersion} 已下载完成,现在重启并安装?`,
+      buttons: ['立即重启安装', '取消'], defaultId: 0, noLink: true,
+    });
+    if (choice === 0) autoUpdater.quitAndInstall(true, true);
+    return;
+  }
+  autoUpdater.checkForUpdates().catch((e) => log(`更新检查失败: ${e.message}`));
+}
+
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
 function menuItems() {
   return [
@@ -326,6 +445,7 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
+    { type: 'item', id: 'check-update', label: '检查更新…' },
     { type: 'sep' },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
     { type: 'sep' },
@@ -372,6 +492,7 @@ ipcMain.on('m:action', (e, id) => {
     case 'devtools': dshView?.webContents.toggleDevTools(); break;
     case 'dsh-home': shell.openPath(path.join(os.homedir(), '.dsh')); break;
     case 'log': shell.showItemInFolder(logFile); break;
+    case 'check-update': checkForUpdates(true); break;
     case 'close-to-tray': {
       // 设置项:切换"关闭按钮 = 最小化到托盘 / 直接退出"
       const cfg = loadConfig();
@@ -614,6 +735,9 @@ if (!gotLock) {
     createWindow();
     createTray();
     bootDsh();
+
+    // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
+    setTimeout(() => { if (app.isPackaged) checkForUpdates(false); }, 6_000);
 
     // 自动化冒烟:DSH_DESKTOP_SMOKE=1 自动退出;DSH_DESKTOP_DEMO=1 额外按阶段
     // 切换标题栏/全屏状态并写出窗口屏幕坐标(DSH_DEMO_BOUNDS 指定 JSON 路径),
