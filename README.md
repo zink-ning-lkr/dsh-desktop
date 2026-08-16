@@ -51,15 +51,31 @@ npm start
 
 ```
 dsh-desktop/
-├── main.js               # 主进程:窗口/视图编排、dsh 进程管理、托盘、菜单、设置
-├── titlebar.html         # 自绘标题栏(拖拽、窗口按钮、收起开关)
-├── titlebar-preload.js   # 标题栏 IPC 桥
-├── menu.html             # 自绘菜单弹层(主菜单与托盘菜单共用渲染器)
-├── menu-preload.js       # 菜单 IPC 桥
-├── reveal-tab.html       # 标题栏收起后的下拉把手
-├── loading.html          # dsh 启动期间的加载页
-├── assets/               # 图标(DeepSeek 官方鲸鱼,@lobehub/icons)
-└── tools/                # 开发工具:图标生成管线
+├── main.js               # Electron 主进程:窗口与视图编排、dsh 子进程管理(启动/端口解析/进程树清理)、托盘、菜单、配置与日志
+├── titlebar.html         # 自绘标题栏:拖拽移动窗口、最小化/最大化/关闭/收起按钮、鲸鱼 logo 与工作目录显示
+├── titlebar-preload.js   # 标题栏与下拉把手共用的 IPC 桥(窗口控制、菜单、主题/最大化状态同步)
+├── menu.html             # 自绘深色菜单渲染器:主菜单与托盘菜单共用,支持图标、快捷键提示、勾选项、键盘导航
+├── menu-preload.js       # 菜单 IPC 桥(接收条目数据、回传动作与关闭)
+├── reveal-tab.html       # 标题栏收起后顶部中央的下拉把手(鼠标靠近才浮现)
+├── loading.html          # dsh 启动期间的深色加载页(鲸鱼 logo + 转圈)
+├── assets/
+│   ├── icon.ico          # Windows 应用图标,16~256 七档(黑鲸透明底)
+│   ├── icon.png          # 256 PNG 版应用图标
+│   ├── whale-white.png   # 白鲸透明底(标题栏/加载页 logo,深色界面用)
+│   ├── whale-black.png   # 黑鲸透明底(通用素材)
+│   ├── deepseek-whale.svg        # DeepSeek 官方鲸鱼单色矢量(图标生成源)
+│   ├── deepseek-whale-color.svg  # DeepSeek 官方鲸鱼彩色矢量(备用)
+│   └── icon-src/         # 各尺寸 PNG 中间产物(供 gen-icon.js 组装 ico)
+├── tools/
+│   ├── rasterize-icon.js # 图标管线① Electron 离屏渲染三张母版
+│   ├── resize-icons.ps1  # 图标管线② 母版重采样为精确尺寸
+│   └── gen-icon.js       # 图标管线③ 组装 icon.ico / icon.png
+├── package.json          # 项目清单、npm 脚本、electron-builder 打包配置
+├── package-lock.json     # 依赖版本锁定
+├── .gitignore            # Git 忽略规则(node_modules/dist/日志等)
+├── .gitattributes        # 换行符统一与二进制文件声明
+├── LICENSE               # MIT 许可证
+└── README.md             # 项目说明
 ```
 
 ## 开发
