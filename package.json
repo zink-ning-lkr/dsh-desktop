@@ -8,12 +8,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zinkning/dsh-desktop.git"
+    "url": "git+https://github.com/zink-ning/dsh-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/zinkning/dsh-desktop/issues"
+    "url": "https://github.com/zink-ning/dsh-desktop/issues"
   },
-  "homepage": "https://github.com/zinkning/dsh-desktop#readme",
+  "homepage": "https://github.com/zink-ning/dsh-desktop#readme",
   "keywords": ["electron", "deepseek", "dsh", "deepseek-harness", "desktop-app", "wrapper"],
   "scripts": {
     "start": "electron .",
