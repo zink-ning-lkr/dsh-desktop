@@ -1,4 +1,5 @@
 // DSH Desktop —— DeepSeek Harness (dsh) 的桌面壳。
+// 托盘常驻(关闭默认收进后台)、自绘菜单、深色主题;会话/文件/设置与本体完全共享。
 // 原理:以用户选的工作目录为 cwd,后台启动本体 `dsh web`,从 stdout 解析实际地址,
 // 窗口加载该地址。不动 $DSH_HOME,因此会话/设置/插件/文件与本体 dsh 完全共享。
 process.on('uncaughtException', (err) => {
