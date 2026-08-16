@@ -1,3 +1,4 @@
+// 图标管线③ 从 icon-src/ 组装 icon.ico 与 icon.png
 // 从 assets/icon-src/<size>.png(由 rasterize-icon.js 生成)组装:
 //   assets/icon.ico  多尺寸 Windows 图标
 //   assets/icon.png  256 PNG(窗口运行时图标)
