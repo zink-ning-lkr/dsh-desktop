@@ -15,6 +15,11 @@ const path = require('node:path');
 const IS_WIN = process.platform === 'win32';
 // Windows 规范:固定 AppUserModelID,保证任务栏图标/分组/通知归属正确
 if (IS_WIN) app.setAppUserModelId('com.zinkning.dsh-desktop');
+// 后台/遮挡时不挂起 dsh 页面:避免对话正在工作时切走再切回触发重连/视图重建/滚动重置
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // 菜单弹层、右键菜单等原生 UI 跟随应用深色风格
 nativeTheme.themeSource = 'dark';
 const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
@@ -574,7 +579,13 @@ function createWindow() {
   });
   titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html'));
 
-  dshView = new WebContentsView({ webPreferences: { sandbox: true } });
+  dshView = new WebContentsView({
+    webPreferences: {
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  dshView.webContents.setBackgroundThrottling(false);
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
   dshView.webContents.on('did-finish-load', () => {
     syncTitleBarTheme();
