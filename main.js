@@ -20,6 +20,7 @@ nativeTheme.themeSource = 'dark';
 const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
 const BOOT_URL_TIMEOUT_MS = 30_000; // 等待 dsh 打印服务地址
 const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装依赖,放宽)
+const CHECK_UPDATE_TIMEOUT_MS = 15_000; // 手动检查更新的超时时间
 
 let mainWindow = null;
 let dshChild = null;
@@ -318,9 +319,16 @@ autoUpdater.autoDownload = false;        // 由用户确认后再下载
 autoUpdater.autoInstallOnAppQuit = false; // 用户选"稍后"即本次跳过,下次启动检查时再提示
 
 let manualCheck = false;
+let manualCheckTimedOut = false; // 手动检查超时后,忽略迟到的结果事件
+let updateCheckTimer = null;
 let pendingVersion = null; // 已发现/已下载的新版本号
 let updateDownloaded = false;
 let updateWin = null;      // 下载进度小窗
+
+function finishUpdateCheckTimer() {
+  clearTimeout(updateCheckTimer);
+  updateCheckTimer = null;
+}
 
 function closeUpdateWin() {
   updateWin?.destroy();
@@ -344,13 +352,15 @@ function showUpdateProgress(version) {
 }
 
 autoUpdater.on('update-available', (info) => {
+  if (manualCheckTimedOut) return; // 手动检查已超时,忽略迟到结果
+  finishUpdateCheckTimer();
   pendingVersion = info.version;
   const choice = dialog.showMessageBoxSync(mainWindow, {
     type: 'info',
     title: '发现新版本',
     message: `新版本 v${info.version} 可用(当前 v${app.getVersion()})`,
-    detail: '选择"现在下载"将在下载完成后自动重启安装;选择"稍后"则本次跳过,下次启动时再次提示。',
-    buttons: ['现在下载', '稍后'],
+    detail: '选择"现在更新"将在下载完成后自动重启安装;选择"稍后"则跳过本次更新,下次启动时再次提示。',
+    buttons: ['现在更新', '稍后'],
     defaultId: 0, noLink: true,
   });
   if (choice === 0 && !quitting) {
@@ -384,6 +394,8 @@ autoUpdater.on('update-downloaded', () => {
 });
 
 autoUpdater.on('update-not-available', () => {
+  if (manualCheckTimedOut) return;
+  finishUpdateCheckTimer();
   if (manualCheck) {
     dialog.showMessageBoxSync(mainWindow, {
       type: 'info', title: '检查更新',
@@ -394,6 +406,8 @@ autoUpdater.on('update-not-available', () => {
 });
 
 autoUpdater.on('error', (e) => {
+  if (manualCheckTimedOut) return; // 已按超时处理过,不再弹错
+  finishUpdateCheckTimer();
   closeUpdateWin();
   log(`更新检查失败: ${e.message}`);
   if (manualCheck) {
@@ -408,6 +422,7 @@ autoUpdater.on('error', (e) => {
 
 function checkForUpdates(manual) {
   manualCheck = manual;
+  manualCheckTimedOut = false;
   if (!app.isPackaged) {
     if (manual) {
       dialog.showMessageBoxSync(mainWindow, {
@@ -428,6 +443,21 @@ function checkForUpdates(manual) {
     if (choice === 0) autoUpdater.quitAndInstall(true, true);
     return;
   }
+  // 手动检查设超时:超时仍未取到版本信息则终止本次检查并告知用户
+  if (manual) {
+    finishUpdateCheckTimer();
+    updateCheckTimer = setTimeout(() => {
+      updateCheckTimer = null;
+      manualCheckTimedOut = true;
+      log('检查更新超时');
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning', title: '检查更新',
+        message: '运行超时,请重试。',
+        detail: `${CHECK_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取最新版本信息,请确认网络可用后再试。`,
+        buttons: ['好的'], noLink: true,
+      });
+    }, CHECK_UPDATE_TIMEOUT_MS);
+  }
   autoUpdater.checkForUpdates().catch((e) => log(`更新检查失败: ${e.message}`));
 }
 
@@ -445,7 +475,7 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
-    { type: 'item', id: 'check-update', label: '检查更新…' },
+    { type: 'item', id: 'check-update', label: `检查更新…(当前 v${app.getVersion()})` },
     { type: 'sep' },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
     { type: 'sep' },
