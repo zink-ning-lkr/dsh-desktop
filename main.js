@@ -116,7 +116,7 @@ function killTree(child) {
 function startDsh(cwd) {
   const bin = findDshBin();
   const node = findNode();
-  const args = [bin, 'web', '--host', '127.0.0.1', '--port', '0'];
+  const args = [bin, 'web', '--host', '127.0.0.1', '--port', String(loadConfig().port ?? 0)];
   log(`启动 dsh web: "${node.exe}" ${args.map((a) => `"${a}"`).join(' ')} (cwd=${cwd})`);
   const child = spawn(node.exe, args, {
     cwd,
