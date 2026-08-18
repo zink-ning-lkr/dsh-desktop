@@ -47,7 +47,7 @@ npm install          # 国内网络若下载 Electron 报证书错误,见下方"
 npm start
 ```
 
-前置要求:已全局安装 dsh(`npm install -g @deepseek-ai/dsh`)和 Node.js。
+前置要求:已全局安装 dsh(`npm install -g @deepseek-ai/dsh`,已验证兼容 `0.1.0-rc.7`)和 Node.js。
 
 ## 项目结构
 

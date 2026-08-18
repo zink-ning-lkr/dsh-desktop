@@ -23,7 +23,7 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // 菜单弹层、右键菜单等原生 UI 跟随应用深色风格
 nativeTheme.themeSource = 'dark';
 const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
-const BOOT_URL_TIMEOUT_MS = 30_000; // 等待 dsh 打印服务地址
+const BOOT_URL_TIMEOUT_MS = 90_000; // 等待 dsh 打印服务地址(升级/首启时 dsh 要用 pnpm 装 40+ 个包,放宽到 90s)
 const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装依赖,放宽)
 const CHECK_UPDATE_TIMEOUT_MS = 15_000; // 手动检查更新的超时时间
 
@@ -118,10 +118,18 @@ function killTree(child) {
   });
 }
 
+// 读取已定位 dsh 包的版本号(写入启动日志,便于跨版本排查兼容问题)
+function dshVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.dirname(findDshBin()), '..', 'package.json'), 'utf8')).version;
+  } catch { return '未知'; }
+}
+
 function startDsh(cwd) {
   const bin = findDshBin();
   const node = findNode();
   const args = [bin, 'web', '--host', '127.0.0.1', '--port', String(loadConfig().port ?? 0)];
+  log(`dsh 版本: ${dshVersion()}`);
   log(`启动 dsh web: "${node.exe}" ${args.map((a) => `"${a}"`).join(' ')} (cwd=${cwd})`);
   const child = spawn(node.exe, args, {
     cwd,
