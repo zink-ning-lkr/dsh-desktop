@@ -8,12 +8,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zink-ning/dsh-desktop.git"
+    "url": "git+https://github.com/zink-ning-lkr/dsh-desktop.git"
   },
   "bugs": {
-    "url": "https://github.com/zink-ning/dsh-desktop/issues"
+    "url": "https://github.com/zink-ning-lkr/dsh-desktop/issues"
   },
-  "homepage": "https://github.com/zink-ning/dsh-desktop#readme",
+  "homepage": "https://github.com/zink-ning-lkr/dsh-desktop#readme",
   "keywords": [
     "electron",
     "deepseek",
@@ -35,7 +35,7 @@
   "build": {
     "appId": "com.zinkning.dsh-desktop",
     "productName": "DSH Desktop",
-    "copyright": "© zinkning",
+    "copyright": "© zink_ning",
     "publish": {
       "provider": "github",
       "owner": "zink-ning-lkr",

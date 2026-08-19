@@ -97,5 +97,5 @@ npm run dist     # 打包安装版 + 便携版 exe(输出在 dist/)
 
 ## License
 
-[MIT](LICENSE) © zink-ning ·
+[MIT](LICENSE) © zink_ning ·
 
