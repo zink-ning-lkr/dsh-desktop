@@ -10,6 +10,8 @@
   .title { display: flex; align-items: center; gap: 8px; font-size: 14px; }
   .bar { height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
   .fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, #5B7BFF, #364FC9); transition: width .2s; }
+  .fill.busy { width: 100%; transition: none; background-size: 200% 100%; background-image: linear-gradient(90deg, #21262d, #5B7BFF, #364FC9, #21262d); animation: scan 1.3s linear infinite; }
+  @keyframes scan { from { background-position: 0% 0; } to { background-position: -200% 0; } }
   .meta { display: flex; justify-content: space-between; color: #8b949e; font-size: 12px; }
 </style>
 </head>
@@ -21,6 +23,12 @@
 </div>
 <script>
   function setVersion(v) { document.getElementById('title').textContent = '正在下载新版本 v' + v + '…'; }
+  function setBusy(text) {
+    document.getElementById('title').textContent = text;
+    document.getElementById('fill').classList.add('busy');
+    document.getElementById('pct').textContent = '请稍候…';
+    document.getElementById('size').textContent = '';
+  }
   function setProgress(p, mb, total) {
     document.getElementById('fill').style.width = p + '%';
     document.getElementById('pct').textContent = p.toFixed(1) + '%';

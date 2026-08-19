@@ -9,6 +9,7 @@ const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, sh
 const { spawn, execSync } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
+const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -26,6 +27,8 @@ const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
 const BOOT_URL_TIMEOUT_MS = 90_000; // 等待 dsh 打印服务地址(升级/首启时 dsh 要用 pnpm 装 40+ 个包,放宽到 90s)
 const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装依赖,放宽)
 const CHECK_UPDATE_TIMEOUT_MS = 15_000; // 手动检查更新的超时时间
+const CHECK_DSH_UPDATE_TIMEOUT_MS = 10_000; // 手动检查 dsh 本体更新的超时时间
+const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh/latest'; // dsh 本体最新版本查询地址
 
 let mainWindow = null;
 let dshChild = null;
@@ -215,7 +218,7 @@ function startHandlePolling() {
         && p.y >= b.y && p.y <= b.y + HANDLE_ZONE.h;
       if (inZone) {
         const [w] = mainWindow.getContentSize();
-        revealTabView.setBounds({ x: Math.floor(w / 2 - 26), y: 0, width: 52, height: 15 });
+        revealTabView.setBounds({ x: Math.floor(w / 2 - 32), y: 0, width: 64, height: 20 });
       } else {
         revealTabView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
       }
@@ -474,6 +477,189 @@ function checkForUpdates(manual) {
   autoUpdater.checkForUpdates().catch((e) => log(`更新检查失败: ${e.message}`));
 }
 
+// ---------- dsh 本体更新(对接 npm registry,检查流程与桌面端更新保持一致) ----------
+// 与桌面端更新相同的语义:启动时静默检查、菜单手动检查带超时、发现新版弹"现在更新/稍后"、
+// 只有手动触发才弹"已是最新/失败",安装完成后提示重启 dsh 服务。
+function parseVersion(v) {
+  return String(v || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+}
+// a < b → -1;a === b → 0;a > b → 1(忽略 prerelease 标签,仅比较数字段)
+function compareVersion(a, b) {
+  const va = parseVersion(a), vb = parseVersion(b);
+  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+    const x = va[i] || 0, y = vb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+let cachedNpmCli = null;
+function findNpmCli() {
+  if (cachedNpmCli) return cachedNpmCli;
+  const npm = firstLine(IS_WIN ? 'where npm.cmd' : 'which npm');
+  cachedNpmCli = npm || (IS_WIN ? 'npm.cmd' : 'npm');
+  return cachedNpmCli;
+}
+
+// 从 npm registry 读取 dsh 最新版本号(带超时;返回版本号字符串,失败返回 null)
+function fetchLatestDshVersion(timeoutMs) {
+  return new Promise((resolve) => {
+    const req = https.get(DSH_REGISTRY_URL, { timeout: timeoutMs }, (res) => {
+      let data = '';
+      res.on('data', (c) => {
+        data += c;
+        if (data.length > 1_000_000) req.destroy(new Error('响应过大'));
+      });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).version || null); } catch { resolve(null); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('超时')));
+    req.on('error', () => resolve(null));
+  });
+}
+
+let dshCheckTimer = null;
+let dshManualCheckTimedOut = false; // 手动检查超时后,忽略迟到的结果
+let dshUpdateWin = null;             // 安装进度小窗
+
+function finishDshCheckTimer() {
+  clearTimeout(dshCheckTimer);
+  dshCheckTimer = null;
+}
+function closeDshUpdateWin() {
+  dshUpdateWin?.destroy();
+  dshUpdateWin = null;
+}
+
+// 安装进度小窗(复用 update.html 的深色界面,进度条改为不定态扫描动画)
+function showDshUpdateProgress(text) {
+  closeDshUpdateWin();
+  dshUpdateWin = new BrowserWindow({
+    width: 380, height: 130, useContentSize: true,
+    frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
+    webPreferences: { sandbox: true },
+  });
+  dshUpdateWin.setMenuBarVisibility(false);
+  dshUpdateWin.loadFile(path.join(__dirname, 'update.html')).then(() => {
+    if (!dshUpdateWin) return;
+    dshUpdateWin.webContents.executeJavaScript(`setBusy(${JSON.stringify(text)})`).catch(() => {});
+    dshUpdateWin.show();
+  });
+  dshUpdateWin.on('closed', () => { dshUpdateWin = null; });
+}
+
+// 通过 npm 全局安装 dsh 新版本;完成后提示重启 dsh 服务(对应桌面端"立即重启安装")
+function installDshUpdate(version) {
+  const npm = findNpmCli();
+  log(`安装 dsh 本体更新: "${npm}" install -g @deepseek-ai/dsh`);
+  showDshUpdateProgress(`正在安装 dsh 本体 v${version}…`);
+  const child = spawn(npm, ['install', '-g', '@deepseek-ai/dsh'], { windowsHide: true });
+  let buf = '';
+  const onData = (c) => {
+    const text = c.toString();
+    if (text.trim()) log(`[npm] ${text.trim()}`);
+    buf += text;
+    if (buf.length > 8000) buf = buf.slice(-8000);
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  child.on('close', (code) => {
+    closeDshUpdateWin();
+    if (quitting) return;
+    if (code === 0) {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'info', title: 'dsh 更新完成',
+        message: `dsh 本体已更新到 v${version}。`,
+        detail: '重启 dsh 服务后即可使用新版本。',
+        buttons: ['重启 dsh', '稍后'], defaultId: 0, noLink: true,
+      });
+      if (choice === 0 && !quitting) bootDsh();
+    } else {
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'error', title: 'dsh 更新失败',
+        message: `npm 安装失败 (code=${code})。`,
+        detail: `日志:\n${buf.slice(-1500)}`,
+        buttons: ['好的'], noLink: true,
+      });
+    }
+  });
+  child.on('error', (e) => {
+    closeDshUpdateWin();
+    if (quitting) return;
+    log(`dsh 更新安装进程启动失败: ${e.message}`);
+    dialog.showMessageBoxSync(mainWindow, {
+      type: 'error', title: 'dsh 更新失败',
+      message: `无法启动 npm:${e.message}`,
+      buttons: ['好的'], noLink: true,
+    });
+  });
+}
+
+function checkDshUpdate(manual) {
+  finishDshCheckTimer();
+  dshManualCheckTimedOut = false;
+  // 仅打包版才有"桌面端更新";dsh 本体检查在开发模式同样可用,故不设 isPackaged 门槛
+  const current = dshVersion();
+  if (current === '未知') {
+    log('检查 dsh 更新: 未定位到 dsh 本体,跳过');
+    if (manual) {
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning', title: '检查 dsh 更新',
+        message: '未检测到 dsh 本体,请先全局安装:npm install -g @deepseek-ai/dsh',
+        buttons: ['好的'], noLink: true,
+      });
+    }
+    return;
+  }
+  // 手动检查设超时:超时仍未取到版本信息则终止本次检查并告知用户
+  if (manual) {
+    dshCheckTimer = setTimeout(() => {
+      dshCheckTimer = null;
+      dshManualCheckTimedOut = true;
+      log('检查 dsh 更新超时');
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning', title: '检查 dsh 更新',
+        message: '运行超时,请重试。',
+        detail: `${CHECK_DSH_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取 dsh 最新版本信息,请确认网络可用后再试。`,
+        buttons: ['好的'], noLink: true,
+      });
+    }, CHECK_DSH_UPDATE_TIMEOUT_MS);
+  }
+  fetchLatestDshVersion(8_000).then((latest) => {
+    if (dshManualCheckTimedOut) return; // 已按超时处理,忽略迟到结果
+    finishDshCheckTimer();
+    if (!latest) {
+      log('检查 dsh 更新失败: 未能获取最新版本信息');
+      if (manual) {
+        dialog.showMessageBoxSync(mainWindow, {
+          type: 'error', title: '检查 dsh 更新',
+          message: '检查 dsh 本体更新失败。',
+          detail: '请确认网络可用后重试。',
+          buttons: ['好的'], noLink: true,
+        });
+      }
+      return;
+    }
+    if (compareVersion(latest, current) > 0) {
+      log(`发现 dsh 新版本 v${latest}(当前 v${current})`);
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'info', title: '发现 dsh 新版本',
+        message: `dsh 本体新版本 v${latest} 可用(当前 v${current})`,
+        detail: '选择"现在更新"将通过 npm 全局安装新版本;安装完成后提示重启 dsh 服务。',
+        buttons: ['现在更新', '稍后'], defaultId: 0, noLink: true,
+      });
+      if (choice === 0 && !quitting) installDshUpdate(latest);
+    } else if (manual) {
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'info', title: '检查 dsh 更新',
+        message: `dsh 本体已是最新版本(v${current})。`,
+        buttons: ['好的'], noLink: true,
+      });
+    }
+  });
+}
+
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
 function menuItems() {
   return [
@@ -489,6 +675,7 @@ function menuItems() {
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
     { type: 'item', id: 'check-update', label: `检查更新…(当前 v${app.getVersion()})` },
+    { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'sep' },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
     { type: 'sep' },
@@ -536,6 +723,7 @@ ipcMain.on('m:action', (e, id) => {
     case 'dsh-home': shell.openPath(path.join(os.homedir(), '.dsh')); break;
     case 'log': shell.showItemInFolder(logFile); break;
     case 'check-update': checkForUpdates(true); break;
+    case 'check-dsh-update': checkDshUpdate(true); break;
     case 'close-to-tray': {
       // 设置项:切换"关闭按钮 = 最小化到托盘 / 直接退出"
       const cfg = loadConfig();
@@ -759,6 +947,7 @@ function buildMenu() {
       submenu: [
         { label: '打开 dsh 数据目录 (~/.dsh)', click: () => shell.openPath(path.join(os.homedir(), '.dsh')) },
         { label: '打开日志文件', click: () => shell.showItemInFolder(logFile) },
+        { label: '检查 dsh 本体更新', click: () => checkDshUpdate(true) },
       ],
     },
   ]));
@@ -787,6 +976,8 @@ if (!gotLock) {
 
     // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
     setTimeout(() => { if (app.isPackaged) checkForUpdates(false); }, 6_000);
+    // 12 秒后静默检查 dsh 本体更新(错开桌面端更新检查,避免两个弹窗同时出现)
+    setTimeout(() => checkDshUpdate(false), 12_000);
 
     // 自动化冒烟:DSH_DESKTOP_SMOKE=1 自动退出;DSH_DESKTOP_DEMO=1 额外按阶段
     // 切换标题栏/全屏状态并写出窗口屏幕坐标(DSH_DEMO_BOUNDS 指定 JSON 路径),
