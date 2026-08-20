@@ -132,6 +132,8 @@ function startDsh(cwd) {
   const bin = findDshBin();
   const node = findNode();
   const args = [bin, 'web', '--host', '127.0.0.1', '--port', String(loadConfig().port ?? 0)];
+  // dsh 0.1.0-rc.8 起默认自动打开系统浏览器;桌面壳已内嵌 UI,默认加 --no-open 抑制,由菜单"自动打开浏览器"控制
+  if (!loadConfig().openBrowser) args.push('--no-open');
   log(`dsh 版本: ${dshVersion()}`);
   log(`启动 dsh web: "${node.exe}" ${args.map((a) => `"${a}"`).join(' ')} (cwd=${cwd})`);
   const child = spawn(node.exe, args, {
@@ -677,6 +679,7 @@ function menuItems() {
     { type: 'item', id: 'check-update', label: `检查更新…(当前 v${app.getVersion()})` },
     { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'sep' },
+    { type: 'item', id: 'auto-open-browser', label: '自动打开浏览器', checked: !!loadConfig().openBrowser },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
     { type: 'sep' },
     { type: 'item', id: 'quit', label: '退出', accel: 'Alt+F4' },
@@ -724,6 +727,14 @@ ipcMain.on('m:action', (e, id) => {
     case 'log': shell.showItemInFolder(logFile); break;
     case 'check-update': checkForUpdates(true); break;
     case 'check-dsh-update': checkDshUpdate(true); break;
+    case 'auto-open-browser': {
+      // 设置项:启动 dsh 时是否随带打开系统浏览器(dsh 0.1.0-rc.8 起默认会,故桌面壳默认关闭并传 --no-open)
+      const cfg = loadConfig();
+      cfg.openBrowser = !cfg.openBrowser;
+      saveConfig(cfg);
+      log(`自动打开浏览器已切换为: ${cfg.openBrowser ? '开启' : '关闭'}`);
+      break;
+    }
     case 'close-to-tray': {
       // 设置项:切换"关闭按钮 = 最小化到托盘 / 直接退出"
       const cfg = loadConfig();
