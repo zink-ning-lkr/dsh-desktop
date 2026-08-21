@@ -482,17 +482,42 @@ function checkForUpdates(manual) {
 // ---------- dsh 本体更新(对接 npm registry,检查流程与桌面端更新保持一致) ----------
 // 与桌面端更新相同的语义:启动时静默检查、菜单手动检查带超时、发现新版弹"现在更新/稍后"、
 // 只有手动触发才弹"已是最新/失败",安装完成后提示重启 dsh 服务。
+// 解析 semver 版本号(支持 v 前缀与 -pre 后缀,如 0.1.1-rc.2 / v1.2.3);
+// 返回 { nums:[major,minor,patch], pre:[...] },pre 为空数组表示正式版;无法解析返回 null
 function parseVersion(v) {
-  return String(v || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const s = String(v || '').replace(/^v/i, '').trim();
+  const m = s.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$/);
+  if (!m) return null;
+  const nums = [1, 2, 3].map((i) => (m[i] ? parseInt(m[i], 10) : 0));
+  const pre = m[4] ? m[4].split('.') : [];
+  return { nums, pre };
 }
-// a < b → -1;a === b → 0;a > b → 1(忽略 prerelease 标签,仅比较数字段)
-function compareVersion(a, b) {
-  const va = parseVersion(a), vb = parseVersion(b);
-  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-    const x = va[i] || 0, y = vb[i] || 0;
-    if (x !== y) return x < y ? -1 : 1;
+// 预发布段逐段比较(semver 规则):数字段按数值、字母段按字典序、数字段 < 字母段、段耗尽者更旧
+function comparePre(a, b) {
+  if (a.length === 0 && b.length === 0) return 0;
+  if (a.length === 0) return 1; // 正式版 > 任何预发布
+  if (b.length === 0) return -1;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i], y = b[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
+    if (nx && ny) return parseInt(x, 10) < parseInt(y, 10) ? -1 : 1;
+    if (nx) return -1;
+    if (ny) return 1;
+    return x < y ? -1 : 1;
   }
   return 0;
+}
+// a < b → -1;a === b → 0;a > b → 1;任一无法解析 → 0(不误报更新)
+function compareVersion(a, b) {
+  const va = parseVersion(a), vb = parseVersion(b);
+  if (!va || !vb) return 0;
+  for (let i = 0; i < 3; i++) {
+    if (va.nums[i] !== vb.nums[i]) return va.nums[i] < vb.nums[i] ? -1 : 1;
+  }
+  return comparePre(va.pre, vb.pre);
 }
 
 let cachedNpmCli = null;
