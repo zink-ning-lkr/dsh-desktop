@@ -222,6 +222,7 @@ function waitServerReady(url, shouldStop = () => false) {
 // dsh 页面从标题栏下方开始渲染,与窗口按钮物理隔离,永不重叠。
 // 标题栏可收起(滑动动画),收起后顶部中央出现下拉把手;F11 全屏时自动收起。
 const TITLEBAR_H = 30;
+const BAR_OVERLAP = 10; // 标题栏底部渐变透明区,覆盖到页面顶端,柔化两者边界
 const TITLE_BAR_DEFAULT = '#0d1117';
 let dshView = null;
 let titlebarView = null;
@@ -230,11 +231,13 @@ let menuPopupView = null;
 let barVisible = true;
 let currentBarH = TITLEBAR_H;
 let barAnim = null;
+let menuClosedAt = 0; // 弹层最后关闭时刻:防"点按钮关闭→blur 先关→点击又打开"的抖动
 
 function layoutViews() {
   if (!mainWindow || !titlebarView || !dshView) return;
   const [w, h] = mainWindow.getContentSize();
-  titlebarView.setBounds({ x: 0, y: 0, width: w, height: currentBarH });
+  // 展开时标题栏高度 = 逻辑栏高 + 底部渐变区(盖住页面顶端);收起时完全隐藏
+  titlebarView.setBounds({ x: 0, y: 0, width: w, height: currentBarH > 0 ? currentBarH + BAR_OVERLAP : 0 });
   dshView.setBounds({ x: 0, y: currentBarH, width: w, height: Math.max(0, h - currentBarH) });
   // 把手默认隐藏,由 handlePoll 检测到鼠标靠近顶部中央时再浮现
   revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
@@ -383,16 +386,24 @@ let statusPayload = null;    // 当前展示的载荷(用于增量更新)
 let statusQueued = null;     // 窗口未加载完成时排队的载荷
 let statusActions = null;    // 结果视图按钮 id → 回调
 
-function flushStatus() {
-  if (!statusQueued || !statusWin) return;
-  const p = statusQueued;
-  statusQueued = null;
+function sendStatus(p) {
+  if (!statusWin) return;
   statusPayload = p;
+  // 结果视图需要 ~226px 内容高度(大图标+标题+多行详情+按钮),固定 186px 会裁掉确定按钮
+  const h = p.mode === 'result' ? 250 : 186;
+  statusWin.setContentSize(410, h);
   statusWin.setTitle(p.title || 'DSH');
   statusWin.webContents.send('st:set', p);
   if (statusWin.isMinimized()) statusWin.restore();
   statusWin.show();
   statusWin.focus();
+}
+
+function flushStatus() {
+  if (!statusQueued || !statusWin) return;
+  const p = statusQueued;
+  statusQueued = null;
+  sendStatus(p);
 }
 
 function showStatus(p) {
@@ -412,7 +423,8 @@ function showStatus(p) {
     statusQueued = p;
     return;
   }
-  flushStatus();
+  if (statusQueued) { statusQueued = p; return; } // 窗口仍在加载:更新排队载荷
+  sendStatus(p); // 窗口已就绪:直接下发(修复"检查后结果永远不显示")
 }
 
 function updateStatus(patch) {
@@ -514,7 +526,13 @@ function showDialog(opts, cb) {
     dialogQueued = opts;
     return;
   }
-  flushDialog();
+  if (dialogQueued) { dialogQueued = opts; return; } // 仍在加载:更新排队载荷
+  // 已就绪:直接展示(修复第二次调用不显示)
+  dialogWin.setTitle(opts.title || 'DSH');
+  dialogWin.webContents.send('dl:show', opts);
+  centerOn(dialogWin, mainWindow);
+  dialogWin.show();
+  dialogWin.focus();
 }
 
 ipcMain.on('dl:choose', (_e, i) => {
@@ -581,6 +599,16 @@ function showReport(opts) {
   reportPath = rep.filePath;
   reportLogFile = logFile;
   const logPreview = String(ctx.buf || '').slice(-3000) || diagnostics.tailFile(logFile, 60) || '';
+  const payload = {
+    phase: opts.phase,
+    badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
+    name: rep.cls.title,
+    cause: rep.cls.cause,
+    suggestions: rep.cls.suggestions || [],
+    logPreview,
+    reportPath: rep.filePath,
+    actions: opts.actions || [],
+  };
 
   if (!reportWin) {
     reportWin = new BrowserWindow({
@@ -592,28 +620,13 @@ function showReport(opts) {
     reportWin.loadFile(path.join(__dirname, 'report.html'));
     reportWin.webContents.once('did-finish-load', flushReport);
     reportWin.on('closed', () => { reportWin = null; });
-    reportQueued = {
-      phase: opts.phase,
-      badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
-      name: rep.cls.title,
-      cause: rep.cls.cause,
-      suggestions: rep.cls.suggestions || [],
-      logPreview,
-      reportPath: rep.filePath,
-      actions: opts.actions || [],
-    };
+    reportQueued = payload;
     return;
   }
-  reportWin.webContents.send('rp:show', {
-    phase: opts.phase,
-    badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
-    name: rep.cls.title,
-    cause: rep.cls.cause,
-    suggestions: rep.cls.suggestions || [],
-    logPreview,
-    reportPath: rep.filePath,
-    actions: opts.actions || [],
-  });
+  if (reportQueued) { reportQueued = payload; return; } // 仍在加载:更新排队载荷
+  // 已就绪:直接展示
+  reportWin.setTitle(payload.name || 'DSH 错误报告');
+  reportWin.webContents.send('rp:show', payload);
   centerOn(reportWin, mainWindow);
   reportWin.show();
   reportWin.focus();
@@ -973,7 +986,8 @@ function checkDshUpdate(manual) {
     }
     if (compareVersion(latest, current) > 0) {
       log(`发现 dsh 新版本 v${latest}(当前 v${current})`);
-      showStatusResult({
+      pendingVersion = latest;
+      const showResult = () => showStatusResult({
         type: 'info', title: '发现 dsh 新版本',
         detail: `dsh 本体新版本 v${latest} 可用(当前 v${current})\n「现在更新」将通过 npm 全局安装新版本;安装完成后提示重启 dsh 服务。`,
         buttons: [{ id: 'install', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
@@ -981,6 +995,23 @@ function checkDshUpdate(manual) {
         if (id === 'install' && !quitting) installDshUpdate(latest);
         else closeStatus();
       });
+      if (!manual) {
+        // 自动检查:只发桌面通知(点击后再弹窗),不抢占正在进行的检查窗口
+        try {
+          if (Notification.isSupported()) {
+            const n = new Notification({
+              title: '发现 dsh 新版本',
+              body: `dsh 本体 v${latest} 可用(当前 v${current}),点击查看。`,
+              icon: path.join(__dirname, 'assets', 'icon.ico'),
+            });
+            n.on('click', showResult);
+            n.show();
+            log('自动检查发现 dsh 新版本:已发桌面通知(未弹出窗口)');
+            return;
+          }
+        } catch (e) { log(`dsh 更新桌面通知失败: ${e.message}`); }
+      }
+      showResult();
     } else if (manual) {
       showStatusResult({
         type: 'info', title: '检查 dsh 更新',
@@ -1030,13 +1061,23 @@ function showMenuPopup() {
     height: mh + MENU_MARGIN * 2,
   });
   menuPopupView.webContents.send('m:show', { items, w: MENU_W, margin: MENU_MARGIN });
+  titlebarView?.webContents.send('tb:menu-state', true); // 菜单按点亮起
   menuPopupView.webContents.focus();
 }
 
 function closeMenuPopup(refocus = false) {
+  menuClosedAt = Date.now();
   menuPopupView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  titlebarView?.webContents.send('tb:menu-state', false);
   if (refocus) dshView?.webContents.focus();
 }
+
+// 左上角菜单按钮:点击打开,再点关闭(toggle);blur 自动收起后 350ms 内再点不算重开
+ipcMain.on('tb:menu', () => {
+  const open = !!menuPopupView && menuPopupView.getBounds().width > 0;
+  if (open || Date.now() - menuClosedAt < 350) { closeMenuPopup(true); return; }
+  showMenuPopup();
+});
 
 ipcMain.on('m:action', (e, id) => {
   // 区分来源:主窗口菜单弹层 / 托盘菜单小窗
@@ -1094,6 +1135,8 @@ async function syncTitleBarTheme() {
     const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
     const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
     titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#9aa0a6' : '#5f6368' });
+    // 视图表面底色跟随页面色:缩放/未绘制边缘露出的底色与页面一致,不突兀
+    titlebarView.setBackgroundColor(hex);
   } catch { /* 页面未就绪等,忽略 */ }
 }
 
@@ -1113,6 +1156,8 @@ function createWindow() {
   titlebarView = new WebContentsView({
     webPreferences: { sandbox: true, preload: path.join(__dirname, 'titlebar-preload.js') },
   });
+  // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露出白边,必须显式设暗色
+  titlebarView.setBackgroundColor(TITLE_BAR_DEFAULT);
   titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html'));
 
   dshView = new WebContentsView({
@@ -1123,6 +1168,8 @@ function createWindow() {
   });
   dshView.webContents.setBackgroundThrottling(false);
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
+  // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
+  dshView.setBackgroundColor(TITLE_BAR_DEFAULT);
   dshView.webContents.on('did-finish-load', () => {
     syncTitleBarTheme();
     dshView?.webContents.focus();
@@ -1149,8 +1196,9 @@ function createWindow() {
   menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html'));
   menuPopupView.webContents.on('blur', () => closeMenuPopup()); // 点击菜单外任意处关闭
 
-  mainWindow.contentView.addChildView(titlebarView);
+  // 堆叠顺序(后加的上层):dsh 页面 → 标题栏(底部渐变区盖住页面顶端)→ 下拉把手 → 菜单弹层
   mainWindow.contentView.addChildView(dshView);
+  mainWindow.contentView.addChildView(titlebarView);
   mainWindow.contentView.addChildView(revealTabView);
   mainWindow.contentView.addChildView(menuPopupView);
   layoutViews();
@@ -1178,7 +1226,6 @@ ipcMain.on('tb:max', () => {
   else mainWindow.maximize();
 });
 ipcMain.on('tb:close', () => mainWindow?.close());
-ipcMain.on('tb:menu', () => showMenuPopup());
 ipcMain.on('tb:hide-bar', () => toggleTitlebar(false));
 ipcMain.on('tb:show-bar', () => toggleTitlebar(true));
 
@@ -1401,24 +1448,46 @@ if (!gotLock) {
         });
       };
       const uiStep = (fn, delay, tag) => setTimeout(() => { try { fn(); log(`UITEST ${tag} ✓`); } catch (err) { log(`UITEST ${tag} ✗ 主进程异常: ${err.stack || err}`); } }, delay);
-      // ① 状态窗:检查 → ✕ 取消(应关窗且清计时器)→ 再开下载 → 结果
-      uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 4000, 'status-show');
-      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 4300, 'status-cancel-click');
-      uiStep(() => {
-        const ok = !statusWin && !updateCheckTimer && !dshCheckTimer;
-        log(`UITEST cancel-chk win=${!!statusWin} timer=${!!updateCheckTimer} dshTimer=${!!dshCheckTimer} → ${ok ? 'PASS' : 'FAIL'}`);
-      }, 4500, 'status-cancel-verify');
-      uiStep(() => { showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }); hookWin(statusWin, 'status2'); }, 5200, 'status-download');
-      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 6400, 'status-progress');
-      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成,现在重启并安装?', buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }] }, () => log('UITEST status-action ✓')), 7600, 'status-result');
-      // ② 标题栏动画:收起 → 240ms 后应收敛到 0,再展开 → 240ms 后应回到 TITLEBAR_H
-      uiStep(() => toggleTitlebar(false), 8200, 'bar-collapse');
-      uiStep(() => log(`UITEST bar-after-collapse currentBarH=${currentBarH}(期望 0)`), 8600, 'bar-collapse-verify');
-      uiStep(() => toggleTitlebar(true), 8800, 'bar-expand');
-      uiStep(() => log(`UITEST bar-after-expand currentBarH=${currentBarH}(期望 ${TITLEBAR_H})`), 9200, 'bar-expand-verify');
-      uiStep(() => { showDialog({ type: 'warning', title: '检查 dsh 更新', message: '未检测到 dsh 本体,请先全局安装:', detail: 'npm install -g @deepseek-ai/dsh', buttons: [{ label: '好的', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 9600, 'dialog-show');
-      uiStep(() => { showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }, { id: 'quit', label: '退出', style: 'danger' }] }); hookWin(reportWin, 'report'); }, 10800, 'report-show');
-      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 13000);
+      const readDom = (win, expr, tag) => win?.webContents.executeJavaScript(expr)
+        .then((v) => log(`UITEST dom ${tag} = "${v}"`))
+        .catch((e) => log(`UITEST dom ${tag} ✗ ${e.message}`));
+      // ① 状态窗翻页(本版修复点:窗口已打开时结果必须能送达)与取消语义
+      uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 3500, 'status-show');
+      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => {}), 4200, 'flip-result');
+      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'flip'), 4600);
+      uiStep(() => log(`UITEST h-result=${statusWin?.getContentSize()[1]}(期望 250,确定按钮可见)`), 4700, 'h-result-verify');
+      // 结果态 ✕ = 仅关闭
+      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 5000, 'result-x');
+      uiStep(() => log(`UITEST result-x win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 5300, 'result-x-verify');
+      // 活动态 ✕ = 取消并关闭
+      uiStep(() => showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }), 5800, 'check2');
+      uiStep(() => log(`UITEST h-activity=${statusWin?.getContentSize()[1]}(期望 186)`), 5950, 'h-activity-verify');
+      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 6100, 'cancel-click');
+      uiStep(() => { const ok = !statusWin; log(`UITEST cancel2 win=${!!statusWin} → ${ok ? 'PASS' : 'FAIL'}`); }, 6400, 'cancel-verify');
+      // 下载 → 进度 → 结果
+      uiStep(() => showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }), 7000, 'dl-show');
+      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 7400, 'dl-progress');
+      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪(下载完成)', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => log('UITEST install-click ✓')), 7800, 'dl-result');
+      // ② 标题栏动画:收起 → 240ms 后应收敛到 0,再展开 → 应回到 TITLEBAR_H
+      uiStep(() => toggleTitlebar(false), 8400, 'bar-collapse');
+      uiStep(() => log(`UITEST bar-collapsed h=${currentBarH}(期望 0) → ${currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
+      uiStep(() => toggleTitlebar(true), 9200, 'bar-expand');
+      uiStep(() => log(`UITEST bar-expanded h=${currentBarH}(期望 ${TITLEBAR_H},PASS=${currentBarH === TITLEBAR_H}) viewH=${titlebarView?.getBounds().height}(期望 ${TITLEBAR_H + BAR_OVERLAP},渐变区露出)`), 9700, 'bar-verify30');
+      // ③ 对话框复用(第二次调用必须仍能显示)
+      uiStep(() => { showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 10200, 'd1');
+      uiStep(() => showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(复用)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
+      uiStep(() => readDom(dialogWin, 'document.getElementById("title").textContent', 'd2'), 11200);
+      // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
+      uiStep(() => showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
+      uiStep(() => readDom(reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
+      // ⑤ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
+      uiStep(() => showMenuPopup(), 13000, 'menu-open');
+      uiStep(() => log(`UITEST menu-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13300, 'menu-open-verify');
+      uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13500, 'menu-toggle-close');
+      uiStep(() => log(`UITEST menu-toggled-close w=${menuPopupView?.getBounds().width}(期望 0) → ${menuPopupView?.getBounds().width === 0 ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
+      uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13900, 'menu-toggle-open');
+      uiStep(() => log(`UITEST menu-toggled-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14150, 'menu-reopen-verify');
+      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 14600);
     }
   });
 

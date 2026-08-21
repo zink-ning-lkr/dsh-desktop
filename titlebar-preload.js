@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld('__titlebar', {
   onTheme: (cb) => ipcRenderer.on('tb:theme', (_e, v) => cb(v)),
   onMaximized: (cb) => ipcRenderer.on('tb:maximized', (_e, v) => cb(v)),
   onWorkspace: (cb) => ipcRenderer.on('tb:workspace', (_e, v) => cb(v)),
+  onMenuState: (cb) => ipcRenderer.on('tb:menu-state', (_e, v) => cb(v)),
 });

@@ -8,10 +8,14 @@
 <style>
   :root { --bg: #0d1117; --fg: #9aa0a6; }
   html, body { margin: 0; height: 100%; overflow: hidden; }
+  /* 画布底层兜底暗色:即使渐变暂未生效(主题未送达等),页面任何像素都不是白 */
+  html { background-color: var(--bg); }
   body {
     display: flex;
     align-items: center;
-    background: var(--bg);
+    /* 底部渐变透明:与主界面边界柔化,顶部实色、底部渐隐(下方 10px 覆盖在页面上) */
+    background-color: var(--bg);
+    background-image: linear-gradient(180deg, var(--bg) 0%, var(--bg) 55%, transparent 100%);
     color: var(--fg);
     font: 12px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
     user-select: none;
@@ -30,6 +34,8 @@
   #menuBtn svg { width: 13px; height: 13px; }
   #menuBtn:hover { background: rgba(127, 127, 127, .25); }
   #menuBtn:hover svg { color: #79b8ff; }
+  #menuBtn.active, #menuBtn.active:hover { background: rgba(127, 127, 127, .30); }
+  #menuBtn.active svg { color: #79b8ff; }
   #collapseBtn { width: 34px; }
   #collapseBtn svg { width: 11px; height: 11px; transition: transform .15s ease; }
   #collapseBtn:hover svg { color: #c9d1d9; transform: translateY(-1px); }
@@ -86,8 +92,14 @@
   document.getElementById('closeBtn').onclick = () => t.close();
   document.getElementById('collapseBtn').onclick = () => t.hideTitlebar();
   t.onTheme(({ bg, fg }) => {
-    document.body.style.background = bg;
+    // 跟随 dsh 页面背景色,底部渐隐到透明,融入主界面(底色与渐变分开设,任一方未生效都保持暗色画布)
+    document.body.style.backgroundColor = bg;
+    document.body.style.backgroundImage = `linear-gradient(180deg, ${bg} 0%, ${bg} 55%, transparent 100%)`;
     document.body.style.color = fg;
+  });
+  t.onMenuState((open) => {
+    const el = document.getElementById('menuBtn');
+    if (el) el.classList.toggle('active', !!open);
   });
   t.onMaximized((max) => {
     document.getElementById('icoMax').style.display = max ? 'none' : '';
