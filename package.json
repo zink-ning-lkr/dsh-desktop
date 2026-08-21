@@ -36,6 +36,7 @@
     "appId": "com.zinkning.dsh-desktop",
     "productName": "DSH Desktop",
     "copyright": "© zink-ning-lkr",
+    "electronDist": "node_modules/electron/dist",
     "publish": {
       "provider": "github",
       "owner": "zink-ning-lkr",
