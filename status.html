@@ -98,7 +98,7 @@
     <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
     </button>
-    <button class="hmbtn" id="xBtn" title="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="hmbtn" id="xBtn" title="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="activity" id="activity">
     <div class="detail" id="detail"></div>
@@ -165,7 +165,8 @@
   }
 
   document.getElementById('bgBtn').addEventListener('click', () => S.background());
-  document.getElementById('xBtn').addEventListener('click', () => (cur && cur.mode === 'result' ? S.close() : S.background()));
+  // 活动态 ✕ = 取消并关闭(检查/下载/安装);结果态 ✕ = 仅关闭
+  document.getElementById('xBtn').addEventListener('click', () => (cur && cur.mode === 'result' ? S.close() : S.cancel()));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') document.getElementById('xBtn').click();
   });

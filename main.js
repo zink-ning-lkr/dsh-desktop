@@ -35,8 +35,8 @@ nativeTheme.themeSource = 'dark';
 const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
 const BOOT_URL_TIMEOUT_MS = 90_000; // 等待 dsh 打印服务地址(升级/首启时 dsh 要用 pnpm 装 40+ 个包,放宽到 90s)
 const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装依赖,放宽)
-const CHECK_UPDATE_TIMEOUT_MS = 15_000; // 手动检查更新的超时时间
-const CHECK_DSH_UPDATE_TIMEOUT_MS = 10_000; // 手动检查 dsh 本体更新的超时时间
+const CHECK_UPDATE_TIMEOUT_MS = 8_000; // 手动检查更新的超时时间
+const CHECK_DSH_UPDATE_TIMEOUT_MS = 7_000; // 手动检查 dsh 本体更新的超时时间
 const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh/latest'; // dsh 本体最新版本查询地址
 
 let mainWindow = null;
@@ -275,25 +275,34 @@ function toggleTitlebar(visible, animated = true) {
   barVisible = visible;
   closeMenuPopup();
   if (visible) stopHandlePolling();
-  clearInterval(barAnim);
+  clearTimeout(barAnim);
   if (!animated) {
     currentBarH = visible ? TITLEBAR_H : 0;
     layoutViews();
     if (!visible) startHandlePolling();
     return;
   }
+  // 平滑滑动:240ms easeInOutCubic,自适应帧间隔(高刷显示器更顺滑)
   const from = currentBarH;
   const to = visible ? TITLEBAR_H : 0;
   const startedAt = Date.now();
-  barAnim = setInterval(() => {
-    const t = Math.min(1, (Date.now() - startedAt) / 160);
-    currentBarH = Math.round(from + (to - from) * (1 - Math.pow(1 - t, 3))); // easeOutCubic
+  const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const FRAME_MS = 1000 / 120;
+  let last = startedAt;
+  const step = () => {
+    const now = Date.now();
+    const t = Math.min(1, (now - startedAt) / 240);
+    currentBarH = Math.round(from + (to - from) * easeInOutCubic(t));
     layoutViews();
     if (t >= 1) {
-      clearInterval(barAnim);
+      barAnim = null;
       if (!visible) startHandlePolling();
+      return;
     }
-  }, 16);
+    barAnim = setTimeout(step, Math.max(0, FRAME_MS - (Date.now() - last)));
+    last = Date.now();
+  };
+  barAnim = setTimeout(step, 0);
 }
 
 function toggleFullscreen() {
@@ -443,6 +452,27 @@ ipcMain.on('st:action', (_e, id) => {
   statusActions = null;
   if (fn) fn(id);
 });
+// ✕ 按钮语义 = 取消当前操作并关闭窗口(检查/下载/安装);「后台」按钮才是最小化
+ipcMain.on('st:cancel', () => cancelStatusOp());
+// 取消当前状态窗对应操作:清计时器、忽略迟到结果、停止 npm 安装、关闭窗口
+function cancelStatusOp() {
+  log('用户取消当前操作(状态窗关闭)');
+  statusOpCancelled = true;
+  if (updateCheckTimer) finishUpdateCheckTimer();
+  if (dshCheckTimer) finishDshCheckTimer();
+  manualCheckTimedOut = true;     // 忽略迟到的桌面端检查结果
+  dshManualCheckTimedOut = true;  // 忽略迟到的 dsh 本体检查结果
+  downloadInProgress = false;
+  updateDownloaded = false;
+  pendingVersion = null;
+  if (dshInstallChild) {
+    installCancelled = true;
+    const c = dshInstallChild;
+    dshInstallChild = null;
+    killTree(c);
+  }
+  closeStatus();
+}
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
 let dialogWin = null;
@@ -629,6 +659,7 @@ let updateCheckTimer = null;
 let pendingVersion = null; // 已发现/已下载的新版本号
 let updateDownloaded = false;
 let downloadInProgress = false; // 处于下载阶段(错误信息区分"检查失败/下载失败")
+let statusOpCancelled = false;  // 用户已取消当前状态窗操作(忽略迟到结果)
 
 function finishUpdateCheckTimer() {
   clearTimeout(updateCheckTimer);
@@ -645,6 +676,7 @@ autoUpdater.on('update-available', (info) => {
     buttons: [{ id: 'dl', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
   }, (id) => {
     if (id === 'later' || quitting) return closeStatus();
+    statusOpCancelled = false;
     showStatus({ mode: 'download', title: `正在下载 v${info.version}…`, detail: `当前 v${app.getVersion()}`, pct: '0%', size: '' });
     downloadInProgress = true;
     autoUpdater.downloadUpdate().catch((e) => {
@@ -673,6 +705,7 @@ autoUpdater.on('download-progress', (p) => {
 });
 
 autoUpdater.on('update-downloaded', () => {
+  if (statusOpCancelled) { updateDownloaded = false; return; } // 用户已取消,迟到结果不再弹窗
   downloadInProgress = false;
   updateDownloaded = true;
   showStatusResult({
@@ -714,6 +747,7 @@ autoUpdater.on('error', (e) => {
 function checkForUpdates(manual) {
   manualCheck = manual;
   manualCheckTimedOut = false;
+  statusOpCancelled = false;
   if (!app.isPackaged) {
     if (manual) {
       showDialog({
@@ -818,11 +852,16 @@ function fetchLatestDshVersion(timeoutMs) {
     });
     req.on('timeout', () => req.destroy(new Error('超时')));
     req.on('error', () => resolve(null));
+    // 总超时兜底:连接卡死(DNS/TCP 不可达)时 socket 空闲超时不一定触发,这里保证按时返回
+    const overall = setTimeout(() => req.destroy(new Error('总超时')), timeoutMs + 1000);
+    req.on('close', () => clearTimeout(overall));
   });
 }
 
 let dshCheckTimer = null;
 let dshManualCheckTimedOut = false; // 手动检查超时后,忽略迟到的结果
+let dshInstallChild = null; // 正在运行的 npm 安装进程(供 ✕ 取消)
+let installCancelled = false; // 用户已取消安装(忽略安装结果)
 
 function finishDshCheckTimer() {
   clearTimeout(dshCheckTimer);
@@ -831,10 +870,13 @@ function finishDshCheckTimer() {
 
 // 通过 npm 全局安装 dsh 新版本;完成后提示重启 dsh 服务(对应桌面端"立即重启安装")
 function installDshUpdate(version) {
+  statusOpCancelled = false;
+  installCancelled = false;
   const npm = findNpmCli();
   log(`安装 dsh 本体更新: "${npm}" install -g @deepseek-ai/dsh`);
   showStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: 'npm install -g @deepseek-ai/dsh', spin: true });
   const child = spawn(npm, ['install', '-g', '@deepseek-ai/dsh'], { windowsHide: true });
+  dshInstallChild = child;
   let buf = '';
   const onData = (c) => {
     const text = c.toString();
@@ -850,7 +892,8 @@ function installDshUpdate(version) {
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
   child.on('close', (code) => {
-    if (quitting) return;
+    if (dshInstallChild === child) dshInstallChild = null;
+    if (quitting || installCancelled) return; // 用户已取消:忽略安装结果
     if (code === 0) {
       log(`dsh 本体更新完成 v${version}`);
       showStatusResult({
@@ -871,7 +914,8 @@ function installDshUpdate(version) {
     }
   });
   child.on('error', (e) => {
-    if (quitting) return;
+    if (dshInstallChild === child) dshInstallChild = null;
+    if (quitting || installCancelled) return;
     log(`dsh 更新安装进程启动失败: ${e.message}`);
     showStatusResult({
       type: 'error', title: 'dsh 更新失败',
@@ -884,6 +928,7 @@ function installDshUpdate(version) {
 function checkDshUpdate(manual) {
   finishDshCheckTimer();
   dshManualCheckTimedOut = false;
+  statusOpCancelled = false;
   // 仅打包版才有"桌面端更新";dsh 本体检查在开发模式同样可用,故不设 isPackaged 门槛
   const current = dshVersion();
   if (current === '未知') {
@@ -1356,12 +1401,24 @@ if (!gotLock) {
         });
       };
       const uiStep = (fn, delay, tag) => setTimeout(() => { try { fn(); log(`UITEST ${tag} ✓`); } catch (err) { log(`UITEST ${tag} ✗ 主进程异常: ${err.stack || err}`); } }, delay);
+      // ① 状态窗:检查 → ✕ 取消(应关窗且清计时器)→ 再开下载 → 结果
       uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 4000, 'status-show');
-      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 5200, 'status-download');
-      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成,现在重启并安装?', buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }] }, () => log('UITEST status-action ✓')), 6400, 'status-result');
-      uiStep(() => { showDialog({ type: 'warning', title: '检查 dsh 更新', message: '未检测到 dsh 本体,请先全局安装:', detail: 'npm install -g @deepseek-ai/dsh', buttons: [{ label: '好的', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 7600, 'dialog-show');
-      uiStep(() => { showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }, { id: 'quit', label: '退出', style: 'danger' }] }); hookWin(reportWin, 'report'); }, 8800, 'report-show');
-      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 11000);
+      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 4300, 'status-cancel-click');
+      uiStep(() => {
+        const ok = !statusWin && !updateCheckTimer && !dshCheckTimer;
+        log(`UITEST cancel-chk win=${!!statusWin} timer=${!!updateCheckTimer} dshTimer=${!!dshCheckTimer} → ${ok ? 'PASS' : 'FAIL'}`);
+      }, 4500, 'status-cancel-verify');
+      uiStep(() => { showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }); hookWin(statusWin, 'status2'); }, 5200, 'status-download');
+      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 6400, 'status-progress');
+      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成,现在重启并安装?', buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }] }, () => log('UITEST status-action ✓')), 7600, 'status-result');
+      // ② 标题栏动画:收起 → 240ms 后应收敛到 0,再展开 → 240ms 后应回到 TITLEBAR_H
+      uiStep(() => toggleTitlebar(false), 8200, 'bar-collapse');
+      uiStep(() => log(`UITEST bar-after-collapse currentBarH=${currentBarH}(期望 0)`), 8600, 'bar-collapse-verify');
+      uiStep(() => toggleTitlebar(true), 8800, 'bar-expand');
+      uiStep(() => log(`UITEST bar-after-expand currentBarH=${currentBarH}(期望 ${TITLEBAR_H})`), 9200, 'bar-expand-verify');
+      uiStep(() => { showDialog({ type: 'warning', title: '检查 dsh 更新', message: '未检测到 dsh 本体,请先全局安装:', detail: 'npm install -g @deepseek-ai/dsh', buttons: [{ label: '好的', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 9600, 'dialog-show');
+      uiStep(() => { showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }, { id: 'quit', label: '退出', style: 'danger' }] }); hookWin(reportWin, 'report'); }, 10800, 'report-show');
+      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 13000);
     }
   });
 
