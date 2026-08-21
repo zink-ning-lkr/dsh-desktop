@@ -1,0 +1,175 @@
+<!-- 统一状态窗:检查更新/下载进度/dsh 安装/结果视图,可挂后台(最小化到任务栏),完成时通知 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>DSH</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
+    font: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .win {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    background: rgba(22, 27, 34, .98);
+    border: 1px solid #30363d; border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+    animation: winIn .22s cubic-bezier(.2, .9, .3, 1.15);
+  }
+  @keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
+  .head {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px 0;
+    -webkit-app-region: drag;
+  }
+  .head .ico { width: 20px; height: 20px; flex: none; color: #79b8ff; }
+  .head .ico svg { width: 20px; height: 20px; }
+  .head .t { flex: 1; font-size: 14px; color: #e6edf3; font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .hmbtn {
+    -webkit-app-region: no-drag; border: none; border-radius: 6px; background: transparent;
+    color: #8b949e; cursor: default; display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .hmbtn:hover { background: rgba(127, 127, 127, .22); color: #e6edf3; }
+  #bgBtn { width: 60px; height: 24px; font-size: 12px; gap: 4px; }
+  #bgBtn svg { width: 12px; height: 12px; }
+  #xBtn { width: 26px; height: 24px; }
+  #xBtn svg { width: 12px; height: 12px; }
+  .activity { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; }
+  .detail { font-size: 12px; color: #8b949e; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+    max-height: 38px; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .bar { height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
+  .fill {
+    height: 100%; width: 0%; border-radius: 3px; position: relative;
+    background: linear-gradient(90deg, #4d6bfe, #8b5cf6);
+    transition: width .18s ease-out;
+  }
+  .fill::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
+    transform: translateX(-100%); animation: sheen 1.6s ease-in-out infinite;
+  }
+  @keyframes sheen { 55%, 100% { transform: translateX(100%); } }
+  .fill.indet {
+    width: 100%; transition: none;
+    background-size: 200% 100%;
+    background-image: linear-gradient(90deg, #21262d 0%, #4d6bfe 35%, #8b5cf6 50%, #4d6bfe 65%, #21262d 100%);
+    animation: indet 1.3s linear infinite;
+  }
+  .fill.indet::after { display: none; }
+  @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
+  .meta { display: flex; justify-content: space-between; font-size: 12px; color: #8b949e; }
+  /* -------- 结果视图 -------- */
+  .result { display: none; flex: 1; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; padding: 14px 20px 18px; }
+  .result .big {
+    width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  }
+  .result .big svg { width: 24px; height: 24px; }
+  .result.info .big { background: rgba(121, 184, 255, .12); color: #79b8ff; }
+  .result.success .big { background: rgba(63, 185, 80, .14); color: #3fb950; animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
+  .result.warning .big { background: rgba(210, 153, 34, .14); color: #d29922; }
+  .result.error .big { background: rgba(248, 81, 73, .14); color: #f85149; animation: shake .34s ease; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+  .rtitle { font-size: 15px; font-weight: 600; color: #e6edf3; text-align: center; }
+  .rdetail { font-size: 12px; color: #8b949e; text-align: center; line-height: 1.5; max-height: 62px; overflow: hidden;
+    white-space: pre-wrap; word-break: break-all; }
+  .btns { display: flex; gap: 8px; margin-top: 2px; }
+  .btns button {
+    border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 7px 18px; border-radius: 7px;
+    font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s;
+  }
+  .btns button:hover { background: #30363d; border-color: #3d444d; }
+  .btns button:active { transform: scale(.97); }
+  .btns button.primary { background: linear-gradient(180deg, #4d6bfe, #3b5bdb); border-color: transparent; color: #fff; }
+  .btns button.primary:hover { filter: brightness(1.12); }
+  @media (prefers-reduced-motion: reduce) { .win, .result .big, .fill.indet, .fill::after { animation: none; } }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="head" id="head">
+    <span class="ico" id="ico"></span>
+    <span class="t" id="title">…</span>
+    <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
+    </button>
+    <button class="hmbtn" id="xBtn" title="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
+  <div class="activity" id="activity">
+    <div class="detail" id="detail"></div>
+    <div class="bar"><div class="fill indet" id="fill"></div></div>
+    <div class="meta"><span id="pct"></span><span id="size"></span></div>
+  </div>
+  <div class="result" id="result">
+    <div class="big" id="big"></div>
+    <div class="rtitle" id="rtitle"></div>
+    <div class="rdetail" id="rdetail"></div>
+    <div class="btns" id="btns"></div>
+  </div>
+</div>
+<script>
+  const S = window.__status;
+  const ACT = {
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M11 8v3l2 2M16.5 16.5 21 21" stroke-linecap="round"/></svg>',
+    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    install: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="7.5"/><path d="M12 6v6l3.5 2" stroke-linecap="round"/></svg>',
+    restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 3.5v3.2h-3.2" stroke-linecap="round"/></svg>',
+  };
+  const RES = {
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.2" stroke-linecap="round"/></svg>',
+    success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 12.2l2.7 2.7L16 9.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4.5 22 20H2z"/><path d="M12 10v4.5M12 17.4v.2" stroke-linecap="round"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6" stroke-linecap="round"/></svg>',
+  };
+  let cur = null;
+
+  function render(p) {
+    cur = p;
+    document.title = p.title || 'DSH';
+    const isRes = p.mode === 'result';
+    document.getElementById('activity').style.display = isRes ? 'none' : 'flex';
+    document.getElementById('result').style.display = isRes ? 'flex' : 'none';
+    document.getElementById('bgBtn').style.display = isRes ? 'none' : '';
+    document.getElementById('ico').innerHTML = ACT[p.mode] || ACT.check;
+    document.getElementById('title').textContent = p.title || '';
+    if (isRes) {
+      const type = p.resultType || 'info';
+      const rv = document.getElementById('result');
+      rv.className = 'result ' + type;
+      document.getElementById('big').innerHTML = RES[type] || RES.info;
+      document.getElementById('rtitle').textContent = p.title || '';
+      document.getElementById('rdetail').textContent = p.detail || '';
+      const btns = document.getElementById('btns');
+      btns.innerHTML = '';
+      (p.buttons || []).forEach((b) => {
+        const el = document.createElement('button');
+        el.textContent = b.label;
+        if (b.primary) el.className = 'primary';
+        el.addEventListener('click', () => S.action(b.id));
+        btns.appendChild(el);
+      });
+      return;
+    }
+    document.getElementById('detail').textContent = p.detail || '';
+    const fill = document.getElementById('fill');
+    const has = typeof p.progress === 'number';
+    fill.classList.toggle('indet', !has);
+    if (has) fill.style.width = Math.max(0, Math.min(100, p.progress)) + '%';
+    document.getElementById('pct').textContent = p.pct || (has ? p.progress.toFixed(1) + '%' : (p.spin ? '请稍候…' : ''));
+    document.getElementById('size').textContent = p.size || '';
+  }
+
+  document.getElementById('bgBtn').addEventListener('click', () => S.background());
+  document.getElementById('xBtn').addEventListener('click', () => (cur && cur.mode === 'result' ? S.close() : S.background()));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.getElementById('xBtn').click();
+  });
+  S.onSet(render);
+</script>
+</body>
+</html>

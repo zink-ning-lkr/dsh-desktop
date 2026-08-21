@@ -3,6 +3,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>titlebar</title>
 <style>
   :root { --bg: #0d1117; --fg: #9aa0a6; }
@@ -23,16 +24,20 @@
     align-items: center;
     justify-content: center;
     cursor: default;
+    transition: background .15s ease, color .15s ease;
   }
   #menuBtn { width: 32px; height: 22px; border-radius: 6px; margin-left: 5px; }
-  #menuBtn:hover { background: rgba(127, 127, 127, .25); }
   #menuBtn svg { width: 13px; height: 13px; }
+  #menuBtn:hover { background: rgba(127, 127, 127, .25); }
+  #menuBtn:hover svg { color: #79b8ff; }
   #collapseBtn { width: 34px; }
-  #collapseBtn svg { width: 11px; height: 11px; }
+  #collapseBtn svg { width: 11px; height: 11px; transition: transform .15s ease; }
+  #collapseBtn:hover svg { color: #c9d1d9; transform: translateY(-1px); }
   .title { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; }
   .logo {
     width: 16px; height: 16px; flex: none;
     /* 白鲸 logo,透明底 */
+    opacity: .9;
   }
   .name { white-space: nowrap; opacity: .85; }
   .workspace { opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
@@ -40,8 +45,11 @@
   .cap { display: flex; height: 100%; flex: none; }
   .cap button { width: 44px; }
   .cap button:hover { background: rgba(127, 127, 127, .18); }
+  .cap svg { width: 11px; height: 11px; transition: transform .12s ease; }
+  .cap button:hover svg { transform: scale(1.12); }
   #closeBtn:hover { background: #c42b1c; color: #fff; }
-  .cap svg { width: 11px; height: 11px; }
+  #closeBtn:hover svg { transform: scale(1.08); }
+  @media (prefers-reduced-motion: reduce) { button, .cap svg { transition: none; } }
 </style>
 </head>
 <body>

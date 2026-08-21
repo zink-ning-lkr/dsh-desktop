@@ -3,6 +3,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>reveal</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -16,9 +17,14 @@
     cursor: default;
     user-select: none;
     -webkit-app-region: no-drag;
+    transition: background .16s ease, color .16s ease;
+    animation: dropIn .18s ease;
   }
+  @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
   body:hover { background: rgba(38, 44, 56, .95); color: #c9d1d9; }
-  svg { width: 14px; height: 14px; }
+  svg { width: 14px; height: 14px; transition: transform .16s ease; }
+  body:hover svg { transform: translateY(1px); }
+  @media (prefers-reduced-motion: reduce) { body { animation: none; } }
 </style>
 </head>
 <body title="显示标题栏">

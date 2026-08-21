@@ -3,6 +3,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>menu</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
@@ -19,7 +20,9 @@
     border-radius: 10px;
     box-shadow: 0 10px 32px rgba(0, 0, 0, .5);
     padding: 10px 6px;
+    animation: menuIn .16s cubic-bezier(.2, .9, .3, 1.1);
   }
+  @keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
   .item {
     display: flex;
     align-items: center;
@@ -29,14 +32,20 @@
     border-radius: 6px;
     cursor: default;
     white-space: nowrap;
+    transition: background .12s ease, color .12s ease;
+    animation: itemIn .18s ease backwards;
+    animation-delay: calc(var(--i, 0) * 8ms);
   }
+  @keyframes itemIn { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
   .item:hover, .item.sel { background: #1f6feb2e; color: #fff; }
-  .item .ico { width: 16px; height: 16px; flex: none; color: #8b949e; display: flex; align-items: center; justify-content: center; }
+  .item .ico { width: 16px; height: 16px; flex: none; color: #8b949e; display: flex; align-items: center; justify-content: center; transition: color .12s ease, transform .12s ease; }
   .item:hover .ico, .item.sel .ico { color: #79b8ff; }
+  .item:hover .ico, .item.sel .ico { transform: translateX(1px); }
   .item .lbl { flex: 1; }
   .item .accel { color: #6e7681; font-size: 12px; padding-left: 18px; }
   .sep { height: 1px; background: #21262d; margin: 4px 8px; }
   .item.danger:hover, .item.danger.sel { background: #da363433; }
+  @media (prefers-reduced-motion: reduce) { .panel, .item { animation: none; } }
 </style>
 </head>
 <body>
@@ -76,6 +85,7 @@
       actionable.push(i);
       const row = document.createElement('div');
       row.className = 'item' + (it.id === 'quit' ? ' danger' : '');
+      row.style.setProperty('--i', actionable.length - 1);
       row.innerHTML = `<span class="ico">${ICONS[it.id] || ''}</span><span class="lbl">${it.label}</span>` +
         (it.checked ? '<span class="accel" title="已启用">✓</span>' : (it.accel ? `<span class="accel">${it.accel}</span>` : ''));
       row.addEventListener('click', () => window.__menu.action(it.id));

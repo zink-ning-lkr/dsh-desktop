@@ -2,16 +2,25 @@
 // 托盘常驻(关闭默认收进后台)、自绘菜单、深色主题;会话/文件/设置与本体完全共享。
 // 原理:以用户选的工作目录为 cwd,后台启动本体 `dsh web`,从 stdout 解析实际地址,
 // 窗口加载该地址。不动 $DSH_HOME,因此会话/设置/插件/文件与本体 dsh 完全共享。
+//
+// UI 层(除 dsh 页面本身):
+//   - titlebar.html  自绘标题栏(可收起)
+//   - loading.html   dsh 启动加载页(阶段提示 + 日志尾巴)
+//   - menu.html      主菜单/托盘菜单弹层
+//   - status.html    统一状态窗(检查更新/下载/安装/结果,可挂后台)
+//   - dialog.html    通用深色对话框(替代原生 MessageBox)
+//   - report.html    错误报告窗(启动失败/进程退出,一键导出)
 process.on('uncaughtException', (err) => {
   try { require('fs').writeFileSync(require('path').join(__dirname, 'CRASH.txt'), `${new Date().toISOString()}\n${err.stack || err}`); } catch (e) { /* 无法落盘 */ }
 });
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView, Notification, clipboard } = require('electron');
 const { spawn, execSync } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
+const diagnostics = require('./diagnostics');
 
 const IS_WIN = process.platform === 'win32';
 // Windows 规范:固定 AppUserModelID,保证任务栏图标/分组/通知归属正确
@@ -36,6 +45,9 @@ let bootSeq = 0; // 递增序号:重启后,旧一次 boot 的回调不再生效
 let quitting = false;
 let cleaned = false;
 let dshWebUrl = null; // 当前 dsh web 服务地址(供"在浏览器中打开"使用)
+let lastBootBuf = '';   // 最近一次启动的 stdout/stderr 缓冲尾部(供错误报告)
+let lastBootArgs = null; // 最近一次启动的 spawn 参数
+let lastBootStart = null; // 最近一次启动的时刻
 
 // ---------- 配置(记住上次的工作目录) ----------
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
@@ -67,8 +79,22 @@ function log(line) {
   if (!logTimer) logTimer = setInterval(flushLog, 500);
 }
 process.on('uncaughtException', (err) => {
-  try { require('fs').appendFileSync(require('path').join(__dirname, 'CRASH.txt'), `${new Date().toISOString()}\n${err.stack || err}\n`); } catch (e) { /* 无法落盘 */ }
+  const now = new Date().toISOString();
+  try { fs.appendFileSync(path.join(__dirname, 'CRASH.txt'), `${now}\n${err.stack || err}\n`); } catch (e) { /* 无法落盘 */ }
   log(`未捕获异常: ${err.stack || err}`);
+  // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径
+  try {
+    if (app && app.isReady()) {
+      const ctx = {
+        app, screen, phase: 'uncaught', error: err, code: null, buf: lastBootBuf,
+        logFile, crashFile: path.join(__dirname, 'CRASH.txt'), configPath: configPath(),
+        workspace: loadConfig().workspace, userData: app.getPath('userData'),
+        dshBin: findDshBinSafe(), nodeExe: findNodeSafe(), args: lastBootArgs,
+        elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
+      };
+      try { diagnostics.buildReport(ctx); } catch (e2) { log(`诊断落盘失败: ${e2.message}`); }
+    }
+  } catch (e3) { /* 忽略 */ }
 });
 
 // ---------- 定位 node 与 dsh(不经过 dsh.cmd 转发,便于管理进程树);成功后缓存避免重复 execSync ----------
@@ -95,6 +121,7 @@ function findDshBin() {
   }
   throw new Error('找不到 dsh,请先全局安装:npm install -g @deepseek-ai/dsh');
 }
+function findDshBinSafe() { try { return findDshBin(); } catch { return null; } }
 function findNode() {
   if (cachedNode) return cachedNode;
   const node = firstLine(IS_WIN ? 'where node' : 'which node');
@@ -106,6 +133,7 @@ function findNode() {
   cachedNode = { exe: process.execPath, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
   return cachedNode;
 }
+function findNodeSafe() { try { return findNode().exe; } catch { return null; } }
 
 // ---------- 进程管理 ----------
 function killTree(child) {
@@ -128,12 +156,15 @@ function dshVersion() {
   } catch { return '未知'; }
 }
 
-function startDsh(cwd) {
+function startDsh(cwd, onOut) {
   const bin = findDshBin();
   const node = findNode();
   const args = [bin, 'web', '--host', '127.0.0.1', '--port', String(loadConfig().port ?? 0)];
   // dsh 0.1.0-rc.8 起默认自动打开系统浏览器;桌面壳已内嵌 UI,默认加 --no-open 抑制,由菜单"自动打开浏览器"控制
   if (!loadConfig().openBrowser) args.push('--no-open');
+  lastBootArgs = args;
+  lastBootStart = Date.now();
+  lastBootBuf = '';
   log(`dsh 版本: ${dshVersion()}`);
   log(`启动 dsh web: "${node.exe}" ${args.map((a) => `"${a}"`).join(' ')} (cwd=${cwd})`);
   const child = spawn(node.exe, args, {
@@ -150,7 +181,12 @@ function startDsh(cwd) {
     const settle = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); child.off('exit', onExit); fn(value); };
     const onData = (chunk) => {
       const text = chunk.toString();
-      if (text.trim()) log(`[dsh] ${text.trim()}`);
+      lastBootBuf = (lastBootBuf + text).slice(-16000);
+      if (text.trim()) {
+        log(`[dsh] ${text.trim()}`);
+        const line = text.trim().split('\n').pop();
+        if (onOut) onOut(line);
+      }
       buf += text;
       // dsh web 启动后打印形如 "dsh web: http://127.0.0.1:7123" 的地址行
       const m = buf.match(/dsh web: (https?:\/\/\S+)/) || buf.match(/https?:\/\/(127\.0\.0\.1|localhost):\d+/);
@@ -331,6 +367,257 @@ function createTray() {
   tray.on('right-click', () => showTrayMenu());
 }
 
+// ---------- 统一状态窗(检查更新/下载/安装/结果,可挂后台到任务栏) ----------
+let statusWin = null;        // 状态窗实例
+let statusMinimized = false; // 处于"挂后台"(最小化到任务栏)状态
+let statusPayload = null;    // 当前展示的载荷(用于增量更新)
+let statusQueued = null;     // 窗口未加载完成时排队的载荷
+let statusActions = null;    // 结果视图按钮 id → 回调
+
+function flushStatus() {
+  if (!statusQueued || !statusWin) return;
+  const p = statusQueued;
+  statusQueued = null;
+  statusPayload = p;
+  statusWin.setTitle(p.title || 'DSH');
+  statusWin.webContents.send('st:set', p);
+  if (statusWin.isMinimized()) statusWin.restore();
+  statusWin.show();
+  statusWin.focus();
+}
+
+function showStatus(p) {
+  statusPayload = p;
+  if (!statusWin) {
+    statusWin = new BrowserWindow({
+      width: 410, height: 186, useContentSize: true,
+      frame: false, resizable: false, skipTaskbar: false, show: false,
+      webPreferences: { sandbox: true, preload: path.join(__dirname, 'status-preload.js') },
+    });
+    statusWin.setMenuBarVisibility(false);
+    statusWin.loadFile(path.join(__dirname, 'status.html'));
+    statusWin.webContents.once('did-finish-load', flushStatus);
+    statusWin.on('closed', () => { statusWin = null; statusMinimized = false; statusActions = null; });
+    statusWin.on('minimize', () => { statusMinimized = true; });
+    statusWin.on('restore', () => { statusMinimized = false; });
+    statusQueued = p;
+    return;
+  }
+  flushStatus();
+}
+
+function updateStatus(patch) {
+  if (statusQueued) { statusQueued = { ...statusQueued, ...patch }; statusPayload = statusQueued; return; }
+  if (!statusWin) return;
+  statusPayload = { ...(statusPayload || {}), ...patch };
+  statusWin.webContents.send('st:set', statusPayload);
+}
+
+function closeStatus() {
+  statusWin?.destroy();
+  statusWin = null;
+  statusActions = null;
+}
+
+// 挂后台期间有结果到达 → 桌面通知,点击恢复状态窗
+function statusNotify(title, body) {
+  if (!statusMinimized || !statusWin) return;
+  try {
+    const n = new Notification({ title, body, icon: path.join(__dirname, 'assets', 'icon.ico') });
+    n.on('click', () => { statusWin?.show(); statusWin?.focus(); });
+    n.show();
+  } catch (e) { log(`通知失败: ${e.message}`); }
+}
+
+// 结果视图:type=info/success/warning/error;回程按钮走 onAction(id)
+function showStatusResult(p, onAction) {
+  statusActions = onAction || null;
+  showStatus({ ...p, mode: 'result' });
+  statusNotify(p.title || 'DSH', String(p.detail || '').split('\n')[0]);
+}
+
+ipcMain.on('st:bg', () => { if (statusWin && !statusWin.isMinimized()) statusWin.minimize(); });
+ipcMain.on('st:close', () => closeStatus());
+ipcMain.on('st:action', (_e, id) => {
+  const fn = statusActions;
+  statusActions = null;
+  if (fn) fn(id);
+});
+
+// ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
+let dialogWin = null;
+let dialogQueued = null;
+let dialogCb = null;
+
+function centerOn(win, ref) {
+  try {
+    const b = ref && !ref.isDestroyed() ? ref.getBounds() : screen.getPrimaryDisplay().workArea;
+    const [w, h] = win.getContentSize();
+    win.setPosition(Math.round(b.x + (b.width - w) / 2), Math.round(b.y + (b.height - h) / 2));
+  } catch { /* 忽略 */ }
+}
+
+function flushDialog() {
+  if (!dialogQueued || !dialogWin) return;
+  const o = dialogQueued;
+  dialogQueued = null;
+  dialogWin.setTitle(o.title || 'DSH');
+  dialogWin.webContents.send('dl:show', o);
+  centerOn(dialogWin, mainWindow);
+  dialogWin.show();
+  dialogWin.focus();
+}
+
+// opts: { type:'info'|'success'|'warning'|'error', title, message, detail, buttons:[{label,primary}] }
+function showDialog(opts, cb) {
+  dialogCb = cb || null;
+  if (!dialogWin) {
+    dialogWin = new BrowserWindow({
+      width: 440, height: 220, useContentSize: true,
+      frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
+      webPreferences: { sandbox: true, preload: path.join(__dirname, 'dialog-preload.js') },
+    });
+    dialogWin.setMenuBarVisibility(false);
+    dialogWin.loadFile(path.join(__dirname, 'dialog.html'));
+    dialogWin.webContents.once('did-finish-load', flushDialog);
+    dialogWin.on('closed', () => { dialogWin = null; });
+    dialogQueued = opts;
+    return;
+  }
+  flushDialog();
+}
+
+ipcMain.on('dl:choose', (_e, i) => {
+  const cb = dialogCb;
+  dialogCb = null;
+  dialogWin?.hide();
+  if (cb) cb(i);
+});
+
+// ---------- 错误报告窗(启动失败 / dsh 意外退出,一键导出) ----------
+let reportWin = null;
+let reportQueued = null;
+let reportText = '';
+let reportPath = null;
+let reportLogFile = '';
+
+function flushReport() {
+  if (!reportQueued || !reportWin) return;
+  const o = reportQueued;
+  reportQueued = null;
+  reportWin.setTitle(o.name || 'DSH 错误报告');
+  reportWin.webContents.send('rp:show', o);
+  centerOn(reportWin, mainWindow);
+  reportWin.show();
+  reportWin.focus();
+}
+
+function closeReportWindow() {
+  reportWin?.destroy();
+  reportWin = null;
+}
+
+// opts: { phase:'boot'|'exit', error, code, buf, actions:[{id,label,style}] }
+function showReport(opts) {
+  closeStatus();
+  const ctx = {
+    app, screen,
+    phase: opts.phase,
+    error: opts.error || null,
+    code: opts.code != null ? opts.code : null,
+    buf: opts.buf || lastBootBuf,
+    logFile,
+    crashFile: path.join(__dirname, 'CRASH.txt'),
+    configPath: configPath(),
+    workspace: loadConfig().workspace,
+    userData: app.getPath('userData'),
+    dshBin: findDshBinSafe(),
+    nodeExe: findNodeSafe(),
+    args: lastBootArgs,
+    elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
+  };
+  const rep = (() => {
+    try { return diagnostics.buildReport(ctx); }
+    catch (e) {
+      log(`诊断失败: ${e.message}`);
+      return {
+        diag: {}, filePath: null,
+        cls: { title: '诊断模块异常', cause: e.message, suggestions: ['请查看日志文件定位问题。'] },
+        text: `诊断模块自身失败:\n${e.stack || e}\n\n原始错误:\n${(opts.error && opts.error.stack) || opts.error || ''}`,
+      };
+    }
+  })();
+  reportText = rep.text;
+  reportPath = rep.filePath;
+  reportLogFile = logFile;
+  const logPreview = String(ctx.buf || '').slice(-3000) || diagnostics.tailFile(logFile, 60) || '';
+
+  if (!reportWin) {
+    reportWin = new BrowserWindow({
+      width: 760, height: 600, minWidth: 640, minHeight: 480, useContentSize: true,
+      frame: false, resizable: true, show: false,
+      webPreferences: { sandbox: true, preload: path.join(__dirname, 'report-preload.js') },
+    });
+    reportWin.setMenuBarVisibility(false);
+    reportWin.loadFile(path.join(__dirname, 'report.html'));
+    reportWin.webContents.once('did-finish-load', flushReport);
+    reportWin.on('closed', () => { reportWin = null; });
+    reportQueued = {
+      phase: opts.phase,
+      badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
+      name: rep.cls.title,
+      cause: rep.cls.cause,
+      suggestions: rep.cls.suggestions || [],
+      logPreview,
+      reportPath: rep.filePath,
+      actions: opts.actions || [],
+    };
+    return;
+  }
+  reportWin.webContents.send('rp:show', {
+    phase: opts.phase,
+    badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
+    name: rep.cls.title,
+    cause: rep.cls.cause,
+    suggestions: rep.cls.suggestions || [],
+    logPreview,
+    reportPath: rep.filePath,
+    actions: opts.actions || [],
+  });
+  centerOn(reportWin, mainWindow);
+  reportWin.show();
+  reportWin.focus();
+}
+
+ipcMain.on('rp:export', () => {
+  if (!reportWin) return;
+  const def = reportPath || path.join(app.getPath('userData'), 'dsh-error-report.txt');
+  const save = dialog.showSaveDialogSync(reportWin, {
+    title: '导出错误报告',
+    defaultPath: def,
+    filters: [{ name: '文本报告', extensions: ['txt'] }],
+  });
+  if (!save) return;
+  try {
+    fs.writeFileSync(save, reportText, 'utf8');
+    reportWin.webContents.send('rp:exported', save);
+    shell.showItemInFolder(save);
+  } catch (e) {
+    log(`报告导出失败: ${e.message}`);
+  }
+});
+ipcMain.on('rp:copy', () => {
+  clipboard.writeText(reportText);
+  reportWin?.webContents.send('rp:copied');
+});
+ipcMain.on('rp:open-log', () => { if (reportLogFile) shell.showItemInFolder(reportLogFile); });
+ipcMain.on('rp:action', (_e, id) => {
+  if (id === '_close') return closeReportWindow();
+  closeReportWindow();
+  if (id === 'quit') app.quit();
+  else if (id === 'retry' || id === 'restart') bootDsh();
+});
+
 // ---------- 应用更新(对接 GitHub Releases,electron-updater) ----------
 const { autoUpdater } = require('electron-updater');
 autoUpdater.autoDownload = false;        // 由用户确认后再下载
@@ -341,101 +628,87 @@ let manualCheckTimedOut = false; // 手动检查超时后,忽略迟到的结果�
 let updateCheckTimer = null;
 let pendingVersion = null; // 已发现/已下载的新版本号
 let updateDownloaded = false;
-let updateWin = null;      // 下载进度小窗
+let downloadInProgress = false; // 处于下载阶段(错误信息区分"检查失败/下载失败")
 
 function finishUpdateCheckTimer() {
   clearTimeout(updateCheckTimer);
   updateCheckTimer = null;
 }
 
-function closeUpdateWin() {
-  updateWin?.destroy();
-  updateWin = null;
-}
-
-function showUpdateProgress(version) {
-  closeUpdateWin();
-  updateWin = new BrowserWindow({
-    width: 380, height: 130, useContentSize: true,
-    frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
-    webPreferences: { sandbox: true },
-  });
-  updateWin.setMenuBarVisibility(false);
-  updateWin.loadFile(path.join(__dirname, 'update.html')).then(() => {
-    if (!updateWin) return;
-    updateWin.webContents.executeJavaScript(`setVersion(${JSON.stringify(version)})`).catch(() => {});
-    updateWin.show();
-  });
-  updateWin.on('closed', () => { updateWin = null; });
-}
-
 autoUpdater.on('update-available', (info) => {
   if (manualCheckTimedOut) return; // 手动检查已超时,忽略迟到结果
   finishUpdateCheckTimer();
   pendingVersion = info.version;
-  const choice = dialog.showMessageBoxSync(mainWindow, {
-    type: 'info',
-    title: '发现新版本',
-    message: `新版本 v${info.version} 可用(当前 v${app.getVersion()})`,
-    detail: '选择"现在更新"将在下载完成后自动重启安装;选择"稍后"则跳过本次更新,下次启动时再次提示。',
-    buttons: ['现在更新', '稍后'],
-    defaultId: 0, noLink: true,
-  });
-  if (choice === 0 && !quitting) {
-    showUpdateProgress(info.version);
+  showStatusResult({
+    type: 'info', title: '发现新版本',
+    detail: `新版本 v${info.version} 可用(当前 v${app.getVersion()})\n「现在更新」将在下载完成后自动重启安装;「稍后」则跳过本次更新。`,
+    buttons: [{ id: 'dl', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
+  }, (id) => {
+    if (id === 'later' || quitting) return closeStatus();
+    showStatus({ mode: 'download', title: `正在下载 v${info.version}…`, detail: `当前 v${app.getVersion()}`, pct: '0%', size: '' });
+    downloadInProgress = true;
     autoUpdater.downloadUpdate().catch((e) => {
-      closeUpdateWin();
+      downloadInProgress = false;
       log(`更新下载失败: ${e.message}`);
+      if (!quitting) {
+        showStatusResult({
+          type: 'error', title: '更新下载失败',
+          detail: `原因: ${e.message}\n可稍后重试,或重新检查更新。`,
+          buttons: [{ id: 'ok', label: '好的' }],
+        }, () => closeStatus());
+      }
     });
-  }
+  });
 });
 
 autoUpdater.on('download-progress', (p) => {
-  if (!updateWin) return;
-  updateWin.webContents.executeJavaScript(
-    `setProgress(${p.percent}, ${Math.round(p.transferred / 1048576)}, ${Math.round(p.total / 1048576)})`,
-  ).catch(() => {});
+  if (!statusWin || statusPayload?.mode !== 'download') return;
+  const speed = p.bytesPerSecond ? `${(p.bytesPerSecond / 1048576).toFixed(1)} MB/s` : '';
+  updateStatus({
+    mode: 'download',
+    progress: p.percent,
+    pct: p.percent.toFixed(1) + '%',
+    size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB${speed ? ' · ' + speed : ''}`,
+  });
 });
 
 autoUpdater.on('update-downloaded', () => {
-  closeUpdateWin();
+  downloadInProgress = false;
   updateDownloaded = true;
-  const choice = dialog.showMessageBoxSync(mainWindow, {
-    type: 'info',
-    title: '更新就绪',
-    message: `v${pendingVersion} 已下载完成,现在重启并安装?`,
-    detail: '安装程序会自动完成更新并重新启动应用。',
-    buttons: ['立即重启安装', '稍后'],
-    defaultId: 0, noLink: true,
+  showStatusResult({
+    type: 'success', title: '更新就绪',
+    detail: `v${pendingVersion} 已下载完成,现在重启并安装?`,
+    buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }],
+  }, (id) => {
+    if (id === 'install') autoUpdater.quitAndInstall(true, true);
+    else closeStatus();
   });
-  if (choice === 0) autoUpdater.quitAndInstall(true, true);
 });
 
 autoUpdater.on('update-not-available', () => {
   if (manualCheckTimedOut) return;
   finishUpdateCheckTimer();
   if (manualCheck) {
-    dialog.showMessageBoxSync(mainWindow, {
+    showStatusResult({
       type: 'info', title: '检查更新',
-      message: `当前已是最新版本(v${app.getVersion()})。`,
-      buttons: ['好的'], noLink: true,
-    });
+      detail: `当前已是最新版本(v${app.getVersion()})。`,
+      buttons: [{ id: 'ok', label: '好的' }],
+    }, () => closeStatus());
   }
 });
 
 autoUpdater.on('error', (e) => {
   if (manualCheckTimedOut) return; // 已按超时处理过,不再弹错
   finishUpdateCheckTimer();
-  closeUpdateWin();
+  const wasDownload = downloadInProgress;
+  downloadInProgress = false;
   log(`更新检查失败: ${e.message}`);
-  if (manualCheck) {
-    dialog.showMessageBoxSync(mainWindow, {
-      type: 'error', title: '检查更新',
-      message: `检查更新失败:${e.message}`,
-      detail: '请确认网络可用后重试。',
-      buttons: ['好的'], noLink: true,
-    });
-  }
+  if (!manualCheck && !wasDownload) return; // 自动检查出错静默
+  showStatusResult({
+    type: 'error', title: wasDownload ? '更新下载失败' : '检查更新失败',
+    detail: `原因: ${e.message}${wasDownload ? '\n可稍后重试,或重新检查更新。' : '\n请确认网络可用后重试。'}`,
+    buttons: [{ id: 'ok', label: '好的' }],
+  }, () => closeStatus());
 });
 
 function checkForUpdates(manual) {
@@ -443,37 +716,39 @@ function checkForUpdates(manual) {
   manualCheckTimedOut = false;
   if (!app.isPackaged) {
     if (manual) {
-      dialog.showMessageBoxSync(mainWindow, {
+      showDialog({
         type: 'info', title: '检查更新',
         message: '开发模式下不支持在线更新,请使用打包后的应用。',
-        buttons: ['好的'], noLink: true,
+        buttons: [{ label: '好的', primary: true }],
       });
     }
     return;
   }
   if (updateDownloaded) {
     // 已下载过:直接询问是否重启安装
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'info', title: '更新就绪',
-      message: `v${pendingVersion} 已下载完成,现在重启并安装?`,
-      buttons: ['立即重启安装', '取消'], defaultId: 0, noLink: true,
+    showStatusResult({
+      type: 'success', title: '更新就绪',
+      detail: `v${pendingVersion} 已下载完成,现在重启并安装?`,
+      buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '取消' }],
+    }, (id) => {
+      if (id === 'install') autoUpdater.quitAndInstall(true, true);
+      else closeStatus();
     });
-    if (choice === 0) autoUpdater.quitAndInstall(true, true);
     return;
   }
-  // 手动检查设超时:超时仍未取到版本信息则终止本次检查并告知用户
+  // 手动检查:显示"检查中"状态窗,设超时;超时仍未取到版本信息则终止本次检查并告知用户
   if (manual) {
     finishUpdateCheckTimer();
+    showStatus({ mode: 'check', title: '正在检查更新…', detail: `当前 v${app.getVersion()}`, spin: true });
     updateCheckTimer = setTimeout(() => {
       updateCheckTimer = null;
       manualCheckTimedOut = true;
       log('检查更新超时');
-      dialog.showMessageBoxSync(mainWindow, {
-        type: 'warning', title: '检查更新',
-        message: '运行超时,请重试。',
+      showStatusResult({
+        type: 'warning', title: '检查更新超时',
         detail: `${CHECK_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取最新版本信息,请确认网络可用后再试。`,
-        buttons: ['好的'], noLink: true,
-      });
+        buttons: [{ id: 'ok', label: '好的' }],
+      }, () => closeStatus());
     }, CHECK_UPDATE_TIMEOUT_MS);
   }
   autoUpdater.checkForUpdates().catch((e) => log(`更新检查失败: ${e.message}`));
@@ -548,39 +823,17 @@ function fetchLatestDshVersion(timeoutMs) {
 
 let dshCheckTimer = null;
 let dshManualCheckTimedOut = false; // 手动检查超时后,忽略迟到的结果
-let dshUpdateWin = null;             // 安装进度小窗
 
 function finishDshCheckTimer() {
   clearTimeout(dshCheckTimer);
   dshCheckTimer = null;
-}
-function closeDshUpdateWin() {
-  dshUpdateWin?.destroy();
-  dshUpdateWin = null;
-}
-
-// 安装进度小窗(复用 update.html 的深色界面,进度条改为不定态扫描动画)
-function showDshUpdateProgress(text) {
-  closeDshUpdateWin();
-  dshUpdateWin = new BrowserWindow({
-    width: 380, height: 130, useContentSize: true,
-    frame: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
-    webPreferences: { sandbox: true },
-  });
-  dshUpdateWin.setMenuBarVisibility(false);
-  dshUpdateWin.loadFile(path.join(__dirname, 'update.html')).then(() => {
-    if (!dshUpdateWin) return;
-    dshUpdateWin.webContents.executeJavaScript(`setBusy(${JSON.stringify(text)})`).catch(() => {});
-    dshUpdateWin.show();
-  });
-  dshUpdateWin.on('closed', () => { dshUpdateWin = null; });
 }
 
 // 通过 npm 全局安装 dsh 新版本;完成后提示重启 dsh 服务(对应桌面端"立即重启安装")
 function installDshUpdate(version) {
   const npm = findNpmCli();
   log(`安装 dsh 本体更新: "${npm}" install -g @deepseek-ai/dsh`);
-  showDshUpdateProgress(`正在安装 dsh 本体 v${version}…`);
+  showStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: 'npm install -g @deepseek-ai/dsh', spin: true });
   const child = spawn(npm, ['install', '-g', '@deepseek-ai/dsh'], { windowsHide: true });
   let buf = '';
   const onData = (c) => {
@@ -588,38 +841,43 @@ function installDshUpdate(version) {
     if (text.trim()) log(`[npm] ${text.trim()}`);
     buf += text;
     if (buf.length > 8000) buf = buf.slice(-8000);
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length) {
+      const last = lines[lines.length - 1].trim().slice(0, 130);
+      updateStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: last || '请稍候…', spin: true });
+    }
   };
   child.stdout.on('data', onData);
   child.stderr.on('data', onData);
   child.on('close', (code) => {
-    closeDshUpdateWin();
     if (quitting) return;
     if (code === 0) {
-      const choice = dialog.showMessageBoxSync(mainWindow, {
-        type: 'info', title: 'dsh 更新完成',
-        message: `dsh 本体已更新到 v${version}。`,
-        detail: '重启 dsh 服务后即可使用新版本。',
-        buttons: ['重启 dsh', '稍后'], defaultId: 0, noLink: true,
+      log(`dsh 本体更新完成 v${version}`);
+      showStatusResult({
+        type: 'success', title: 'dsh 更新完成',
+        detail: `dsh 本体已更新到 v${version},重启 dsh 服务后生效。`,
+        buttons: [{ id: 'restart', label: '重启 dsh', primary: true }, { id: 'later', label: '稍后' }],
+      }, (id) => {
+        closeStatus();
+        if (id === 'restart' && !quitting) bootDsh();
       });
-      if (choice === 0 && !quitting) bootDsh();
     } else {
-      dialog.showMessageBoxSync(mainWindow, {
+      log(`dsh 更新安装失败 (code=${code})`);
+      showStatusResult({
         type: 'error', title: 'dsh 更新失败',
-        message: `npm 安装失败 (code=${code})。`,
-        detail: `日志:\n${buf.slice(-1500)}`,
-        buttons: ['好的'], noLink: true,
-      });
+        detail: `npm 安装失败 (code=${code})\n${buf.slice(-300)}`,
+        buttons: [{ id: 'ok', label: '好的' }],
+      }, () => closeStatus());
     }
   });
   child.on('error', (e) => {
-    closeDshUpdateWin();
     if (quitting) return;
     log(`dsh 更新安装进程启动失败: ${e.message}`);
-    dialog.showMessageBoxSync(mainWindow, {
+    showStatusResult({
       type: 'error', title: 'dsh 更新失败',
-      message: `无法启动 npm:${e.message}`,
-      buttons: ['好的'], noLink: true,
-    });
+      detail: `无法启动 npm:${e.message}`,
+      buttons: [{ id: 'ok', label: '好的' }],
+    }, () => closeStatus());
   });
 }
 
@@ -631,26 +889,27 @@ function checkDshUpdate(manual) {
   if (current === '未知') {
     log('检查 dsh 更新: 未定位到 dsh 本体,跳过');
     if (manual) {
-      dialog.showMessageBoxSync(mainWindow, {
+      showDialog({
         type: 'warning', title: '检查 dsh 更新',
-        message: '未检测到 dsh 本体,请先全局安装:npm install -g @deepseek-ai/dsh',
-        buttons: ['好的'], noLink: true,
+        message: '未检测到 dsh 本体,请先全局安装:',
+        detail: 'npm install -g @deepseek-ai/dsh',
+        buttons: [{ label: '好的', primary: true }],
       });
     }
     return;
   }
-  // 手动检查设超时:超时仍未取到版本信息则终止本次检查并告知用户
+  // 手动检查:显示"检查中"状态窗,设超时
   if (manual) {
+    showStatus({ mode: 'check', title: '正在检查 dsh 本体更新…', detail: `当前 v${current}`, spin: true });
     dshCheckTimer = setTimeout(() => {
       dshCheckTimer = null;
       dshManualCheckTimedOut = true;
       log('检查 dsh 更新超时');
-      dialog.showMessageBoxSync(mainWindow, {
-        type: 'warning', title: '检查 dsh 更新',
-        message: '运行超时,请重试。',
+      showStatusResult({
+        type: 'warning', title: '检查 dsh 更新超时',
         detail: `${CHECK_DSH_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取 dsh 最新版本信息,请确认网络可用后再试。`,
-        buttons: ['好的'], noLink: true,
-      });
+        buttons: [{ id: 'ok', label: '好的' }],
+      }, () => closeStatus());
     }, CHECK_DSH_UPDATE_TIMEOUT_MS);
   }
   fetchLatestDshVersion(8_000).then((latest) => {
@@ -659,30 +918,30 @@ function checkDshUpdate(manual) {
     if (!latest) {
       log('检查 dsh 更新失败: 未能获取最新版本信息');
       if (manual) {
-        dialog.showMessageBoxSync(mainWindow, {
-          type: 'error', title: '检查 dsh 更新',
-          message: '检查 dsh 本体更新失败。',
+        showStatusResult({
+          type: 'error', title: '检查 dsh 本体更新失败',
           detail: '请确认网络可用后重试。',
-          buttons: ['好的'], noLink: true,
-        });
+          buttons: [{ id: 'ok', label: '好的' }],
+        }, () => closeStatus());
       }
       return;
     }
     if (compareVersion(latest, current) > 0) {
       log(`发现 dsh 新版本 v${latest}(当前 v${current})`);
-      const choice = dialog.showMessageBoxSync(mainWindow, {
+      showStatusResult({
         type: 'info', title: '发现 dsh 新版本',
-        message: `dsh 本体新版本 v${latest} 可用(当前 v${current})`,
-        detail: '选择"现在更新"将通过 npm 全局安装新版本;安装完成后提示重启 dsh 服务。',
-        buttons: ['现在更新', '稍后'], defaultId: 0, noLink: true,
+        detail: `dsh 本体新版本 v${latest} 可用(当前 v${current})\n「现在更新」将通过 npm 全局安装新版本;安装完成后提示重启 dsh 服务。`,
+        buttons: [{ id: 'install', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
+      }, (id) => {
+        if (id === 'install' && !quitting) installDshUpdate(latest);
+        else closeStatus();
       });
-      if (choice === 0 && !quitting) installDshUpdate(latest);
     } else if (manual) {
-      dialog.showMessageBoxSync(mainWindow, {
+      showStatusResult({
         type: 'info', title: '检查 dsh 更新',
-        message: `dsh 本体已是最新版本(v${current})。`,
-        buttons: ['好的'], noLink: true,
-      });
+        detail: `dsh 本体已是最新版本(v${current})。`,
+        buttons: [{ id: 'ok', label: '好的' }],
+      }, () => closeStatus());
     }
   });
 }
@@ -888,44 +1147,69 @@ async function bootDsh() {
   }
   if (!dshView) return;
   dshWebUrl = null; // 重启期间旧地址失效
-  dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
+
+  // 加载页阶段提示:窗口未加载完成的阶段入队,加载完成后统一补发
+  const loading = dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
+  let loadingFlush = [];
+  let settledUrl = false;
+  loading.then(() => {
+    const wc = dshView?.webContents;
+    if (!wc) return;
+    for (const c of loadingFlush) wc.executeJavaScript(c).catch(() => {});
+    loadingFlush = null;
+  });
+  const stage = (i, text) => {
+    if (seq !== bootSeq || settledUrl || !dshView) return;
+    const cmd = `setStage(${i}, ${JSON.stringify(text)})`;
+    if (loadingFlush) { loadingFlush.push(cmd); return; }
+    dshView.webContents.executeJavaScript(cmd).catch(() => {});
+  };
 
   const cwd = loadConfig().workspace;
   titlebarView?.webContents.send('tb:workspace', cwd);
   try {
-    const { child, url } = await startDsh(cwd);
+    stage(1, '启动 dsh web 服务…');
+    const { child, url } = await startDsh(cwd, (line) => {
+      if (seq !== bootSeq || settledUrl || !dshView || loadingFlush) return;
+      dshView.webContents.executeJavaScript(`pushLog(${JSON.stringify(line.slice(0, 160))})`).catch(() => {});
+    });
     dshChild = child;
     child.once('exit', (code) => {
       if (quitting || seq !== bootSeq) return;
-      const choice = dialog.showMessageBoxSync(mainWindow, {
-        type: 'error',
-        title: 'dsh 已退出',
-        message: `dsh web 进程意外退出 (code=${code})。`,
-        detail: `日志:\n${logFile}`,
-        buttons: ['重启 dsh', '退出'],
-        noLink: true,
+      log(`dsh web 进程意外退出 (code=${code})`);
+      showReport({
+        phase: 'exit',
+        error: null,
+        code,
+        buf: lastBootBuf,
+        actions: [
+          { id: 'restart', label: '重启 dsh', style: 'primary' },
+          { id: 'quit', label: '退出', style: 'danger' },
+        ],
       });
-      if (choice === 0 && !quitting) bootDsh();
-      else app.quit();
     });
     log(`服务地址: ${url},等待 HTTP 就绪…`);
     dshWebUrl = url;
+    stage(2, '等待服务就绪…');
     const ready = await waitServerReady(url, () => seq !== bootSeq);
     if (!ready || quitting || seq !== bootSeq || !dshView) return;
     log(`加载 ${url}`);
+    stage(3, '加载页面…');
+    settledUrl = true;
     dshView.webContents.loadURL(url);
   } catch (err) {
     if (quitting || seq !== bootSeq) return;
     log(`启动失败: ${err.message}`);
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      type: 'error',
-      title: 'dsh 启动失败',
-      message: String(err.message || err),
-      buttons: ['重试', '退出'],
-      noLink: true,
+    showReport({
+      phase: 'boot',
+      error: err,
+      code: null,
+      buf: lastBootBuf,
+      actions: [
+        { id: 'retry', label: '重试', style: 'primary' },
+        { id: 'quit', label: '退出', style: 'danger' },
+      ],
     });
-    if (choice === 0 && !quitting) bootDsh();
-    else app.quit();
   }
 }
 
@@ -1057,6 +1341,27 @@ if (!gotLock) {
       } else {
         setTimeout(() => { log('SMOKE: 自动退出'); app.quit(); }, 16_000);
       }
+    }
+
+    // 自动 UI 冒烟:DSH_DESKTOP_UITEST=1 依次弹出 状态窗(检查→下载→结果)/ 对话框 / 错误报告窗,
+    // 抓取各窗口渲染器控制台报错与加载失败,随后自动退出(供回归验证)
+    if (process.env.DSH_DESKTOP_UITEST) {
+      const hookWin = (win, tag) => {
+        if (!win) return;
+        win.webContents.on('console-message', (e) => {
+          log(`UITEST ${tag} console(${e.level}): ${e.message}`);
+        });
+        win.webContents.on('did-fail-load', (_e, code, desc) => {
+          log(`UITEST ${tag} did-fail-load ${code}: ${desc}`);
+        });
+      };
+      const uiStep = (fn, delay, tag) => setTimeout(() => { try { fn(); log(`UITEST ${tag} ✓`); } catch (err) { log(`UITEST ${tag} ✗ 主进程异常: ${err.stack || err}`); } }, delay);
+      uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 4000, 'status-show');
+      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 5200, 'status-download');
+      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成,现在重启并安装?', buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }] }, () => log('UITEST status-action ✓')), 6400, 'status-result');
+      uiStep(() => { showDialog({ type: 'warning', title: '检查 dsh 更新', message: '未检测到 dsh 本体,请先全局安装:', detail: 'npm install -g @deepseek-ai/dsh', buttons: [{ label: '好的', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 7600, 'dialog-show');
+      uiStep(() => { showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }, { id: 'quit', label: '退出', style: 'danger' }] }); hookWin(reportWin, 'report'); }, 8800, 'report-show');
+      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 11000);
     }
   });
 

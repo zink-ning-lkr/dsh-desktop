@@ -1,0 +1,151 @@
+<!-- 错误报告窗:启动失败/dsh 意外退出时展示分类结论、原因、建议与日志预览,一键导出报告 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>DSH 错误报告</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
+    font: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .win {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    background: rgba(13, 17, 23, .985);
+    border: 1px solid #30363d; border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, .6);
+    animation: winIn .22s cubic-bezier(.2, .9, .3, 1.1);
+  }
+  @keyframes winIn { from { opacity: 0; transform: scale(.96) translateY(-8px); } to { opacity: 1; transform: none; } }
+  .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; }
+  .head .logo { width: 18px; height: 18px; flex: none; }
+  .head .t { flex: 1; font-size: 14px; font-weight: 600; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head .x {
+    -webkit-app-region: no-drag; width: 28px; height: 24px; border: none; border-radius: 6px;
+    background: transparent; color: #8b949e; cursor: default; display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .head .x:hover { background: rgba(194, 43, 28, .8); color: #fff; }
+  .head .x svg { width: 12px; height: 12px; }
+  .body { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0; min-height: 0; }
+  .cls { display: flex; align-items: center; gap: 10px; }
+  .badge {
+    flex: none; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: rgba(248, 81, 73, .15); color: #f85149; border: 1px solid rgba(248, 81, 73, .35);
+  }
+  .cls .name { font-size: 14px; font-weight: 600; color: #e6edf3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cause { font-size: 12.5px; color: #c9d1d9; line-height: 1.55; background: #161b22; border: 1px solid #21262d;
+    border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; word-break: break-all; max-height: 88px; overflow: hidden; }
+  .sec-label { font-size: 11px; font-weight: 600; color: #6e7681; letter-spacing: .06em; }
+  .advice { display: flex; flex-direction: column; gap: 6px; }
+  .advice .row { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: #8b949e; line-height: 1.5; }
+  .advice .row::before { content: "•"; color: #4d6bfe; flex: none; }
+  .log-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .log {
+    flex: 1; min-height: 0; overflow: auto; background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+    padding: 10px 12px; font: 11.5px/1.55 "Cascadia Mono", Consolas, monospace; color: #8b949e;
+    white-space: pre-wrap; word-break: break-all; user-select: text;
+  }
+  .log .hl { color: #f85149; }
+  .foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
+  .foot .spacer { flex: 1; }
+  .foot .note { font-size: 11px; color: #6e7681; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .foot button {
+    border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 8px 16px; border-radius: 7px;
+    font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s; white-space: nowrap;
+  }
+  .foot button:hover { background: #30363d; border-color: #3d444d; }
+  .foot button:active { transform: scale(.97); }
+  .foot button.primary { background: linear-gradient(180deg, #4d6bfe, #3b5bdb); border-color: transparent; color: #fff; }
+  .foot button.primary:hover { filter: brightness(1.12); }
+  .foot button.success { background: linear-gradient(180deg, #2ea043, #238636); border-color: transparent; color: #fff; }
+  .foot button.success:hover { filter: brightness(1.12); }
+  .foot button.danger { background: linear-gradient(180deg, #da3633, #b62324); border-color: transparent; color: #fff; }
+  .foot button.danger:hover { filter: brightness(1.12); }
+  .flash { opacity: 0; transition: opacity .25s; font-size: 11.5px; color: #3fb950; }
+  .flash.on { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .win { animation: none; } }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="head">
+    <img class="logo" src="assets/whale-white.png" alt="">
+    <span class="t">DSH 错误报告 — 启动诊断</span>
+    <button class="x" id="xBtn" title="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
+  <div class="body">
+    <div class="cls">
+      <span class="badge" id="badge">启动失败</span>
+      <span class="name" id="name"></span>
+    </div>
+    <div class="cause" id="cause"></div>
+    <div class="advice" id="advice"></div>
+    <div class="log-wrap">
+      <span class="sec-label">关键日志预览(完整内容见「日志文件」)</span>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="flash" id="flash"></span>
+    <span class="spacer"></span>
+    <span class="note" id="reportPath"></span>
+    <button id="copyBtn">复制报告</button>
+    <button id="exportBtn" class="success">导出报告</button>
+    <button id="logBtn">日志文件</button>
+    <div id="actions"></div>
+  </div>
+</div>
+<script>
+  const R = window.__report;
+  let payload = null;
+
+  function render(p) {
+    payload = p;
+    document.title = p.name || 'DSH 错误报告';
+    const badge = p.badge || (p.phase === 'exit' ? '进程退出' : '启动失败');
+    document.getElementById('badge').textContent = badge;
+    document.getElementById('name').textContent = p.name || '';
+    document.getElementById('cause').textContent = p.cause || '';
+    const advice = document.getElementById('advice');
+    advice.innerHTML = '';
+    (p.suggestions || []).forEach((s) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.textContent = s;
+      advice.appendChild(row);
+    });
+    const logEl = document.getElementById('log');
+    logEl.textContent = (p.logPreview || '(暂无日志)').trim() || '(暂无日志)';
+    document.getElementById('reportPath').textContent = p.reportPath ? '报告已自动保存' : '';
+    const actions = document.getElementById('actions');
+    actions.innerHTML = '';
+    (p.actions || []).forEach((a) => {
+      const el = document.createElement('button');
+      el.textContent = a.label;
+      if (a.style) el.className = a.style;
+      el.addEventListener('click', () => R.action(a.id));
+      actions.appendChild(el);
+    });
+  }
+
+  function flash(msg) {
+    const f = document.getElementById('flash');
+    f.textContent = msg;
+    f.classList.add('on');
+    setTimeout(() => f.classList.remove('on'), 1800);
+  }
+
+  document.getElementById('xBtn').addEventListener('click', () => R.action('_close'));
+  document.getElementById('exportBtn').addEventListener('click', () => R.export());
+  document.getElementById('copyBtn').addEventListener('click', () => R.copy());
+  document.getElementById('logBtn').addEventListener('click', () => R.openLog());
+  R.onShow(render);
+  R.onCopied(() => flash('已复制到剪贴板'));
+  R.onExported(() => flash('报告已导出'));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') R.action('_close'); });
+</script>
+</body>
+</html>

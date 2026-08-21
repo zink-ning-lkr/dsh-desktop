@@ -1,10 +1,12 @@
-<!-- dsh 启动期间的深色加载页 -->
+<!-- dsh 启动期间的深色加载页:阶段提示 + 实时日志尾巴 + 现代化动效 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH</title>
 <style>
+  :root { color-scheme: dark; }
   html, body {
     margin: 0;
     height: 100%;
@@ -15,24 +17,85 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 22px;
+    gap: 24px;
     user-select: none;
+    overflow: hidden;
   }
-  .spinner {
-    width: 34px;
-    height: 34px;
-    border: 3px solid #21262d;
-    border-top-color: #4d6bfe;
-    border-radius: 50%;
-    animation: spin 0.9s linear infinite;
+  .logo {
+    width: 56px; height: 56px;
+    filter: drop-shadow(0 0 14px rgba(77, 107, 254, .35));
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(77, 107, 254, .28)); }
+    50% { transform: scale(1.05); filter: drop-shadow(0 0 20px rgba(77, 107, 254, .5)); }
+  }
+  .ring {
+    position: relative; width: 40px; height: 40px;
+  }
+  .ring::before, .ring::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 3px solid transparent;
+  }
+  .ring::before {
+    border-top-color: #4d6bfe; border-right-color: rgba(77, 107, 254, .35);
+    animation: spin .85s linear infinite;
+  }
+  .ring::after {
+    inset: -9px; border: 1.5px solid rgba(77, 107, 254, .16);
+    animation: spin 2.4s linear infinite reverse;
+    opacity: .6;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  p { margin: 0; font-size: 13px; }
+  .stage { margin: 0; font-size: 13px; color: #c9d1d9; min-height: 18px; animation: fadeUp .3s ease; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .dots { display: flex; gap: 7px; height: 6px; }
+  .dots i {
+    width: 6px; height: 6px; border-radius: 50%; background: #21262d;
+    transition: background .3s, transform .3s;
+  }
+  .dots i.on { background: #4d6bfe; transform: scale(1.15); animation: dotPulse 1.4s ease-in-out infinite; }
+  @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .logtail {
+    position: absolute; left: 16px; right: 16px; bottom: 14px;
+    font: 11px/1.7 "Cascadia Mono", Consolas, monospace;
+    color: #484f58; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    opacity: .8;
+  }
+  .hint { margin: 0; font-size: 12px; color: #6e7681; }
+  @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i { animation: none; } }
 </style>
 </head>
 <body>
-  <img src="assets/whale-white.png" alt="DSH" style="width: 52px; height: 52px; opacity: .9;">
-  <div class="spinner"></div>
-  <p>正在启动 dsh web…(首次启动可能需要几十秒)</p>
+  <img class="logo" src="assets/whale-white.png" alt="DSH">
+  <div class="ring"></div>
+  <p class="stage" id="stage">正在启动…</p>
+  <div class="dots" id="dots"></div>
+  <p class="hint" id="hint">首次启动可能需要几十秒</p>
+  <div class="logtail" id="logtail"></div>
+<script>
+  const stage = document.getElementById('stage');
+  // 四个启动阶段,与主进程 setStage(i) 对应:0 定位 dsh → 1 启动服务 → 2 等待就绪 → 3 加载页面
+  const STAGES = ['定位 dsh 本体…', '启动 dsh web 服务…', '等待服务就绪…', '加载页面…'];
+  for (let i = 0; i < STAGES.length; i++) {
+    const d = document.createElement('i');
+    document.getElementById('dots').appendChild(d);
+  }
+  function setStage(i, text) {
+    stage.textContent = text || (STAGES[i] || STAGES[0]);
+    stage.style.animation = 'none';
+    void stage.offsetWidth; // 重启动画
+    stage.style.animation = '';
+    [...document.querySelectorAll('.dots i')].forEach((d, k) => {
+      d.classList.toggle('on', k <= i);
+    });
+    if (i >= 2) document.getElementById('hint').style.display = 'none';
+  }
+  const tailEl = document.getElementById('logtail');
+  function pushLog(line) {
+    tailEl.textContent = line || '';
+  }
+</script>
 </body>
 </html>
