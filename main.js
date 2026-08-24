@@ -38,6 +38,8 @@ const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装
 const CHECK_UPDATE_TIMEOUT_MS = 8_000; // 手动检查更新的超时时间
 const CHECK_DSH_UPDATE_TIMEOUT_MS = 7_000; // 手动检查 dsh 本体更新的超时时间
 const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh/latest'; // dsh 本体最新版本查询地址
+const DSH_INSTALL_IDLE_TIMEOUT_MS = 60_000; // npm 安装连续无输出多久后提示"可能卡住"(dsh 运行中文件被占用/网络慢)
+const DSH_INSTALL_TOTAL_TIMEOUT_MS = 15 * 60_000; // npm 安装总超时:强制终止并报错,避免无限"请稍后"
 
 let mainWindow = null;
 let dshChild = null;
@@ -850,6 +852,20 @@ function findNpmCli() {
   return cachedNpmCli;
 }
 
+// 定位 npm-cli.js(直接由 node 执行):Windows 上 spawn .cmd 会同步抛 EINVAL,必须走 node + cli.js
+let cachedNpmCliJs = null;
+function findNpmCliJs() {
+  if (cachedNpmCliJs) return cachedNpmCliJs;
+  const cands = [findNpmCli()];
+  if (process.env.APPDATA) cands.push(path.join(process.env.APPDATA, 'npm', 'npm.cmd'));
+  for (const c of cands) {
+    if (!c) continue;
+    const js = path.join(path.dirname(c), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    if (fs.existsSync(js)) { cachedNpmCliJs = js; return js; }
+  }
+  return null;
+}
+
 // 从 npm registry 读取 dsh 最新版本号(带超时;返回版本号字符串,失败返回 null)
 function fetchLatestDshVersion(timeoutMs) {
   return new Promise((resolve) => {
@@ -885,57 +901,104 @@ function finishDshCheckTimer() {
 function installDshUpdate(version) {
   statusOpCancelled = false;
   installCancelled = false;
+  // Windows 上 spawn .cmd/.bat 必须走 shell,否则同步抛 EINVAL 且函数中断、状态窗永远停在"请稍后"。
+  // 首选 node + npm-cli.js(稳定、无注入面、进程树可清理);找不到再退回 shell 方式。
+  const node = findNodeSafe();
+  const npmCliJs = process.env.DSH_UITEST_FAKE_NPM || findNpmCliJs(); // UITEST 时注入假 npm 脚本
   const npm = findNpmCli();
-  log(`安装 dsh 本体更新: "${npm}" install -g @deepseek-ai/dsh`);
+  let exec, args, opts;
+  if (node && npmCliJs) {
+    exec = node;
+    args = [npmCliJs, 'install', '-g', '@deepseek-ai/dsh'];
+    opts = { windowsHide: true };
+  } else {
+    exec = npm;
+    args = ['install', '-g', '@deepseek-ai/dsh'];
+    opts = { shell: true, windowsHide: true };
+  }
+  log(`安装 dsh 本体更新: ${exec} ${args.join(' ')}`);
   showStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: 'npm install -g @deepseek-ai/dsh', spin: true });
-  const child = spawn(npm, ['install', '-g', '@deepseek-ai/dsh'], { windowsHide: true });
-  dshInstallChild = child;
-  let buf = '';
-  const onData = (c) => {
-    const text = c.toString();
-    if (text.trim()) log(`[npm] ${text.trim()}`);
-    buf += text;
-    if (buf.length > 8000) buf = buf.slice(-8000);
-    const lines = text.split(/\r?\n/).filter(Boolean);
-    if (lines.length) {
-      const last = lines[lines.length - 1].trim().slice(0, 130);
-      updateStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: last || '请稍候…', spin: true });
-    }
-  };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
-  child.on('close', (code) => {
-    if (dshInstallChild === child) dshInstallChild = null;
-    if (quitting || installCancelled) return; // 用户已取消:忽略安装结果
-    if (code === 0) {
-      log(`dsh 本体更新完成 v${version}`);
-      showStatusResult({
-        type: 'success', title: 'dsh 更新完成',
-        detail: `dsh 本体已更新到 v${version},重启 dsh 服务后生效。`,
-        buttons: [{ id: 'restart', label: '重启 dsh', primary: true }, { id: 'later', label: '稍后' }],
-      }, (id) => {
-        closeStatus();
-        if (id === 'restart' && !quitting) bootDsh();
-      });
-    } else {
-      log(`dsh 更新安装失败 (code=${code})`);
-      showStatusResult({
-        type: 'error', title: 'dsh 更新失败',
-        detail: `npm 安装失败 (code=${code})\n${buf.slice(-300)}`,
-        buttons: [{ id: 'ok', label: '好的' }],
-      }, () => closeStatus());
-    }
-  });
-  child.on('error', (e) => {
-    if (dshInstallChild === child) dshInstallChild = null;
-    if (quitting || installCancelled) return;
-    log(`dsh 更新安装进程启动失败: ${e.message}`);
+  let child = null;
+  try {
+    child = spawn(exec, args, opts);
+  } catch (e) {
+    // 启动失败必须反馈到窗口,不能静默卡在"请稍后"
+    log(`无法启动 npm 安装进程: ${e.message}`);
     showStatusResult({
       type: 'error', title: 'dsh 更新失败',
       detail: `无法启动 npm:${e.message}`,
       buttons: [{ id: 'ok', label: '好的' }],
     }, () => closeStatus());
+    return;
+  }
+  dshInstallChild = child;
+  let buf = '';
+  let lastOutAt = Date.now();
+  let idleTimer = null;
+  let totalTimer = null;
+  const clearTimers = () => { clearInterval(idleTimer); clearTimeout(totalTimer); idleTimer = totalTimer = null; };
+  // 超时护栏:UITEST 压短以便回归验证;生产用常量
+  const idleMs = process.env.DSH_DESKTOP_UITEST ? 1500 : DSH_INSTALL_IDLE_TIMEOUT_MS;
+  const totalMs = process.env.DSH_DESKTOP_UITEST ? 4000 : DSH_INSTALL_TOTAL_TIMEOUT_MS;
+  const finish = (ok, msg) => {
+    if (dshInstallChild === child) dshInstallChild = null;
+    clearTimers();
+    if (quitting || installCancelled) return; // 取消/超时中止:忽略迟到结果
+    log(ok ? `dsh 本体更新完成 v${version}` : `dsh 更新安装失败: ${msg}`);
+    showStatusResult({
+      type: ok ? 'success' : 'error',
+      title: ok ? 'dsh 更新完成' : 'dsh 更新失败',
+      detail: ok
+        ? `dsh 本体已更新到 v${version},重启 dsh 服务后生效。`
+        : `${msg}\n${buf.slice(-300)}`,
+      buttons: ok
+        ? [{ id: 'restart', label: '重启 dsh', primary: true }, { id: 'later', label: '稍后' }]
+        : [{ id: 'ok', label: '好的' }],
+    }, (id) => {
+      closeStatus();
+      if (ok && id === 'restart' && !quitting) bootDsh();
+    });
+  };
+  const onData = (c) => {
+    const text = c.toString();
+    if (text.trim()) log(`[npm] ${text.trim().slice(-500)}`);
+    buf += text;
+    if (buf.length > 8000) buf = buf.slice(-8000);
+    // npm 进度/日志用 \r 覆盖写,需按 \r\n|\r|\n 分段,最新一段作为详情
+    const segs = String(text).split(/\r\n|\r|\n/).map((s) => s.trim()).filter(Boolean);
+    if (segs.length) {
+      lastOutAt = Date.now();
+      updateStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: segs[segs.length - 1].slice(0, 130), spin: true });
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  // 无输出护栏:长时间没有新输出 → 提示可能的卡因(dsh 本体在运行导致文件被占用 / 网络),但不自动中止
+  idleTimer = setInterval(() => {
+    if (Date.now() - lastOutAt > idleMs) {
+      updateStatus({
+        mode: 'install', title: `正在安装 dsh 本体 v${version}…`,
+        detail: 'npm 长时间无输出,可能因 dsh 本体正在运行、文件被占用而卡住;可关闭其他 dsh 实例后点 ✕ 取消重试',
+        spin: true,
+      });
+    }
+  }, 5000);
+  // 总超时护栏:强制终止并报错,绝不无限"请稍后"
+  totalTimer = setTimeout(() => {
+    if (quitting || installCancelled || dshInstallChild !== child) return;
+    log('dsh 安装超时,强制终止 npm 进程');
+    installCancelled = true; // 让 close 回调忽略后续结果,避免重复弹窗
+    killTree(child);
+    showStatusResult({
+      type: 'error', title: 'dsh 更新失败',
+      detail: `npm 安装超时(${Math.round(totalMs / 60000)} 分钟)已中止。若 dsh 本体正在运行,请关闭它或仅保留一个实例后重试。`,
+      buttons: [{ id: 'ok', label: '好的' }],
+    }, () => closeStatus());
+  }, totalMs);
+  child.on('close', (code) => {
+    finish(code === 0, code === 0 ? '' : `npm 安装失败 (code=${code})`);
   });
+  child.on('error', (e) => finish(false, `无法启动 npm:${e.message}`));
 }
 
 function checkDshUpdate(manual) {
@@ -1487,7 +1550,23 @@ if (!gotLock) {
       uiStep(() => log(`UITEST menu-toggled-close w=${menuPopupView?.getBounds().width}(期望 0) → ${menuPopupView?.getBounds().width === 0 ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
       uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13900, 'menu-toggle-open');
       uiStep(() => log(`UITEST menu-toggled-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14150, 'menu-reopen-verify');
-      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 14600);
+      // ⑥ dsh 本体安装(本版修复:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
+      //    成功路径:假 npm 输出两行后正常退出 0 → 应出现"dsh 更新完成"结果窗
+      fs.writeFileSync(path.join(app.getPath('userData'), 'fake-npm-ok.js'),
+        "process.stdout.write('fetching dsh metadata...\\n');setTimeout(()=>{process.stdout.write('added 1 package in 2s\\n');process.exit(0);},900);");
+      fs.writeFileSync(path.join(app.getPath('userData'), 'fake-npm-hang.js'),
+        "process.stdout.write('hanging...\\n');setInterval(()=>{},1000);");
+      uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(app.getPath('userData'), 'fake-npm-ok.js'); installDshUpdate('9.9.9'); hookWin(statusWin, 'status'); }, 15200, 'dsh-install-ok');
+      uiStep(() => readDom(statusWin, 'document.getElementById("title").textContent', 'install-title'), 15500);
+      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'install-result'), 16400);
+      uiStep(() => { statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="稍后").click()').catch(() => {}); }, 16600, 'install-later');
+      uiStep(() => log(`UITEST install-later win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 16800, 'install-later-verify');
+      //    超时护栏:假 npm 挂死不退出 → 总超时应强制终止并弹"dsh 更新失败"
+      uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(app.getPath('userData'), 'fake-npm-hang.js'); installDshUpdate('9.9.9'); }, 17600, 'dsh-install-hang');
+      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 22000);
+      uiStep(() => { statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 22150, 'install-okbtn');
+      uiStep(() => log(`UITEST install-timeout win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 22300, 'install-okbtn-verify');
+      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 22400);
     }
   });
 
