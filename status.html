@@ -138,7 +138,7 @@
     document.getElementById('ico').innerHTML = ACT[p.mode] || ACT.check;
     document.getElementById('title').textContent = p.title || '';
     if (isRes) {
-      const type = p.resultType || 'info';
+      const type = p.type || 'info';
       const rv = document.getElementById('result');
       rv.className = 'result ' + type;
       document.getElementById('big').innerHTML = RES[type] || RES.info;

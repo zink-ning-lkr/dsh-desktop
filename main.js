@@ -10,8 +10,48 @@
 //   - status.html    统一状态窗(检查更新/下载/安装/结果,可挂后台)
 //   - dialog.html    通用深色对话框(替代原生 MessageBox)
 //   - report.html    错误报告窗(启动失败/进程退出,一键导出)
+// 单一 uncaughtException 处理器(原两处重叠注册已合并;Node 官方警告异常后继续运行
+// 状态未定义,必须记录后主动退出,而非静默放行)。
+// 模块加载期(下方 require 全部完成之前)触发的异常同样由本处理器兜底:崩溃记录部分
+// 用内联 require 完成,不依赖尚未初始化的模块级绑定;其余(日志/报告/退出)逐段 try 兜底,
+// 避免 TDZ 或依赖缺位导致处理过程中二次抛错。
+let crashHandling = false; // 防重入:处理期间的二次异常不再递归
 process.on('uncaughtException', (err) => {
-  try { require('fs').writeFileSync(require('path').join(__dirname, 'CRASH.txt'), `${new Date().toISOString()}\n${err.stack || err}`); } catch (e) { /* 无法落盘 */ }
+  if (crashHandling) return;
+  crashHandling = true;
+  try {
+    // 崩溃记录写入 userData(打包后 __dirname 是只读 asar,写那里会静默失效)
+    try {
+      let ud = null;
+      try { ud = require('electron').app.getPath('userData'); } catch { /* electron/app 未就绪 */ }
+      require('node:fs').appendFileSync(
+        require('node:path').join(ud || __dirname, 'CRASH.txt'),
+        `${new Date().toISOString()}\n${err.stack || err}\n`,
+      );
+    } catch (e) { /* 无法落盘 */ }
+  } catch (e) { /* 处理器自身异常:直接退出,避免递归 */ try { process.exit(1); } catch {} return; }
+  // 模块加载期只负责落盘 + 退出,其余逻辑依赖的绑定此时可能尚未初始化,先硬退出
+  try { app; } catch { try { process.exit(1); } catch {} return; }
+  try {
+    log(`未捕获异常: ${err.stack || err}`);
+    flushLog(); // 日志缓冲即时刷盘,保证崩溃现场进入 dsh-web.log
+  } catch (e) { /* 日志系统未就绪,忽略 */ }
+  // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径
+  try {
+    if (app.isReady()) {
+      const ctx = {
+        app, screen, phase: 'uncaught', error: err, code: null, buf: lastBootBuf,
+        logFile, crashFile: crashFilePath(), configPath: configPath(),
+        workspace: loadConfig().workspace, userData: app.getPath('userData'),
+        dshBin: findDshBinSafe(), nodeExe: findNodeSafe(), args: lastBootArgs,
+        elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
+      };
+      try { diagnostics.buildReport(ctx); } catch (e2) { log(`诊断落盘失败: ${e2.message}`); }
+    }
+  } catch (e3) { /* 模块加载期 app 未就绪等,忽略 */ }
+  // 记录完毕主动退出:走 app.quit() 会触发 before-quit 正常清理(dsh 子进程树 + 日志);
+  // app 不可用(未初始化/已损坏)时退硬退出兜底
+  try { app.quit(); } catch { try { process.exit(1); } catch {} }
 });
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView, Notification, clipboard } = require('electron');
 const { spawn, execSync } = require('node:child_process');
@@ -60,6 +100,10 @@ function saveConfig(cfg) {
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
   fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2));
 }
+// 崩溃记录统一落 userData(打包后 __dirname 是只读 asar,写那里会静默失败)
+const crashFilePath = () => {
+  try { return path.join(app.getPath('userData'), 'CRASH.txt'); } catch { return path.join(__dirname, 'CRASH.txt'); }
+};
 
 // ---------- 日志(内存缓冲 + 定期批量刷盘,避免高频 stdout 把主进程卡在同步 IO 上) ----------
 const logFile = path.join(app.getPath('userData'), 'dsh-web.log');
@@ -70,9 +114,10 @@ function flushLog() {
   const data = logBuf.join('');
   logBuf = [];
   try {
+    rotateLogIfNeeded();
     fs.appendFileSync(logFile, data);
   } catch (e) {
-    try { fs.appendFileSync(path.join(__dirname, 'CRASH.txt'), `log失败: ${e.message}\n`); } catch { /* 彻底失败 */ }
+    try { fs.appendFileSync(crashFilePath(), `log失败: ${e.message}\n`); } catch { /* 彻底失败 */ }
   }
 }
 function log(line) {
@@ -80,24 +125,20 @@ function log(line) {
   logBuf.push(`[${new Date().toISOString()}] ${s.length > 2000 ? s.slice(0, 2000) + '…' : s}\n`);
   if (!logTimer) logTimer = setInterval(flushLog, 500);
 }
-process.on('uncaughtException', (err) => {
-  const now = new Date().toISOString();
-  try { fs.appendFileSync(path.join(__dirname, 'CRASH.txt'), `${now}\n${err.stack || err}\n`); } catch (e) { /* 无法落盘 */ }
-  log(`未捕获异常: ${err.stack || err}`);
-  // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径
+
+// ---------- 日志轮转:单文件超过上限时归档为 .old 并重开,防长期运行无限膨胀 ----------
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5MB
+function rotateLogIfNeeded() {
   try {
-    if (app && app.isReady()) {
-      const ctx = {
-        app, screen, phase: 'uncaught', error: err, code: null, buf: lastBootBuf,
-        logFile, crashFile: path.join(__dirname, 'CRASH.txt'), configPath: configPath(),
-        workspace: loadConfig().workspace, userData: app.getPath('userData'),
-        dshBin: findDshBinSafe(), nodeExe: findNodeSafe(), args: lastBootArgs,
-        elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
-      };
-      try { diagnostics.buildReport(ctx); } catch (e2) { log(`诊断落盘失败: ${e2.message}`); }
+    const st = fs.statSync(logFile);
+    if (st.size > LOG_MAX_BYTES) {
+      const old = logFile + '.old';
+      try { fs.unlinkSync(old); } catch { /* 无旧档 */ }
+      fs.renameSync(logFile, old);
+      logBuf.unshift(`[${new Date().toISOString()}] 日志已轮转(旧档: ${old})\n`);
     }
-  } catch (e3) { /* 忽略 */ }
-});
+  } catch { /* 日志文件尚不存在,无需轮转 */ }
+}
 
 // ---------- 定位 node 与 dsh(不经过 dsh.cmd 转发,便于管理进程树);成功后缓存避免重复 execSync ----------
 let cachedDshBin = null;
@@ -127,13 +168,20 @@ function findDshBinSafe() { try { return findDshBin(); } catch { return null; } 
 function findNode() {
   if (cachedNode) return cachedNode;
   const node = firstLine(IS_WIN ? 'where node' : 'which node');
-  if (node) {
+  if (node && nodeUsable(node)) {
     cachedNode = { exe: node, env: process.env };
     return cachedNode;
   }
+  // PATH 里的 node 缺失或不可用(损坏/过旧/权限异常):回退 Electron 内置 node,
+  // 否则 dsh 起不来而壳看起来正常,排障指向性差
+  if (node) log(`系统 node 不可用("${node}" -v 失败),回退 Electron 内置 node`);
   // 兜底:让 Electron 二进制以纯 Node 模式运行
   cachedNode = { exe: process.execPath, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
   return cachedNode;
+}
+// 验证 node 可执行且能输出版本号(5s 超时防悬挂)
+function nodeUsable(exe) {
+  try { return execSync(`"${exe}" -v`, { windowsHide: true, timeout: 5000 }).toString().trim().length > 0; } catch { return false; }
 }
 function findNodeSafe() { try { return findNode().exe; } catch { return null; } }
 
@@ -190,8 +238,9 @@ function startDsh(cwd, onOut) {
         if (onOut) onOut(line);
       }
       buf += text;
-      // dsh web 启动后打印形如 "dsh web: http://127.0.0.1:7123" 的地址行
-      const m = buf.match(/dsh web: (https?:\/\/\S+)/) || buf.match(/https?:\/\/(127\.0\.0\.1|localhost):\d+/);
+      // dsh web 启动后打印形如 "dsh web: http://127.0.0.1:7123" 的地址行;
+      // 仅匹配 "dsh web:" 前缀行(旧的兜底分支会把任意回环地址输出误判为服务地址)
+      const m = buf.match(/dsh web:\s*(https?:\/\/\S+)/);
       if (m) settle(resolve, { child, url: m[1] });
     };
     const onExit = (code) => settle(reject, new Error(`dsh web 启动后即退出 (code=${code})\n${buf.slice(-2000)}`));
@@ -231,6 +280,7 @@ let titlebarView = null;
 let revealTabView = null;
 let menuPopupView = null;
 let barVisible = true;
+let barBeforeFullscreen = true; // 进全屏前的标题栏可见性:退出全屏时恢复原状(而非强制显示)
 let currentBarH = TITLEBAR_H;
 let barAnim = null;
 let menuClosedAt = 0; // 弹层最后关闭时刻:防"点按钮关闭→blur 先关→点击又打开"的抖动
@@ -368,7 +418,7 @@ function showTrayMenu() {
     trayMenuWin.webContents.send('m:show', { items, w: 264, margin: 12 });
     trayMenuWin.show();
     trayMenuWin.focus();
-  });
+  }).catch(() => {}); // 窗口早关等取消加载,忽略
   trayMenuWin.on('blur', () => closeTrayMenu());
   trayMenuWin.on('closed', () => { trayMenuWin = null; });
 }
@@ -417,7 +467,7 @@ function showStatus(p) {
       webPreferences: { sandbox: true, preload: path.join(__dirname, 'status-preload.js') },
     });
     statusWin.setMenuBarVisibility(false);
-    statusWin.loadFile(path.join(__dirname, 'status.html'));
+    statusWin.loadFile(path.join(__dirname, 'status.html')).catch(() => {});
     statusWin.webContents.once('did-finish-load', flushStatus);
     statusWin.on('closed', () => { statusWin = null; statusMinimized = false; statusActions = null; });
     statusWin.on('minimize', () => { statusMinimized = true; });
@@ -522,7 +572,7 @@ function showDialog(opts, cb) {
       webPreferences: { sandbox: true, preload: path.join(__dirname, 'dialog-preload.js') },
     });
     dialogWin.setMenuBarVisibility(false);
-    dialogWin.loadFile(path.join(__dirname, 'dialog.html'));
+    dialogWin.loadFile(path.join(__dirname, 'dialog.html')).catch(() => {});
     dialogWin.webContents.once('did-finish-load', flushDialog);
     dialogWin.on('closed', () => { dialogWin = null; });
     dialogQueued = opts;
@@ -577,7 +627,7 @@ function showReport(opts) {
     code: opts.code != null ? opts.code : null,
     buf: opts.buf || lastBootBuf,
     logFile,
-    crashFile: path.join(__dirname, 'CRASH.txt'),
+    crashFile: crashFilePath(),
     configPath: configPath(),
     workspace: loadConfig().workspace,
     userData: app.getPath('userData'),
@@ -619,7 +669,7 @@ function showReport(opts) {
       webPreferences: { sandbox: true, preload: path.join(__dirname, 'report-preload.js') },
     });
     reportWin.setMenuBarVisibility(false);
-    reportWin.loadFile(path.join(__dirname, 'report.html'));
+    reportWin.loadFile(path.join(__dirname, 'report.html')).catch(() => {});
     reportWin.webContents.once('did-finish-load', flushReport);
     reportWin.on('closed', () => { reportWin = null; });
     reportQueued = payload;
@@ -1105,7 +1155,9 @@ function menuItems() {
     { type: 'item', id: 'auto-open-browser', label: '自动打开浏览器', checked: !!loadConfig().openBrowser },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
     { type: 'sep' },
-    { type: 'item', id: 'quit', label: '退出', accel: 'Alt+F4' },
+    // 注意:这里不显示 Alt+F4 快捷键。默认「关闭时最小化到托盘」下,Alt+F4 只隐藏窗口而非退出,
+    // 提示该快捷键会误导用户;点击本项是真正的 app.quit()
+    { type: 'item', id: 'quit', label: '退出' },
   ];
 }
 
@@ -1221,7 +1273,7 @@ function createWindow() {
   });
   // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露出白边,必须显式设暗色
   titlebarView.setBackgroundColor(TITLE_BAR_DEFAULT);
-  titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html'));
+  titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html')).catch(() => {});
 
   dshView = new WebContentsView({
     webPreferences: {
@@ -1230,7 +1282,7 @@ function createWindow() {
     },
   });
   dshView.webContents.setBackgroundThrottling(false);
-  dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
+  dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
   dshView.setBackgroundColor(TITLE_BAR_DEFAULT);
   dshView.webContents.on('did-finish-load', () => {
@@ -1242,13 +1294,25 @@ function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  // 同标签导航防护(will-navigate 只在页面自身发起导航时触发,loadURL/loadFile 不受影响):
+  // 只放行 dsh 服务同源(刷新/前端路由),其余导航(外链、表单提交、被注入的 <a> 等)
+  // 一律截断并交给系统浏览器,防止第三方站点整窗替换进来
+  dshView.webContents.on('will-navigate', (e, url) => {
+    if (dshWebUrl) {
+      try {
+        if (new URL(url).origin === new URL(dshWebUrl).origin) return; // 同源放行
+      } catch { /* URL 解析失败按外链处理 */ }
+    }
+    e.preventDefault();
+    if (/^https?:/.test(url)) shell.openExternal(url);
+  });
 
   // 标题栏收起后顶部的下拉把手
   revealTabView = new WebContentsView({
     webPreferences: { sandbox: true, preload: path.join(__dirname, 'titlebar-preload.js') },
   });
   revealTabView.setBackgroundColor('#00000000'); // 圆角处的透明角落不露白
-  revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html'));
+  revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html')).catch(() => {});
 
   // 自绘菜单弹层(最后添加,位于最上层)
   menuPopupView = new WebContentsView({
@@ -1256,7 +1320,7 @@ function createWindow() {
   });
   // View 默认底色是白色,会把面板周围透明边距(阴影区)衬成白圈,必须置为全透明
   menuPopupView.setBackgroundColor('#00000000');
-  menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html'));
+  menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html')).catch(() => {});
   menuPopupView.webContents.on('blur', () => closeMenuPopup()); // 点击菜单外任意处关闭
 
   // 堆叠顺序(后加的上层):dsh 页面 → 标题栏(底部渐变区盖住页面顶端)→ 下拉把手 → 菜单弹层
@@ -1268,9 +1332,9 @@ function createWindow() {
   mainWindow.on('resize', layoutViews);
   mainWindow.on('maximize', () => { layoutViews(); titlebarView?.webContents.send('tb:maximized', true); });
   mainWindow.on('unmaximize', () => { layoutViews(); titlebarView?.webContents.send('tb:maximized', false); });
-  // 全屏:标题栏自动收起,退出全屏自动恢复
-  mainWindow.on('enter-full-screen', () => toggleTitlebar(false, false));
-  mainWindow.on('leave-full-screen', () => toggleTitlebar(true, false));
+  // 全屏:标题栏自动收起;退出全屏恢复进入前的状态(用户手动隐藏标题栏后全屏,退出时不应被强制显示)
+  mainWindow.on('enter-full-screen', () => { barBeforeFullscreen = barVisible; toggleTitlebar(false, false); });
+  mainWindow.on('leave-full-screen', () => toggleTitlebar(barBeforeFullscreen, false));
   mainWindow.show();
   // 关闭按钮:按设置隐藏到托盘(dsh 后台继续跑)或真正退出(不弹系统通知)
   mainWindow.on('close', (e) => {
@@ -1312,7 +1376,7 @@ async function bootDsh() {
     if (!wc) return;
     for (const c of loadingFlush) wc.executeJavaScript(c).catch(() => {});
     loadingFlush = null;
-  });
+  }).catch(() => {}); // 重启竞态:旧导航被取消会以 ERR_ABORTED 拒绝,忽略
   const stage = (i, text) => {
     if (seq !== bootSeq || settledUrl || !dshView) return;
     const cmd = `setStage(${i}, ${JSON.stringify(text)})`;
@@ -1351,7 +1415,7 @@ async function bootDsh() {
     log(`加载 ${url}`);
     stage(3, '加载页面…');
     settledUrl = true;
-    dshView.webContents.loadURL(url);
+    dshView.webContents.loadURL(url).catch(() => {}); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
   } catch (err) {
     if (quitting || seq !== bootSeq) return;
     log(`启动失败: ${err.message}`);
@@ -1375,7 +1439,7 @@ function ensureWorkspace() {
   const pick = dialog.showOpenDialogSync({
     title: '选择 dsh 的工作目录(文件与会话都归属于它)',
     properties: ['openDirectory'],
-    defaultLocation: 'D:\\',
+    defaultLocation: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
   });
   if (pick && pick[0]) {
     saveConfig({ ...cfg, workspace: pick[0] });
@@ -1388,7 +1452,7 @@ function changeWorkspace() {
   const pick = dialog.showOpenDialogSync(mainWindow, {
     title: '切换工作目录(将重启 dsh 服务)',
     properties: ['openDirectory'],
-    defaultLocation: cfg.workspace || 'D:\\',
+    defaultLocation: cfg.workspace || app.getPath('home'),
   });
   if (!pick || !pick[0]) return;
   saveConfig({ ...cfg, workspace: pick[0] });
@@ -1566,7 +1630,14 @@ if (!gotLock) {
       uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 22000);
       uiStep(() => { statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 22150, 'install-okbtn');
       uiStep(() => log(`UITEST install-timeout win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 22300, 'install-okbtn-verify');
-      setTimeout(() => { log('UITEST: 完成,自动退出'); app.quit(); }, 22400);
+      setTimeout(() => {
+        // 清理 UITEST 写入 userData 的假 npm 脚本
+        for (const f of ['fake-npm-ok.js', 'fake-npm-hang.js']) {
+          try { fs.unlinkSync(path.join(app.getPath('userData'), f)); } catch { /* 已不存在 */ }
+        }
+        log('UITEST: 完成,自动退出');
+        app.quit();
+      }, 22400);
     }
   });
 

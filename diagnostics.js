@@ -5,9 +5,6 @@
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const https = require('node:https');
-
-const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh/latest';
 
 // ---------- 小工具 ----------
 
@@ -24,15 +21,6 @@ function tailFile(file, lines = 200, maxBytes = 200 * 1024) {
     const text = s.length > maxBytes ? s.slice(-maxBytes) : s;
     return text.split('\n').slice(-lines).join('\n').trim();
   }, '');
-}
-
-// 探测 HTTPS 可达性(快速,失败即 false)
-function probeHttps(url, timeoutMs = 2000) {
-  return new Promise((resolve) => {
-    const req = https.get(url, { timeout: timeoutMs }, (res) => { res.resume(); resolve(res.statusCode < 500); });
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.on('error', () => resolve(false));
-  });
 }
 
 // 读取 JSON 文件,失败返回 null
@@ -93,9 +81,6 @@ function collectDiagnostics(ctx = {}) {
   // 配置
   if (ctx.configPath) {
     out.config = readJson(ctx.configPath);
-    if (out.config && out.config.port !== undefined && typeof out.config.port !== 'number') {
-      // 保底:config 解析异常也纳入报告
-    }
   }
   out.workspace = ctx.workspace || null;
 
@@ -289,26 +274,14 @@ function buildReport(ctx) {
   return { diag, cls, text, filePath };
 }
 
-// 网络探测(供报告展示参考;不阻塞主流程)
-async function probeNetwork() {
-  const ok = {};
-  await Promise.all([
-    probeHttps('https://registry.npmjs.org').then((v) => { ok.npmRegistry = v; }),
-    probeHttps(DSH_REGISTRY_URL).then((v) => { ok.dshRegistry = v; }),
-  ]);
-  return ok;
-}
-
 module.exports = {
   collectDiagnostics,
   classifyError,
   renderReport,
   writeReport,
   buildReport,
-  probeNetwork,
   tailFile,
   hr,
-  DSH_REGISTRY_URL,
 };
 
 // 供主进程用:contexts 仅用于测试/调试时直接运行本文件
