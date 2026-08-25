@@ -1,0 +1,285 @@
+// downloader.js —— 桌面端更新包多线程分段下载器(主进程专用,零外部依赖)。
+// 借鉴 aria2 的分块并发思想:GET 探测服务器是否支持 Range → 按 Range 分段并发下载、
+// 各段按字节偏移落盘 → 全程 sha512 校验;服务器不支持 Range 或任一分段异常 →
+// 自动回退单连接整包下载,任何情况下调用方仍可走官方 electron-updater 下载兜底。
+// 网络栈使用 Electron 的 net.request(与 electron-updater 相同:系统代理/证书行为一致),
+// 因此本模块只在 Electron 主进程内加载。
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { net } = require('electron');
+
+const DEFAULT_SEGMENTS = 6;           // 并发分段数(平衡连接开销与 CDN 限流风险)
+const MIN_SEGMENT_BYTES = 512 * 1024; // 小于该体积的包不做分段(连接开销不划算)
+const SEGMENT_TIMEOUT_MS = 30_000;    // 每段无数据超时
+const SINGLE_TIMEOUT_MS = 30_000;     // 单连接整包下载的无数据超时
+const PROBE_TIMEOUT_MS = 8_000;       // 探测请求超时
+const PROGRESS_INTERVAL_MS = 150;     // 进度回调节流
+
+// ---------- 解析最终 URL(GitHub Release 下载会 302 → release-assets CDN) ----------
+// 用 HEAD + 手动重定向拿到最终地址:后续 Range 分段/单连接都直连最终 CDN,
+// 避免重定向过程丢弃 Range 头导致分段全部失效。无重定向或失败返回 null。
+function resolveFinalUrl(url) {
+  return new Promise((resolve) => {
+    let req = null;
+    let settled = false;
+    let timer = null;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { req && req.abort(); } catch { /* ignore */ }
+      resolve(v);
+    };
+    try {
+      req = net.request({ url, method: 'HEAD', redirect: 'manual' });
+    } catch {
+      return finish(null);
+    }
+    timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
+    req.on('redirect', (_status, _method, redirectUrl) => finish(redirectUrl));
+    req.on('response', () => finish(null));
+    req.on('error', () => finish(null));
+    req.end();
+  });
+}
+
+// ---------- 探测:GET + "Range: bytes=0-0" ----------
+// 返回 { size, range }:
+//   size=null   → 拿不到总大小(chunked 等),只能单连接;
+//   range=false → 服务器忽略 Range(返回全部内容),走单连接;
+//   range=true  → 支持分段,size 为总字节数。
+function probe(url, isCancelled) {
+  return new Promise((resolve) => {
+    let req = null;
+    let settled = false;
+    let timer = null;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { req && req.abort(); } catch { /* ignore */ }
+      resolve(v);
+    };
+    try {
+      req = net.request({ url, headers: { Range: 'bytes=0-0' } });
+    } catch {
+      return finish({ size: null, range: false });
+    }
+    timer = setTimeout(() => finish({ size: null, range: false }), PROBE_TIMEOUT_MS);
+    req.on('response', (res) => {
+      const cl = res.headers['content-length'];
+      const cr = res.headers['content-range'];
+      if (res.statusCode === 206 && cr) {
+        const m = /bytes\s+\d+-\d+\/(\d+)/.exec(cr);
+        finish({ size: m ? Number(m[1]) : null, range: true });
+      } else if (res.statusCode === 200) {
+        finish({ size: cl ? Number(cl) : null, range: false });
+      } else {
+        finish({ size: null, range: false });
+      }
+      try { res.destroy(); } catch { /* ignore */ } // 探测即断开,不读正文
+    });
+    req.on('error', () => finish({ size: null, range: false }));
+    req.end();
+  });
+}
+
+// ---------- 单段 Range 下载:并发调用,各自按 start 偏移顺序写同一文件句柄 ----------
+function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes) {
+  return new Promise((resolve, reject) => {
+    let req = null;
+    let settled = false;
+    let timer = null;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { req && req.abort(); } catch { /* ignore */ }
+      reject(err);
+    };
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fail(new Error('分段下载超时(无数据)')), SEGMENT_TIMEOUT_MS);
+    };
+    try {
+      req = net.request({ url, headers: { Range: `bytes=${start}-${end}` } });
+    } catch (err) {
+      return fail(err);
+    }
+    req.on('response', (res) => {
+      if (res.statusCode !== 206) {
+        // 200 = 服务器忽略 Range(重定向可能丢 Range 头)返回全文件 → 本次分段不可用,
+        // 由主流程整体回退单连接;其余状态码一律视为失败。
+        return fail(res.statusCode === 200 ? new Error('服务器忽略 Range,回退单连接') : new Error(`分段下载 HTTP ${res.statusCode}`));
+      }
+      let pos = start;
+      let chain = Promise.resolve();
+      res.on('data', (chunk) => {
+        if (settled) return;
+        if (isCancelled && isCancelled()) return fail(new Error('已取消'));
+        resetTimer();
+        const writePos = pos;
+        pos += chunk.length;
+        const c = chunk;
+        chain = chain.then(
+          () => fd.write(c, 0, c.length, writePos).then(() => { onBytes && onBytes(c.length); }, fail),
+          () => {},
+        );
+      });
+      res.on('end', () => chain.then(() => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } }, fail));
+      res.on('error', (e) => fail(e));
+      resetTimer();
+    });
+    req.on('error', (e) => fail(e));
+    req.end();
+  });
+}
+
+// ---------- 单连接整包下载(回退路径,同样带进度/取消/sha512) ----------
+function singleStreamDownload(url, destFile, opts = {}) {
+  const { sha512, onProgress, isCancelled } = opts;
+  return new Promise((resolve, reject) => {
+    let req = null;
+    let settled = false;
+    let timer = null;
+    let total = 0;
+    let transferred = 0;
+    let lastReport = 0;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { req && req.abort(); } catch { /* ignore */ }
+      reject(err);
+    };
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fail(new Error('下载超时(无数据)')), SINGLE_TIMEOUT_MS);
+    };
+    try {
+      req = net.request({ url });
+    } catch (err) {
+      return fail(err);
+    }
+    req.on('response', (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) return fail(new Error(`下载 HTTP ${res.statusCode}`));
+      total = Number(res.headers['content-length'] || 0) || total;
+      const ws = fs.createWriteStream(destFile);
+      res.on('data', (chunk) => {
+        if (isCancelled && isCancelled()) { ws.destroy(); return fail(new Error('已取消')); }
+        resetTimer();
+        ws.write(chunk);
+        transferred += chunk.length;
+        const now = Date.now();
+        if (onProgress && now - lastReport >= PROGRESS_INTERVAL_MS) {
+          lastReport = now;
+          onProgress({ percent: total ? Math.min(100, (transferred / total) * 100) : 0, transferred, total });
+        }
+      });
+      res.on('end', () => ws.end());
+      ws.on('finish', async () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (sha512) {
+          try {
+            const h = await hashFile(destFile);
+            if (h !== sha512) {
+              try { await fs.promises.unlink(destFile); } catch { /* ignore */ }
+              return reject(new Error('sha512 校验失败(单连接)'));
+            }
+          } catch (e) { return reject(e); }
+        }
+        resolve({ bytes: transferred });
+      });
+      ws.on('error', (e) => { ws.destroy(); fail(e); });
+      res.on('error', (e) => { ws.destroy(); fail(e); });
+      resetTimer();
+    });
+    req.on('error', (e) => fail(e));
+    req.end();
+  });
+}
+
+// ---------- 主入口:多线程分段下载,探测/分段/Range 支持检测失败自动退化 ----------
+// opts: { segments, sha512, onProgress({percent,transferred,total}), isCancelled }
+async function multiThreadDownload(url, destFile, opts = {}) {
+  const { segments = DEFAULT_SEGMENTS, sha512 = null, onProgress = null, isCancelled = null } = opts;
+  // 预解析最终 URL(GitHub 会 302 到 release-assets CDN),保证分段请求带 Range 直达
+  const finalUrl = (await resolveFinalUrl(url)) || url;
+  const info = await probe(finalUrl, isCancelled);
+  const total = info.size || 0;
+  if (!info.range || total < MIN_SEGMENT_BYTES || segments <= 1) {
+    return await singleStreamDownload(finalUrl, destFile, { sha512, onProgress, isCancelled, total });
+  }
+  const n = Math.max(1, Math.min(segments, total));
+  const part = Math.ceil(total / n);
+  const ranges = [];
+  for (let i = 0; i < n; i++) {
+    const start = i * part;
+    const end = Math.min(start + part - 1, total - 1);
+    if (start > end) break;
+    ranges.push([start, end]);
+  }
+  const fd = await fs.promises.open(destFile, 'w');
+  let transferred = 0;
+  let lastReport = 0;
+  const report = (force = false) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && now - lastReport < PROGRESS_INTERVAL_MS) return;
+    lastReport = now;
+    onProgress({ percent: total ? Math.min(100, (transferred / total) * 100) : 0, transferred, total });
+  };
+  const onBytes = (n2) => { transferred += n2; report(); };
+  try {
+    await Promise.all(ranges.map(([s, e]) => fetchRangeSegment(finalUrl, s, e, fd, isCancelled, onBytes)));
+    report(true);
+  } catch (err) {
+    try { await fd.close(); } catch { /* ignore */ }
+    try { await fs.promises.unlink(destFile); } catch { /* ignore */ }
+    throw err;
+  }
+  try { await fd.close(); } catch { /* ignore */ }
+  if (sha512) {
+    const h = await hashFile(destFile);
+    if (h !== sha512) {
+      try { await fs.promises.unlink(destFile); } catch { /* ignore */ }
+      throw new Error(`sha512 校验失败(期望 ${sha512.slice(0, 16)}…,实际 ${h.slice(0, 16)}…)`);
+    }
+  }
+  return { bytes: total };
+}
+
+// ---------- 工具 ----------
+function hashFile(file, algorithm = 'sha512', encoding = 'base64') {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algorithm);
+    hash.setEncoding(encoding);
+    fs.createReadStream(file, { highWaterMark: 1024 * 1024 })
+      .on('error', reject)
+      .on('end', () => { hash.end(); resolve(hash.read()); })
+      .pipe(hash, { end: false });
+  });
+}
+
+// 镜像目录形态(与 electron-updater GenericProvider 一致):镜像根目录 + 原文件名
+function resolveDownloadUrl(rawUrl, mirror) {
+  if (!mirror) return rawUrl;
+  try {
+    const fileName = path.basename(new URL(rawUrl).pathname);
+    if (!fileName) return rawUrl;
+    return new URL(fileName, mirror.endsWith('/') ? mirror : mirror + '/').toString();
+  } catch { return rawUrl; }
+}
+
+module.exports = {
+  multiThreadDownload,
+  singleStreamDownload,
+  hashFile,
+  resolveDownloadUrl,
+  DEFAULT_SEGMENTS,
+};

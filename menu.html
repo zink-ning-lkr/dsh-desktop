@@ -86,8 +86,16 @@
       const row = document.createElement('div');
       row.className = 'item' + (it.id === 'quit' ? ' danger' : '');
       row.style.setProperty('--i', actionable.length - 1);
-      row.innerHTML = `<span class="ico">${ICONS[it.id] || ''}</span><span class="lbl">${it.label}</span>` +
-        (it.checked ? '<span class="accel" title="已启用">✓</span>' : (it.accel ? `<span class="accel">${it.accel}</span>` : ''));
+      const ico = document.createElement('span');
+      ico.className = 'ico';
+      ico.innerHTML = ICONS[it.id] || ''; // 图标来自内部白名单,安全
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = it.label; // 文本一律 textContent:label 中拼接的版本号/路径等不经 HTML 解析
+      const accel = document.createElement('span');
+      if (it.checked) { accel.className = 'accel'; accel.title = '已启用'; accel.textContent = '✓'; }
+      else if (it.accel) { accel.className = 'accel'; accel.textContent = it.accel; }
+      row.append(ico, lbl, accel);
       row.addEventListener('click', () => window.__menu.action(it.id));
       row.addEventListener('mouseenter', () => select(actionable.indexOf(i)));
       panel.appendChild(row);
