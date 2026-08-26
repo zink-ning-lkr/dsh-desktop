@@ -367,6 +367,20 @@ function layoutViews() {
   revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 }
 
+// 强制视图 surface 与逻辑尺寸同步。首次显示时,窗口的实际显示尺寸(高 DPI 下的
+// devicePixelRatio 换算、系统对超出屏幕窗口的收缩等)可能与 show 之前预设的
+// bounds 不同步,表现为界面右侧/底部有一条未绘制的暗色区域,拖拽窗口边缘后恢复。
+// 把宽度先收 1px 再恢复,迫使 Chromium 重算渲染 surface(值相同时 setBounds 不触发重算)。
+function forceViewRelayout() {
+  if (!mainWindow || !dshView) return;
+  try {
+    const b = dshView.getBounds();
+    if (b.width <= 1) return;
+    dshView.setBounds({ x: b.x, y: b.y, width: b.width - 1, height: b.height });
+    dshView.setBounds(b);
+  } catch { /* 窗口销毁中,忽略 */ }
+}
+
 // ---------- 把手浮现:标题栏隐藏期间轮询鼠标位置,靠近顶部中央才显示 ----------
 const HANDLE_ZONE = { w: 280, h: 34 }; // 基础感应区(比把手本身大;上浮后按 1.5 倍迟滞,防闪烁)
 const HANDLE_W = 96, HANDLE_H = 26; // 把手本体尺寸(高 ≥24px 最小点击目标;原 64×20 偏小且易漏触)
@@ -1942,6 +1956,7 @@ function createWindow() {
   dshView.setBackgroundColor(TITLE_BAR_DEFAULT);
   dshView.webContents.on('did-finish-load', () => {
     syncTitleBarTheme();
+    forceViewRelayout(); // 页面加载完成后再确认一次 surface 尺寸(首帧可能仍按旧 viewport 绘制)
     dshView?.webContents.focus();
   });
   // dsh 页面里的外链(文档/仓库等)交给系统浏览器
@@ -2017,6 +2032,9 @@ function createWindow() {
   mainWindow.on('enter-full-screen', () => { barBeforeFullscreen = barVisible; toggleTitlebar(false, false); });
   mainWindow.on('leave-full-screen', () => toggleTitlebar(barBeforeFullscreen, false));
   mainWindow.show();
+  // 首次显示补偿(见 forceViewRelayout):show 后多拍重设,对齐真实显示尺寸并强制 surface 重算,
+  // 修复「首次启动右侧/底部暗色未绘制区、拉伸窗口后消失」
+  for (const ms of [0, 80, 240, 600]) setTimeout(() => { layoutViews(); forceViewRelayout(); }, ms);
   // 关闭按钮:按设置隐藏到托盘(dsh 后台继续跑)或真正退出(不弹系统通知);每次关闭前记忆窗口位置/大小/最大化
   mainWindow.on('close', () => {
     try {
@@ -2320,6 +2338,19 @@ if (!gotLock) {
         .catch((e) => log(`UITEST dom ${tag} ✗ ${e.message}`));
       // ① 状态窗翻页(本版修复点:窗口已打开时结果必须能送达)与取消语义
       uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 3500, 'status-show');
+      // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
+      //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
+      uiStep(() => {
+        try {
+          const b = dshView.getBounds();
+          dshView.webContents.executeJavaScript('({ w: window.innerWidth, h: window.innerHeight })')
+            .then((s) => {
+              const ok = !!s && Math.abs(s.w - b.width) <= 1 && Math.abs(s.h - b.height) <= 1;
+              log(`UITEST layout-fit view=${b.width}x${b.height} page=${s && s.w}x${s && s.h} → ${ok ? 'PASS' : 'FAIL'}`);
+            })
+            .catch((e) => log(`UITEST layout-fit ✗ ${e.message}`));
+        } catch (e) { log(`UITEST layout-fit ✗ ${e.stack || e}`); }
+      }, 3050, 'layout-fit');
       uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => {}), 4200, 'flip-result');
       uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'flip'), 4600);
       uiStep(() => log(`UITEST h-result=${statusWin?.getContentSize()[1]}(期望 250,确定按钮可见)`), 4700, 'h-result-verify');
