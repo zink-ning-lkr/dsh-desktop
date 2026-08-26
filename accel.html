@@ -39,6 +39,10 @@
   }
   .hint { font-size: 12px; color: #8b949e; line-height: 1.55; }
   .hint code { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; color: #c9d1d9; }
+  .dl-note {
+    font-size: 12px; color: #d29922; background: rgba(210, 153, 34, .1);
+    border: 1px solid rgba(210, 153, 34, .3); border-radius: 7px; padding: 7px 10px; line-height: 1.5;
+  }
   .seg-row { display: flex; align-items: center; gap: 14px; }
   input[type=range] { flex: 1; accent-color: #4d6bfe; height: 4px; cursor: default; }
   .seg-n {
@@ -104,8 +108,9 @@
       </div>
       <div class="hint">
         更新安装包将分成多段同时下载并校验 sha512。段数越多越快,但并发过高可能被 CDN 限流;
-        文件过小时会自动退化为单段下载。改动即时生效。
+        文件过小时会自动退化为单段下载。保存后对<strong>下一次更新下载</strong>生效(进行中的下载不受影响)。
       </div>
+      <div class="dl-note" id="dlNote" style="display:none">当前有更新下载进行中,新设置将在下次下载时生效。</div>
     </div>
 
     <!-- ② 镜像源(可选,桌面端更新) -->
@@ -120,9 +125,9 @@
         <span class="err" id="mirrorErr"></span>
       </div>
       <div class="hint">
-        镜像目录内需包含 <code>latest.yml</code> 与安装包,文件名与 GitHub Release 资产一致
-        (参考 GitHub 官方镜像/自建仓库的目录结构)。镜像失效或拉取失败时,
-        下载会自动<strong>回退官方源</strong>,不影响更新。
+        镜像目录内放置与 GitHub Release 资产同名的安装包即可
+        (参考 GitHub 官方镜像/自建仓库的目录结构;版本检查与完整性校验仍走 GitHub 官方)。
+        镜像失效或拉取失败时,下载会自动<strong>回退官方源</strong>,不影响更新。
       </div>
     </div>
 
@@ -168,6 +173,8 @@
     mirror.value = p.downloadMirror || '';
     mirrorErr.textContent = '';
     document.getElementById('cfgPath').textContent = p.cfgPath || 'config.json';
+    // 下载进行中打开设置窗:提示新设置只对下次下载生效,避免误以为能加速当前下载
+    document.getElementById('dlNote').style.display = p.downloadActive ? '' : 'none';
   }
 
   // 滑杆:拖动实时预览数值,松手保存
@@ -206,7 +213,7 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') A.close(); });
 
   A.onShow(apply);
-  A.get().then((p) => { apply(p); segN.textContent = p.segments; });
+  A.get().then((p) => { if (p) { apply(p); segN.textContent = p.segments; } }).catch(() => {}); // 异常时不改表单,保持默认值
 </script>
 </body>
 </html>

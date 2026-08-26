@@ -21,7 +21,7 @@ const PROGRESS_INTERVAL_MS = 150;     // 进度回调节流
 // ---------- 解析最终 URL(GitHub Release 下载会 302 → release-assets CDN) ----------
 // 用 HEAD + 手动重定向拿到最终地址:后续 Range 分段/单连接都直连最终 CDN,
 // 避免重定向过程丢弃 Range 头导致分段全部失效。无重定向或失败返回 null。
-function resolveFinalUrl(url) {
+function resolveFinalUrl(url, isCancelled) {
   return new Promise((resolve) => {
     let req = null;
     let settled = false;
@@ -39,7 +39,8 @@ function resolveFinalUrl(url) {
       return finish(null);
     }
     timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
-    req.on('redirect', (_status, _method, redirectUrl) => finish(redirectUrl));
+    const cancelled = () => isCancelled && isCancelled();
+    req.on('redirect', (_status, _method, redirectUrl) => (cancelled() ? finish(null) : finish(redirectUrl)));
     req.on('response', () => finish(null));
     req.on('error', () => finish(null));
     req.end();
@@ -69,7 +70,12 @@ function probe(url, isCancelled) {
       return finish({ size: null, range: false });
     }
     timer = setTimeout(() => finish({ size: null, range: false }), PROBE_TIMEOUT_MS);
+    const cancelled = () => isCancelled && isCancelled();
     req.on('response', (res) => {
+      if (cancelled()) { // 已取消:探测即断,不再读头
+        try { res.destroy(); } catch { /* ignore */ }
+        return finish({ size: null, range: false });
+      }
       const cl = res.headers['content-length'];
       const cr = res.headers['content-range'];
       if (res.statusCode === 206 && cr) {
@@ -88,7 +94,9 @@ function probe(url, isCancelled) {
 }
 
 // ---------- 单段 Range 下载:并发调用,各自按 start 偏移顺序写同一文件句柄 ----------
-function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes) {
+// shared: { failed } —— 任一分段失败时写入首错,其余分段在下一个数据块/超时到达时立即
+// 中止自己的请求,不再把整段拉完(否则单段失败回退官方下载时,其他段仍在后台白拉流量)
+function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes, shared) {
   return new Promise((resolve, reject) => {
     let req = null;
     let settled = false;
@@ -97,12 +105,13 @@ function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (shared) shared.failed = shared.failed || err; // 首个失败对所有兄弟分段可见
       try { req && req.abort(); } catch { /* ignore */ }
       reject(err);
     };
     const resetTimer = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => fail(new Error('分段下载超时(无数据)')), SEGMENT_TIMEOUT_MS);
+      timer = setTimeout(() => fail(shared && shared.failed ? shared.failed : new Error('分段下载超时(无数据)')), SEGMENT_TIMEOUT_MS);
     };
     try {
       req = net.request({ url, headers: { Range: `bytes=${start}-${end}` } });
@@ -120,6 +129,7 @@ function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes) {
       res.on('data', (chunk) => {
         if (settled) return;
         if (isCancelled && isCancelled()) return fail(new Error('已取消'));
+        if (shared && shared.failed) return fail(shared.failed); // 兄弟分段已失败:尽快中止,不再拉本段
         resetTimer();
         const writePos = pos;
         pos += chunk.length;
@@ -168,17 +178,23 @@ function singleStreamDownload(url, destFile, opts = {}) {
       if (res.statusCode < 200 || res.statusCode >= 300) return fail(new Error(`下载 HTTP ${res.statusCode}`));
       total = Number(res.headers['content-length'] || 0) || total;
       const ws = fs.createWriteStream(destFile);
-      res.on('data', (chunk) => {
+      // 背压:快网 + 慢盘(机械盘/U 盘)时 ws.write 返回 false 说明内部缓冲已满,
+      // 暂停读取网络流等 drain 再继续,避免内存随下载无限膨胀
+      const onData = (chunk) => {
         if (isCancelled && isCancelled()) { ws.destroy(); return fail(new Error('已取消')); }
         resetTimer();
-        ws.write(chunk);
         transferred += chunk.length;
+        if (!ws.write(chunk)) {
+          res.pause();
+          ws.once('drain', () => res.resume());
+        }
         const now = Date.now();
         if (onProgress && now - lastReport >= PROGRESS_INTERVAL_MS) {
           lastReport = now;
           onProgress({ percent: total ? Math.min(100, (transferred / total) * 100) : 0, transferred, total });
         }
-      });
+      };
+      res.on('data', onData);
       res.on('end', () => ws.end());
       ws.on('finish', async () => {
         if (settled) return;
@@ -209,7 +225,7 @@ function singleStreamDownload(url, destFile, opts = {}) {
 async function multiThreadDownload(url, destFile, opts = {}) {
   const { segments = DEFAULT_SEGMENTS, sha512 = null, onProgress = null, isCancelled = null } = opts;
   // 预解析最终 URL(GitHub 会 302 到 release-assets CDN),保证分段请求带 Range 直达
-  const finalUrl = (await resolveFinalUrl(url)) || url;
+  const finalUrl = (await resolveFinalUrl(url, isCancelled)) || url;
   const info = await probe(finalUrl, isCancelled);
   const total = info.size || 0;
   if (!info.range || total < MIN_SEGMENT_BYTES || segments <= 1) {
@@ -227,6 +243,7 @@ async function multiThreadDownload(url, destFile, opts = {}) {
   const fd = await fs.promises.open(destFile, 'w');
   let transferred = 0;
   let lastReport = 0;
+  const shared = { failed: null }; // 任一段失败 → 广播,其余段中止(见 fetchRangeSegment)
   const report = (force = false) => {
     if (!onProgress) return;
     const now = Date.now();
@@ -236,7 +253,7 @@ async function multiThreadDownload(url, destFile, opts = {}) {
   };
   const onBytes = (n2) => { transferred += n2; report(); };
   try {
-    await Promise.all(ranges.map(([s, e]) => fetchRangeSegment(finalUrl, s, e, fd, isCancelled, onBytes)));
+    await Promise.all(ranges.map(([s, e]) => fetchRangeSegment(finalUrl, s, e, fd, isCancelled, onBytes, shared)));
     report(true);
   } catch (err) {
     try { await fd.close(); } catch { /* ignore */ }

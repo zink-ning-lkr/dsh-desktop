@@ -250,13 +250,22 @@ function renderReport(diag, cls, ctx = {}) {
   return L.join('\n');
 }
 
-// 落盘报告,返回路径
+// 落盘报告,返回路径;保留最近 10 份,更早的清理(频繁报障时目录不能无限膨胀,文件名精确到秒,同一秒两次会互相覆盖)
 function writeReport(text, userData) {
   const dir = path.join(userData, 'error-reports');
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const file = path.join(dir, `dsh-error-${stamp}.txt`);
   fs.writeFileSync(file, text, 'utf8');
+  try {
+    const files = fs.readdirSync(dir)
+      .filter((f) => f.startsWith('dsh-error-') && f.endsWith('.txt'))
+      .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    for (const old of files.slice(10)) {
+      try { fs.unlinkSync(path.join(dir, old.f)); } catch { /* 删除失败不影响本次报告 */ }
+    }
+  } catch { /* 清理失败不影响报告 */ }
   return file;
 }
 

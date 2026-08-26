@@ -3,5 +3,5 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__dialog', {
   onShow: (cb) => ipcRenderer.on('dl:show', (_e, v) => cb(v)),
-  choose: (i) => ipcRenderer.send('dl:choose', i),
+  choose: (i, id) => ipcRenderer.send('dl:choose', i, id),
 });

@@ -39,7 +39,7 @@
   #xBtn svg { width: 12px; height: 12px; }
   .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; }
   .detail { font-size: 12px; color: #8b949e; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
-    max-height: 60px; min-height: 0; overflow-y: auto; }
+    max-height: 60px; min-height: 0; overflow-y: auto; user-select: text; }
   .bar { height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
   .fill {
     height: 100%; width: 0%; border-radius: 3px; position: relative;
@@ -76,7 +76,7 @@
   @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
   .rtitle { font-size: 15px; font-weight: 600; color: #e6edf3; text-align: center; }
   .rdetail { font-size: 12px; color: #8b949e; text-align: center; line-height: 1.5; max-height: 62px; min-height: 0; overflow-y: auto;
-    white-space: pre-wrap; word-break: break-all; }
+    white-space: pre-wrap; word-break: break-all; user-select: text; }
   .btns { flex: none; display: flex; gap: 8px; margin-top: 2px; }
   .btns button {
     border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 7px 18px; border-radius: 7px;
@@ -157,6 +157,11 @@
         el.addEventListener('click', () => S.action(b.id));
         btns.appendChild(el);
       });
+      // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮
+      window.setTimeout(() => {
+        const main = btns.querySelector('.primary') || btns.querySelector('button');
+        if (main && document.getElementById('result').style.display !== 'none') main.focus();
+      }, 30);
       return;
     }
     document.getElementById('detail').textContent = p.detail || '';

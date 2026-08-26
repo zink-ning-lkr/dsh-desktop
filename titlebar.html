@@ -107,6 +107,8 @@
     document.getElementById('maxBtn').title = max ? '还原' : '最大化';
   });
   t.onWorkspace((ws) => { document.getElementById('workspace').textContent = ws ? `— ${ws}` : ''; });
+  // 关闭按钮语义随设置联动:「最小化到托盘」提示用户窗口并未退出(否则点 ✕ 后窗口消失易误以为退出了)
+  t.onCloseTip((tip) => { if (tip) document.getElementById('closeBtn').title = tip; });
 </script>
 </body>
 </html>

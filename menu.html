@@ -41,7 +41,7 @@
   .item .ico { width: 16px; height: 16px; flex: none; color: #8b949e; display: flex; align-items: center; justify-content: center; transition: color .12s ease, transform .12s ease; }
   .item:hover .ico, .item.sel .ico { color: #79b8ff; }
   .item:hover .ico, .item.sel .ico { transform: translateX(1px); }
-  .item .lbl { flex: 1; }
+  .item .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .item .accel { color: #6e7681; font-size: 12px; padding-left: 18px; }
   .sep { height: 1px; background: #21262d; margin: 4px 8px; }
   .item.danger:hover, .item.danger.sel { background: #da363433; }
@@ -110,9 +110,13 @@
 
   document.addEventListener('keydown', (e) => {
     const rows = [...panel.querySelectorAll('.item')];
-    if (e.key === 'ArrowDown') { e.preventDefault(); select(Math.min(rows.length - 1, sel + 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); select(Math.max(0, sel - 1)); }
-    else if (e.key === 'Enter') { e.preventDefault(); rows[sel]?.click(); }
+    if (!rows.length) return;
+    // Win32 菜单惯例:方向键在首尾循环;未选中时 ↑ 落到最后一项
+    if (e.key === 'ArrowDown') { e.preventDefault(); select(sel >= rows.length - 1 ? 0 : sel + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); select(sel <= 0 ? rows.length - 1 : sel - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); select(0); }
+    else if (e.key === 'End') { e.preventDefault(); select(rows.length - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); rows[sel]?.click(); }
     else if (e.key === 'Escape') { e.preventDefault(); window.__menu.close(); }
   });
 

@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('__titlebar', {
   onMaximized: (cb) => ipcRenderer.on('tb:maximized', (_e, v) => cb(v)),
   onWorkspace: (cb) => ipcRenderer.on('tb:workspace', (_e, v) => cb(v)),
   onMenuState: (cb) => ipcRenderer.on('tb:menu-state', (_e, v) => cb(v)),
+  onCloseTip: (cb) => ipcRenderer.on('tb:close-tip', (_e, v) => cb(v)),
 });
