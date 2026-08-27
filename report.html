@@ -49,8 +49,12 @@
     white-space: pre-wrap; word-break: break-all; user-select: text;
   }
   .foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
+  /* 动作按钮(重试/退出等)必须是独立的 flex 行且不可压缩:
+     此前 #actions 是块级容器,报告路径占据空间后其内部 inline 按钮会换行堆叠成竖排,
+     与「进程退出」场景的横排布局不一致(几何实测 y=514 与 y=549 两行) */
+  #actions { display: flex; flex: none; align-items: center; gap: 8px; }
   .foot .spacer { flex: 1; }
-  .foot .note { font-size: 11px; color: #6e7681; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+  .foot .note { font-size: 11px; color: #8b949e; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
   .foot button {
     border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 8px 16px; border-radius: 7px;
     font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s; white-space: nowrap;
@@ -76,7 +80,7 @@
 <div class="win">
   <div class="head">
     <img class="logo" src="assets/whale-white.png" alt="">
-    <span class="t">DSH 错误报告 — 启动诊断</span>
+    <span class="t" id="headTitle">DSH 错误报告 — 启动诊断</span>
     <button class="x" id="xBtn" title="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="body">
@@ -108,6 +112,9 @@
   function render(p) {
     payload = p;
     document.title = p.name || 'DSH 错误报告';
+    // 可见头部文案跟随场景:进程退出时不应再显示「启动诊断」(原为静态文本)
+    const headEl = document.getElementById('headTitle');
+    if (headEl) headEl.textContent = p.phase === 'exit' ? 'DSH 错误报告 — 进程退出' : 'DSH 错误报告 — 启动诊断';
     const badge = p.badge || (p.phase === 'exit' ? '进程退出' : '启动失败');
     document.getElementById('badge').textContent = badge;
     document.getElementById('name').textContent = p.name || '';

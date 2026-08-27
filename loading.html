@@ -59,11 +59,11 @@
   .logtail {
     position: absolute; left: 16px; right: 16px; bottom: 14px;
     font: 11px/1.7 "Cascadia Mono", Consolas, monospace;
-    color: #484f58; text-align: center;
+    color: #8b949e; text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     opacity: .8;
   }
-  .hint { margin: 0; font-size: 12px; color: #6e7681; }
+  .hint { margin: 0; font-size: 12px; color: #8b949e; }
   @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i { animation: none; } }
 </style>
 </head>
@@ -72,7 +72,7 @@
   <div class="ring"></div>
   <p class="stage" id="stage">正在启动…</p>
   <div class="dots" id="dots"></div>
-  <p class="hint" id="hint">首次启动可能需要几十秒</p>
+  <p class="hint" id="hint">正在启动 dsh…(首次启动可能需要安装依赖,耗时较长)</p>
   <div class="logtail" id="logtail"></div>
 <script>
   const stage = document.getElementById('stage');
