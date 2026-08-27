@@ -1868,41 +1868,54 @@ function checkDshUpdate(manual) {
 }
 
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
-// 内存仪表(内存优化 P1-3):汇总 Electron 壳各视图/窗口渲染器内存,便于自查与验证优化效果。
-// 懒创建的把手/菜单只有在创建后才有进程;关闭后应为 null,本表能直观看到是否被及时销毁。
-async function showMemoryInfo() {
-  const views = [
-    ['dsh 页面', dshView?.webContents],
-    ['标题栏', titlebarView?.webContents],
-    ['下拉把手', revealTabView?.webContents],
-    ['菜单弹层', menuPopupView?.webContents],
-    ['状态窗', statusWin?.webContents],
-    ['对话框', dialogWin?.webContents],
-    ['加速窗', accelWin?.webContents],
-    ['报告窗', reportWin?.webContents],
-    ['托盘菜单', trayMenuWin?.webContents],
-  ];
-  const lines = [];
-  for (const [name, wc] of views) {
-    if (!wc || wc.isDestroyed()) continue;
-    try {
-      const m = await wc.getProcessMemoryInfo();
-      lines.push(`${name}: ${Math.round(m.workingSetSize / 1048576)}MB(私有 ${Math.round(m.privateBytes / 1048576)}MB)`);
-    } catch { /* 窗口销毁中 */ }
-  }
-  let shellTotal = 0;
-  let procCount = 0;
+// 内存仪表(内存优化 P1-3):同步汇总 Electron 壳进程内存(getAppMetrics 为同步快照,开销微秒级)。
+// 菜单项 label 直接带当前占用值,用户打开菜单即见,无需点进详情;详情对话框按"总数+状态+构成"简化。
+function shellMemMB() {
+  let total = 0;
   try {
     for (const m of app.getAppMetrics()) {
-      if (m.memory && m.memory.workingSetSize) { shellTotal += m.memory.workingSetSize; procCount++; }
+      if (m.memory && m.memory.workingSetSize) total += m.memory.workingSetSize;
     }
   } catch { /* 忽略 */ }
-  lines.unshift(`Electron 壳进程合计: ${Math.round(shellTotal / 1048576)}MB(${procCount} 个进程)`);
-  if (dshChild) lines.push(`dsh 本体进程(独立于壳): pid=${dshChild.pid}`);
+  return Math.round(total / 1048576);
+}
+function fmtMB(mb) {
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + 'GB' : mb + 'MB';
+}
+// 构成分类:页面 = dsh 内容渲染器;界面 = 标题栏/菜单/把手/辅助窗口;系统 = 壳其余(浏览器/GPU/网络等)
+async function uiMemBreakdown() {
+  const gather = async (wc) => {
+    if (!wc || wc.isDestroyed()) return 0;
+    try { return (await wc.getProcessMemoryInfo()).workingSetSize || 0; } catch { return 0; }
+  };
+  const page = await gather(dshView?.webContents);
+  let ui = await gather(titlebarView?.webContents);
+  for (const wc of [revealTabView?.webContents, menuPopupView?.webContents, statusWin?.webContents, dialogWin?.webContents, accelWin?.webContents, reportWin?.webContents, trayMenuWin?.webContents]) ui += await gather(wc);
+  return { page, ui, sys: Math.max(0, shellMemMB() * 1048576 - page - ui) };
+}
+async function showMemoryInfo() {
+  const shell = shellMemMB();
+  const { page, ui, sys } = await uiMemBreakdown();
+  // 状态评价:基于实测基线(壳约 878MB,其中页面约 323MB),分三档映射对话框图标颜色
+  const level = shell <= 900
+    ? { type: 'info', word: '正常' }
+    : shell <= 1300 ? { type: 'warning', word: '偏高' } : { type: 'error', word: '很高' };
+  const advice = level.word === '正常'
+    ? '运行正常,无需关注。'
+    : level.word === '偏高'
+      ? '内存偏高:可关闭闲置的辅助窗口,或稍后重启应用释放。'
+      : '内存占用很高:建议重启应用,或检查 dsh 页面是否有异常任务。';
   showDialog({
-    type: 'info', title: '内存占用', width: 500,
-    message: lines.join('\n'),
-    detail: '下拉把手与菜单弹层为按需创建,关闭后即销毁(表中为 null 表示已释放);辅助窗口闲置 60 秒后自动回收。',
+    type: level.type, title: '内存占用', width: 480,
+    message: `当前共占用 ${fmtMB(shell)}（${level.word}）`,
+    detail: [
+      '构成:',
+      `· 内嵌页面(dsh 内容): ${fmtMB(Math.round(page / 1048576))}`,
+      `· 应用界面(标题栏/弹窗): ${fmtMB(Math.round(ui / 1048576))}`,
+      `· 系统进程(浏览器/GPU/网络): ${fmtMB(Math.round(sys / 1048576))}`,
+      '',
+      `建议:${advice}`,
+    ].join('\n'),
     buttons: [{ label: '好的', primary: true }],
   });
 }
@@ -1920,7 +1933,7 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
-    { type: 'item', id: 'memory-info', label: '内存占用…' },
+    { type: 'item', id: 'memory-info', label: `内存占用 ${fmtMB(shellMemMB())}…` },
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? '检查更新…(便携版请手动下载)' : `检查更新…(当前 v${app.getVersion()})` },
     { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'item', id: 'download-accel', label: '下载加速设置…' },
