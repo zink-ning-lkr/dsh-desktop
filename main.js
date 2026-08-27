@@ -59,7 +59,7 @@ process.on('uncaughtException', (err) => {
   try { app.quit(); } catch { try { process.exit(1); } catch {} }
 });
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView, Notification, clipboard } = require('electron');
-const { spawn, execSync } = require('node:child_process');
+const { spawn, execSync, exec } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -1868,8 +1868,8 @@ function checkDshUpdate(manual) {
 }
 
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
-// 内存仪表(内存优化 P1-3):同步汇总 Electron 壳进程内存(getAppMetrics 为同步快照,开销微秒级)。
-// 菜单项 label 直接带当前占用值,用户打开菜单即见,无需点进详情;详情对话框按"总数+状态+构成"简化。
+// 内存仪表(内存优化 P1-3):总占用 = Electron 壳进程(getAppMetrics 同步快照) + dsh 本体进程树(异步枚举)。
+// 菜单项 label 读 10s 后台刷新的缓存值(零阻塞打开菜单);点开详情时精确枚举本体树一次。
 function shellMemMB() {
   let total = 0;
   try {
@@ -1882,40 +1882,73 @@ function shellMemMB() {
 function fmtMB(mb) {
   return mb >= 1024 ? (mb / 1024).toFixed(1) + 'GB' : mb + 'MB';
 }
-// 构成分类:页面 = dsh 内容渲染器;界面 = 标题栏/菜单/把手/辅助窗口;系统 = 壳其余(浏览器/GPU/网络等)
-async function uiMemBreakdown() {
-  const gather = async (wc) => {
-    if (!wc || wc.isDestroyed()) return 0;
-    try { return (await wc.getProcessMemoryInfo()).workingSetSize || 0; } catch { return 0; }
-  };
-  const page = await gather(dshView?.webContents);
-  let ui = await gather(titlebarView?.webContents);
-  for (const wc of [revealTabView?.webContents, menuPopupView?.webContents, statusWin?.webContents, dialogWin?.webContents, accelWin?.webContents, reportWin?.webContents, trayMenuWin?.webContents]) ui += await gather(wc);
-  return { page, ui, sys: Math.max(0, shellMemMB() * 1048576 - page - ui) };
+let cachedTotalMemMB = null; // 壳 + dsh 本体进程树 总内存缓存(后台 10s 刷新)
+
+// 枚举 dsh 本体进程树(web 主进程 + 插件子进程如 mcp-proxy)的 WorkingSetSize 之和。
+// 异步 exec(固定命令串,无注入面)+ try/catch:枚举失败返回 0,降级为只显示壳,不阻塞也不抛错。
+function dshTreeMemMB() {
+  return new Promise((resolve) => {
+    const root = dshChild && dshChild.pid;
+    if (!root) return resolve(0);
+    const cmd = 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize | ConvertTo-Json -Compress"';
+    exec(cmd, { windowsHide: true, timeout: 8000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return resolve(0);
+      try {
+        let rows = JSON.parse(stdout);
+        if (!Array.isArray(rows)) rows = [rows];
+        const children = new Map();
+        const mem = new Map();
+        for (const r of rows) {
+          if (!r || r.ProcessId == null) continue;
+          let set = children.get(r.ParentProcessId);
+          if (!set) { set = new Set(); children.set(r.ParentProcessId, set); }
+          set.add(r.ProcessId);
+          mem.set(r.ProcessId, r.WorkingSetSize || 0);
+        }
+        let total = 0;
+        const seen = new Set();
+        const stack = [root];
+        while (stack.length) {
+          const p = stack.pop();
+          if (seen.has(p)) continue;
+          seen.add(p);
+          total += mem.get(p) || 0;
+          const cs = children.get(p);
+          if (cs) for (const c of cs) stack.push(c);
+        }
+        resolve(total);
+      } catch { resolve(0); }
+    });
+  });
 }
+async function refreshTotalMemory() {
+  const tree = await dshTreeMemMB();
+  cachedTotalMemMB = shellMemMB() + Math.round(tree / 1048576);
+}
+
 async function showMemoryInfo() {
   const shell = shellMemMB();
-  const { page, ui, sys } = await uiMemBreakdown();
-  // 状态评价:基于实测基线(壳约 878MB,其中页面约 323MB),分三档映射对话框图标颜色
-  const level = shell <= 900
+  const tree = Math.round((await dshTreeMemMB()) / 1048576); // 点开详情时精确枚举本体进程树一次
+  const total = shell + tree;
+  // 状态评价:总内存(壳 + dsh 本体)分三档,映射对话框图标颜色;实测基线约 1.4GB
+  const level = total <= 1500
     ? { type: 'info', word: '正常' }
-    : shell <= 1300 ? { type: 'warning', word: '偏高' } : { type: 'error', word: '很高' };
+    : total <= 2200 ? { type: 'warning', word: '偏高' } : { type: 'error', word: '很高' };
   const advice = level.word === '正常'
     ? '运行正常,无需关注。'
     : level.word === '偏高'
       ? '内存偏高:可关闭闲置的辅助窗口,或稍后重启应用释放。'
       : '内存占用很高:建议重启应用,或检查 dsh 页面是否有异常任务。';
+  const detail = [
+    `· 桌面壳(界面与内容页面): ${fmtMB(shell)}`,
+    `· dsh 本体(服务与插件): ${fmtMB(tree)}`,
+  ];
+  if (!dshChild) detail.push('(提示:当前未运行 dsh 服务进程)');
+  detail.push('', `建议:${advice}`);
   showDialog({
-    type: level.type, title: '内存占用', width: 480,
-    message: `当前共占用 ${fmtMB(shell)}（${level.word}）`,
-    detail: [
-      '构成:',
-      `· 内嵌页面(dsh 内容): ${fmtMB(Math.round(page / 1048576))}`,
-      `· 应用界面(标题栏/弹窗): ${fmtMB(Math.round(ui / 1048576))}`,
-      `· 系统进程(浏览器/GPU/网络): ${fmtMB(Math.round(sys / 1048576))}`,
-      '',
-      `建议:${advice}`,
-    ].join('\n'),
+    type: level.type, title: '内存占用', width: 440,
+    message: `当前共占用 ${fmtMB(total)}（${level.word}）`,
+    detail: detail.join('\n'),
     buttons: [{ label: '好的', primary: true }],
   });
 }
@@ -1933,7 +1966,7 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
-    { type: 'item', id: 'memory-info', label: `内存占用 ${fmtMB(shellMemMB())}…` },
+    { type: 'item', id: 'memory-info', label: `内存占用 ${fmtMB(cachedTotalMemMB ?? shellMemMB())}…` },
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? '检查更新…(便携版请手动下载)' : `检查更新…(当前 v${app.getVersion()})` },
     { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'item', id: 'download-accel', label: '下载加速设置…' },
@@ -2440,6 +2473,9 @@ if (!gotLock) {
     createWindow();
     createTray();
     bootDsh();
+    // 内存仪表:首次刷新 + 每 10s 后台刷新(壳 + dsh 本体进程树),菜单 label 读缓存零阻塞
+    refreshTotalMemory();
+    setInterval(refreshTotalMemory, 10_000);
 
     // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
     setTimeout(() => { if (app.isPackaged) checkForUpdates(false); }, 6_000);
