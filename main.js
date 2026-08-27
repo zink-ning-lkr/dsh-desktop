@@ -347,7 +347,9 @@ function waitServerReady(url, shouldStop = () => false) {
 // dsh 页面从标题栏下方开始渲染,与窗口按钮物理隔离,永不重叠。
 // 标题栏可收起(滑动动画),收起后顶部中央出现下拉把手;F11 全屏时自动收起。
 const TITLEBAR_H = 30;
-const BAR_OVERLAP = 10; // 标题栏底部渐变透明区,覆盖到页面顶端,柔化两者边界
+// 注:标题栏刻意不向下多占重叠区——旧版 BAR_OVERLAP=10 让标题栏视图覆盖页面顶端 10px,
+// 而该区实际是不透明的(视图表面底色 + html 实色背景把渐变完全遮住),等于把 dsh 页面顶部
+// 裁掉一截,视觉突兀;主题跟随下栏底色与页面一致,栏底与页面顶边在 30px 处自然无缝
 const TITLE_BAR_DEFAULT = '#0d1117';
 let dshView = null;
 let titlebarView = null;
@@ -364,8 +366,8 @@ let menuQueued = null; // 菜单页未加载完成时排队的载荷(极快点�
 function layoutViews() {
   if (!mainWindow || !titlebarView || !dshView) return;
   const [w, h] = mainWindow.getContentSize();
-  // 展开时标题栏高度 = 逻辑栏高 + 底部渐变区(盖住页面顶端);收起时完全隐藏
-  titlebarView.setBounds({ x: 0, y: 0, width: w, height: currentBarH > 0 ? currentBarH + BAR_OVERLAP : 0 });
+  // 展开时标题栏高度 = 逻辑栏高,与页面完全不重叠;收起时完全隐藏
+  titlebarView.setBounds({ x: 0, y: 0, width: w, height: currentBarH });
   dshView.setBounds({ x: 0, y: currentBarH, width: w, height: Math.max(0, h - currentBarH) });
   // 把手默认隐藏,由 handlePoll 检测到鼠标靠近顶部中央时再浮现
   revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
@@ -429,34 +431,37 @@ function toggleTitlebar(visible, animated = true) {
   barVisible = visible;
   closeMenuPopup();
   if (visible) stopHandlePolling();
-  clearTimeout(barAnim);
+  clearInterval(barAnim);
   if (!animated) {
     currentBarH = visible ? TITLEBAR_H : 0;
     layoutViews();
     if (!visible) startHandlePolling();
     return;
   }
-  // 平滑滑动:240ms easeInOutCubic,自适应帧间隔(高刷显示器更顺滑)
+  // 平滑滑动:240ms easeInOutCubic,60fps 单定时器按时间戳插值。
+  // 原实现:120fps 链式 setTimeout,动画期间每一帧都对 dshView setBounds → 整个页面视图
+  // 逐帧重排重绘,8ms 帧预算被布局占满后逐帧漂移,表现为卡顿。
+  // 现在:固定 60fps 单 interval,无累积漂移;整数高度未变化时跳过布局(亚像素区间零开销);
+  // 结束精确落位,防取整误差残留。
   const from = currentBarH;
   const to = visible ? TITLEBAR_H : 0;
   const startedAt = Date.now();
+  const DURATION_MS = 240;
   const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-  const FRAME_MS = 1000 / 120;
-  let last = startedAt;
-  const step = () => {
-    const now = Date.now();
-    const t = Math.min(1, (now - startedAt) / 240);
-    currentBarH = Math.round(from + (to - from) * easeInOutCubic(t));
-    layoutViews();
+  barAnim = setInterval(() => {
+    const t = Math.min(1, (Date.now() - startedAt) / DURATION_MS);
+    const next = Math.round(from + (to - from) * easeInOutCubic(t));
+    if (next !== currentBarH) {
+      currentBarH = next;
+      layoutViews();
+    }
     if (t >= 1) {
+      if (currentBarH !== to) { currentBarH = to; layoutViews(); }
+      clearInterval(barAnim);
       barAnim = null;
       if (!visible) startHandlePolling();
-      return;
     }
-    barAnim = setTimeout(step, Math.max(0, FRAME_MS - (Date.now() - last)));
-    last = Date.now();
-  };
-  barAnim = setTimeout(step, 0);
+  }, 1000 / 60);
 }
 
 function toggleFullscreen() {
@@ -2048,7 +2053,7 @@ function createWindow() {
     }
   });
 
-  // 堆叠顺序(后加的上层):dsh 页面 → 标题栏(底部渐变区盖住页面顶端)→ 下拉把手 → 菜单弹层
+  // 堆叠顺序(后加的上层):dsh 页面 → 标题栏 → 下拉把手 → 菜单弹层
   mainWindow.contentView.addChildView(dshView);
   mainWindow.contentView.addChildView(titlebarView);
   mainWindow.contentView.addChildView(revealTabView);
@@ -2400,7 +2405,7 @@ if (!gotLock) {
       uiStep(() => toggleTitlebar(false), 8400, 'bar-collapse');
       uiStep(() => log(`UITEST bar-collapsed h=${currentBarH}(期望 0) → ${currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
       uiStep(() => toggleTitlebar(true), 9200, 'bar-expand');
-      uiStep(() => log(`UITEST bar-expanded h=${currentBarH}(期望 ${TITLEBAR_H},PASS=${currentBarH === TITLEBAR_H}) viewH=${titlebarView?.getBounds().height}(期望 ${TITLEBAR_H + BAR_OVERLAP},渐变区露出)`), 9700, 'bar-verify30');
+      uiStep(() => log(`UITEST bar-expanded h=${currentBarH}(期望 ${TITLEBAR_H},PASS=${currentBarH === TITLEBAR_H}) viewH=${titlebarView?.getBounds().height}(期望 ${TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
       // ③ 对话框复用(第二次调用必须仍能显示)
       uiStep(() => { showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 10200, 'd1');
       uiStep(() => showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(复用)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
