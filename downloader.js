@@ -20,31 +20,41 @@ const PROGRESS_INTERVAL_MS = 150;     // 进度回调节流
 
 // ---------- 解析最终 URL(GitHub Release 下载会 302 → release-assets CDN) ----------
 // 用 HEAD + 手动重定向拿到最终地址:后续 Range 分段/单连接都直连最终 CDN,
-// 避免重定向过程丢弃 Range 头导致分段全部失效。无重定向或失败返回 null。
+// 避免重定向过程丢弃 Range 头导致分段全部失效。
+// 递归跟随至多 MAX_HOPS 跳(单跳 CDN 常见;多跳链(如镜像再转发)到顶仍可用最后地址,
+// 若该地址还会跳,分段流程会因 Range 丢失自动回退单连接,单连接无 Range 不受影响)。
+const MAX_REDIRECT_HOPS = 5;
 function resolveFinalUrl(url, isCancelled) {
-  return new Promise((resolve) => {
-    let req = null;
-    let settled = false;
-    let timer = null;
-    const finish = (v) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { req && req.abort(); } catch { /* ignore */ }
-      resolve(v);
-    };
-    try {
-      req = net.request({ url, method: 'HEAD', redirect: 'manual' });
-    } catch {
-      return finish(null);
-    }
-    timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
-    const cancelled = () => isCancelled && isCancelled();
-    req.on('redirect', (_status, _method, redirectUrl) => (cancelled() ? finish(null) : finish(redirectUrl)));
-    req.on('response', () => finish(null));
-    req.on('error', () => finish(null));
-    req.end();
-  });
+  const probe = (u, depth) =>
+    new Promise((resolve) => {
+      if (depth > MAX_REDIRECT_HOPS) return resolve(u); // 到顶:返回当前已知最深地址
+      let req = null;
+      let settled = false;
+      let timer = null;
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { req && req.abort(); } catch { /* ignore */ }
+        resolve(v);
+      };
+      try {
+        req = net.request({ url: u, method: 'HEAD', redirect: 'manual' });
+      } catch {
+        return finish(null);
+      }
+      timer = setTimeout(() => finish(null), PROBE_TIMEOUT_MS);
+      const cancelled = () => isCancelled && isCancelled();
+      req.on('redirect', (_status, _method, redirectUrl) => {
+        if (cancelled()) return finish(null);
+        // 继续跟踪下一跳,最终拿到无重定向的地址;子链失败时回落当前跳转地址
+        probe(redirectUrl, depth + 1).then((finalUrl) => finish(finalUrl || redirectUrl));
+      });
+      req.on('response', () => finish(u)); // 无重定向:HEAD 直接响应,当前地址即最终地址
+      req.on('error', () => finish(null));
+      req.end();
+    });
+  return probe(url, 0);
 }
 
 // ---------- 探测:GET + "Range: bytes=0-0" ----------
@@ -125,7 +135,7 @@ function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes, shared) {
         return fail(res.statusCode === 200 ? new Error('服务器忽略 Range,回退单连接') : new Error(`分段下载 HTTP ${res.statusCode}`));
       }
       let pos = start;
-      let chain = Promise.resolve();
+      let pending = Promise.resolve(); // 已排队的写(串行化;跨段各自独立,同段内按序落盘)
       res.on('data', (chunk) => {
         if (settled) return;
         if (isCancelled && isCancelled()) return fail(new Error('已取消'));
@@ -133,13 +143,23 @@ function fetchRangeSegment(url, start, end, fd, isCancelled, onBytes, shared) {
         resetTimer();
         const writePos = pos;
         pos += chunk.length;
+        // 背压:写盘期间暂停接收网络流,写完当前 chunk 再继续。
+        // (与单连接路径的 pause/drain 同策略——原先的分段路径只把写操作挂进 promise 链,
+        // 慢盘 + 快网时数据事件不停触发,整段数据会被待写 chunk 顶在内存,峰值≈段大小×并发)
+        res.pause();
         const c = chunk;
-        chain = chain.then(
-          () => fd.write(c, 0, c.length, writePos).then(() => { onBytes && onBytes(c.length); }, fail),
-          () => {},
+        pending = pending.then(
+          () => fd.write(c, 0, c.length, writePos).then(
+            () => { onBytes && onBytes(c.length); if (!settled) res.resume(); },
+            (e) => fail(e),
+          ),
+          () => {}, // 前序写失败已由 fail 处理,本段直接跳过
         );
       });
-      res.on('end', () => chain.then(() => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } }, fail));
+      res.on('end', () => pending.then(
+        () => { if (!settled) { settled = true; clearTimeout(timer); resolve(); } },
+        (e) => fail(e),
+      ));
       res.on('error', (e) => fail(e));
       resetTimer();
     });
@@ -177,11 +197,19 @@ function singleStreamDownload(url, destFile, opts = {}) {
     req.on('response', (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) return fail(new Error(`下载 HTTP ${res.statusCode}`));
       total = Number(res.headers['content-length'] || 0) || total;
+      // 传输内容长度上限:服务器超发(声明 N 却持续推送)时及时中止,避免无限下载。
+      // 有 content-encoding(压缩传输)时响应体会被解压,解码后长度可超过原始 Content-Length,
+      // 此时不设上限,最终仍由 sha512 兜底完整性。
+      const gzipped = !!res.headers['content-encoding'];
       const ws = fs.createWriteStream(destFile);
       // 背压:快网 + 慢盘(机械盘/U 盘)时 ws.write 返回 false 说明内部缓冲已满,
       // 暂停读取网络流等 drain 再继续,避免内存随下载无限膨胀
       const onData = (chunk) => {
         if (isCancelled && isCancelled()) { ws.destroy(); return fail(new Error('已取消')); }
+        if (!gzipped && total && transferred + chunk.length > total) {
+          ws.destroy();
+          return fail(new Error(`下载内容超过声明大小(${transferred + chunk.length} > ${total})`));
+        }
         resetTimer();
         transferred += chunk.length;
         if (!ws.write(chunk)) {

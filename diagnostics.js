@@ -97,9 +97,9 @@ function collectDiagnostics(ctx = {}) {
       modulesOk: safe(() => {
         const nm = path.join(path.dirname(ctx.dshBin), '..', 'node_modules');
         if (!fs.existsSync(nm)) return false;
-        // 抽查几个关键依赖目录是否存在
+        // 抽查头几个依赖目录是否存在;scoped 包(@scope/name)直接按完整路径检查即可
         const deps = Object.keys((pkg && pkg.dependencies) || {}).slice(0, 8);
-        return deps.every((d) => fs.existsSync(path.join(nm, d)) || fs.existsSync(path.join(nm, '@' + d.replace('/', '/'))));
+        return deps.every((d) => fs.existsSync(path.join(nm, d)));
       }, '未知'),
     };
   }
@@ -154,7 +154,7 @@ function classifyError(err, ctx = {}) {
       ['退出其他正在运行的 dsh / DSH Desktop 窗口后再启动。',
         '若确认没有其他实例,可能是上次异常退出残留,重启电脑后重试。']);
   }
-  if (/EPERM|EACCES|EINVAL|EADDRINUSE/.test(msg)) {
+  if (/EPERM|EACCES|EINVAL/.test(msg)) {
     return mk('permission', '权限或占用问题',
       msg, [
         '以管理员身份重试,或检查端口是否被其他程序占用。',

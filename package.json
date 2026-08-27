@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DSH Desktop",
-  "version": "0.5.18",
+  "version": "0.5.19",
   "description": "DeepSeek Harness (dsh) 的桌面壳:后台启动 dsh web,窗口加载其 UI,数据与本体完全共享",
   "main": "main.js",
   "author": "zink-ning-lkr",
@@ -25,7 +25,7 @@
   "scripts": {
     "start": "electron .",
     "icon": "electron tools/rasterize-icon.js && powershell -NoProfile -ExecutionPolicy Bypass -File tools/resize-icons.ps1 && node tools/gen-icon.js",
-    "dist": "electron-builder --win"
+    "dist": "node tools/clean-dist.js && electron-builder --win"
   },
   "devDependencies": {
     "electron": "^39.0.0",

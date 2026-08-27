@@ -101,8 +101,12 @@ async function dshRegistryUrl() {
       log(`npm registry 非 https(${u.protocol}//…),改用官方 registry 检查 dsh 更新`);
       return fallback();
     }
-    u.pathname = '/@deepseek-ai/dsh/latest';
-    cachedDshRegistry = u.toString();
+    // 保留 registry 自身的子路径(自建源常挂在 /artifactory/api/npm/npm/ 等子目录):
+    // 用 origin+pathname 手工拼接,而非整体替换 u.pathname(后者会丢掉子路径导致 404
+    // 静默回退官方,镜像站用户得不到镜像加速)。registry 根以 / 结尾,直接追加包路径。
+    let base = u.origin + u.pathname;
+    if (!base.endsWith('/')) base += '/';
+    cachedDshRegistry = base + '@deepseek-ai/dsh/latest';
   } catch { return fallback(); }
   return cachedDshRegistry || fallback();
 }
@@ -1903,10 +1907,21 @@ ipcMain.on('m:close', (e) => {
   else closeMenuPopup(true);
 });
 
-// 标题栏底色跟随 dsh 页面实际背景色,视觉上与内容融为一体
+// 标题栏底色跟随 dsh 页面实际背景色,视觉上与内容融为一体。
+// dsh 页面可能动态切换主题(白天/夜间、用户改色):仅 did-finish-load 采样一次会在切换后失同步,
+// 故增加 ①页面导航钩子(did-navigate / did-navigate-in-page 覆盖整页跳转与 SPA 路由)②周期采样器
+// (窗口可见时每 3s 采样一次,托盘隐藏/退出时暂停)③同色短路采样相同颜色不再重复 IPC;
+// ④in-flight 互斥,慢页面下 executeJavaScript 超 3s 也不并发采样。
+let lastTitlebarTheme = null;      // 上次已下发的主题色(hex):相同则跳过
+let titlebarThemeInFlight = false; // 采样在途标志
 async function syncTitleBarTheme() {
+  if (titlebarThemeInFlight) return;
   const wc = dshView?.webContents;
   if (!wc || !titlebarView) return;
+  // 仅采样 dsh 页面本体:loadFile 的本地页(loading.html 固定深色)不采样,避免无意义覆盖
+  const cur = wc.getURL();
+  if (!cur || cur.startsWith('file:')) return;
+  titlebarThemeInFlight = true;
   try {
     const bg = await wc.executeJavaScript(
       'getComputedStyle(document.body).backgroundColor || getComputedStyle(document.documentElement).backgroundColor',
@@ -1916,10 +1931,12 @@ async function syncTitleBarTheme() {
     const [r, g, b] = [+m[1], +m[2], +m[3]];
     const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
     const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+    if (hex === lastTitlebarTheme) return; // 主题未变化:不重复 IPC/刷色
+    lastTitlebarTheme = hex;
     titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#9aa0a6' : '#5f6368' });
     // 视图表面底色跟随页面色:缩放/未绘制边缘露出的底色与页面一致,不突兀
     titlebarView.setBackgroundColor(hex);
-  } catch { /* 页面未就绪等,忽略 */ }
+  } catch { /* 页面未就绪等,忽略 */ } finally { titlebarThemeInFlight = false; }
 }
 
 function createWindow() {
@@ -1959,6 +1976,15 @@ function createWindow() {
     forceViewRelayout(); // 页面加载完成后再确认一次 surface 尺寸(首帧可能仍按旧 viewport 绘制)
     dshView?.webContents.focus();
   });
+  // 页面导航/SPA 路由变化后重新采样标题栏主题(整页跳转与前端路由都覆盖)
+  dshView.webContents.on('did-navigate', () => syncTitleBarTheme());
+  dshView.webContents.on('did-navigate-in-page', () => syncTitleBarTheme());
+  // 周期采样兜底动态主题切换(如 dsh 页面内白天/夜间切换):窗口可见时每 3s 采样一次,
+  // 同色短路(见 syncTitleBarTheme)保证无变化时零开销;托盘隐藏/退出时暂停
+  setInterval(() => {
+    if (!mainWindow || !mainWindow.isVisible() || quitting) return;
+    syncTitleBarTheme();
+  }, 3000);
   // dsh 页面里的外链(文档/仓库等)交给系统浏览器
   dshView.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
@@ -1987,9 +2013,13 @@ function createWindow() {
     e.preventDefault();
     if (/^https?:/.test(url)) shell.openExternal(url);
   });
-  // dsh 页面内元素全屏(HTML5 fullscreen,如视频/演示):收齐标题栏让内容占满,退出时恢复
+  // dsh 页面内元素全屏(HTML5 fullscreen,如视频/演示):收齐标题栏让内容占满,退出时恢复进入前状态。
+  // 关键:记录必须无条件执行——若用户已手动收起标题栏(barVisible=false)后页面才进全屏,
+  // 进入时不改任何状态,但退出时仍需按「进入前状态(false)」恢复,否则手收的标题栏会被强制弹回。
+  // (旧实现只在 barVisible 时记录,barBeforeHtmlFullscreen 残留 true,手动收起 + 页面全屏一进一出即触发)
   dshView.webContents.on('enter-html-full-screen', () => {
-    if (barVisible) { barBeforeHtmlFullscreen = barVisible; toggleTitlebar(false, false); }
+    barBeforeHtmlFullscreen = barVisible;
+    if (barVisible) toggleTitlebar(false, false);
   });
   dshView.webContents.on('leave-html-full-screen', () => toggleTitlebar(barBeforeHtmlFullscreen, false));
 
