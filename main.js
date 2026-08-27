@@ -71,11 +71,15 @@ const { multiThreadDownload, resolveDownloadUrl, hashFile, DEFAULT_SEGMENTS } = 
 const IS_WIN = process.platform === 'win32';
 // Windows 规范:固定 AppUserModelID,保证任务栏图标/分组/通知归属正确
 if (IS_WIN) app.setAppUserModelId('com.zinkning.dsh-desktop');
-// 后台/遮挡时不挂起 dsh 页面:避免对话正在工作时切走再切回触发重连/视图重建/滚动重置
+// 后台/遮挡时不挂起 dsh 页面:避免对话正在工作时切走再切回触发重连/视图重建/滚动重置。
+// 保活核心 = dshView 的 backgroundThrottling:false(per-view);全局开关保留与 Windows 遮挡
+// 判定强相关的两个;disable-background-timer-throttling 已明确被 per-view 覆盖(零风险),
+// 移除后辅助窗口/标题栏等后台 timer 恢复节流,省 CPU/电量(内存优化方案 P0-4)。
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// 本地磁盘/内存缓存限额:避免 userData 缓存无限增长(内存优化方案 P1-2)
+app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
 // 菜单弹层、右键菜单等原生 UI 跟随应用深色风格
 nativeTheme.themeSource = 'dark';
 const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
@@ -393,9 +397,31 @@ const HANDLE_W = 96, HANDLE_H = 26; // 把手本体尺寸(高 ≥24px 最小点�
 let handlePoll = null;
 let handleShown = false; // 迟滞状态记忆:已上浮后扩大判定区再收,避免边界抖动
 
+// 下拉把手懒创建(内存优化 P0-1):只有标题栏收起时才需要这个 96×26 的视图,
+// 展开时销毁——避免一个几乎空白的渲染进程常驻(典型 50-90MB)
+function ensureRevealTab() {
+  if (!mainWindow) return;
+  if (revealTabView && !revealTabView.webContents.isDestroyed()) return;
+  revealTabView = new WebContentsView({
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'titlebar-preload.js') },
+  });
+  revealTabView.setBackgroundColor('#00000000'); // 圆角处的透明角落不露白
+  revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html')).catch(() => {});
+  mainWindow.contentView.addChildView(revealTabView);
+  layoutViews();
+}
+function destroyRevealTab() {
+  if (!revealTabView) return;
+  const v = revealTabView;
+  revealTabView = null;
+  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
+  try { v.webContents.close(); } catch { /* 已销毁 */ }
+}
+
 function startHandlePolling() {
   if (handlePoll) return;
   handleShown = false;
+  ensureRevealTab(); // 收起态:确保把手视图存在(可见性由轮询中的 bounds 控制)
   handlePoll = setInterval(() => {
     if (!mainWindow || !mainWindow.isVisible() || !revealTabView || barVisible || currentBarH > 0) return; // 收托盘后台时不空转
     try {
@@ -423,7 +449,7 @@ function stopHandlePolling() {
   clearInterval(handlePoll);
   handlePoll = null;
   handleShown = false;
-  revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  destroyRevealTab(); // 展开/退出:销毁把手视图,释放渲染进程
 }
 
 function toggleTitlebar(visible, animated = true) {
@@ -537,7 +563,7 @@ function showTrayMenu() {
     x, y, width: W, height: H, useContentSize: true,
     frame: false, transparent: true, resizable: false, skipTaskbar: true,
     alwaysOnTop: true, show: false,
-    webPreferences: { sandbox: true, preload: path.join(__dirname, 'menu-preload.js') },
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'menu-preload.js') },
   });
   trayMenuWin.setMenuBarVisibility(false);
   trayMenuWin.loadFile(path.join(__dirname, 'menu.html')).then(() => {
@@ -623,7 +649,7 @@ function showStatus(p) {
     statusWin = new BrowserWindow({
       width: 410, height: 186, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: false, show: false,
-      webPreferences: { sandbox: true, preload: path.join(__dirname, 'status-preload.js') },
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'status-preload.js') },
     });
     statusWin.setMenuBarVisibility(false);
     // 与对话框/报告窗一致:在主窗口所在显示器居中(否则副屏用户会在主屏看到状态窗/进度窗)
@@ -771,9 +797,29 @@ function cancelStatusOp() {
 }
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
+// 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
+const AUX_IDLE_DESTROY_MS = 60_000;
 let dialogWin = null;
 let dialogQueued = null;
 let dialogCb = null;
+let dialogIdleTimer = null; // 对话框隐藏后的空闲回收定时器
+
+function scheduleDialogRecycle() {
+  clearTimeout(dialogIdleTimer);
+  dialogIdleTimer = setTimeout(() => {
+    dialogIdleTimer = null;
+    if (!dialogWin) return;
+    if (quitConfirmShown) return; // 退出确认框未决:不自动销毁(closed 会触发复位语义,不能误取消退出)
+    log('对话框闲置回收:销毁释放渲染进程');
+    dialogWin.destroy();
+    dialogWin = null;
+    dialogCb = null;
+  }, AUX_IDLE_DESTROY_MS);
+}
+function cancelDialogRecycle() {
+  clearTimeout(dialogIdleTimer);
+  dialogIdleTimer = null;
+}
 
 function centerOn(win, ref) {
   try {
@@ -811,6 +857,7 @@ function dialogHeightFor(o, width) {
 
 function flushDialog() {
   if (!dialogQueued || !dialogWin) return;
+  cancelDialogRecycle();
   const o = dialogQueued;
   dialogQueued = null;
   const w = o.width || 460;
@@ -829,12 +876,13 @@ function showDialog(opts, cb) {
     log(`退出确认未决,忽略对话框: ${opts.title || ''}`);
     return;
   }
+  cancelDialogRecycle(); // 正在使用:取消闲置回收
   dialogCb = cb || null;
   if (!dialogWin) {
     dialogWin = new BrowserWindow({
       width: 460, height: 220, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
-      webPreferences: { sandbox: true, preload: path.join(__dirname, 'dialog-preload.js') },
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'dialog-preload.js') },
     });
     dialogWin.setMenuBarVisibility(false);
     dialogWin.loadFile(path.join(__dirname, 'dialog.html')).catch(() => {});
@@ -844,6 +892,7 @@ function showDialog(opts, cb) {
     dialogWin.on('closed', () => {
       dialogWin = null;
       dialogCb = null;
+      cancelDialogRecycle();
       // 退出确认框被直接关掉(Alt+F4/父窗连带销毁等):按「取消」语义复位
       resetQuitConfirm();
     });
@@ -866,6 +915,7 @@ ipcMain.on('dl:choose', (e, i, id) => {
   const cb = dialogCb;
   dialogCb = null;
   dialogWin?.hide();
+  scheduleDialogRecycle(); // 隐藏即开始闲置计时(P0-3)
   if (cb) cb(i, id);
 });
 
@@ -874,6 +924,22 @@ const ACCEL_SEGMENTS_MIN = 2;
 const ACCEL_SEGMENTS_MAX = 16;
 let accelWin = null;
 let accelQueued = false; // 窗口仍在加载中(等待 did-finish-load 后展示)
+let accelIdleTimer = null; // 隐藏后的空闲回收定时器(内存优化 P0-3,与对话框同策略)
+
+function scheduleAccelRecycle() {
+  clearTimeout(accelIdleTimer);
+  accelIdleTimer = setTimeout(() => {
+    accelIdleTimer = null;
+    if (!accelWin) return;
+    log('加速设置窗闲置回收:销毁释放渲染进程');
+    accelWin.destroy();
+    accelWin = null;
+  }, AUX_IDLE_DESTROY_MS);
+}
+function cancelAccelRecycle() {
+  clearTimeout(accelIdleTimer);
+  accelIdleTimer = null;
+}
 
 // 从 config.json 读当前生效的设置(缺失时回落默认值)
 function accelSettingsFromConfig() {
@@ -892,6 +958,7 @@ function accelSettingsFromConfig() {
 
 function flushAccel() {
   if (!accelQueued || !accelWin) return;
+  cancelAccelRecycle();
   accelQueued = false;
   accelWin.webContents.send('acc:show', accelSettingsFromConfig());
   centerOn(accelWin, mainWindow);
@@ -900,16 +967,17 @@ function flushAccel() {
 }
 
 function showAccelSettings() {
+  cancelAccelRecycle(); // 正在使用:取消闲置回收
   if (!accelWin) {
     accelWin = new BrowserWindow({
       width: 520, height: 556, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
-      webPreferences: { sandbox: true, preload: path.join(__dirname, 'accel-preload.js') },
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'accel-preload.js') },
     });
     accelWin.setMenuBarVisibility(false);
     accelWin.loadFile(path.join(__dirname, 'accel.html')).catch(() => {});
     accelWin.webContents.once('did-finish-load', flushAccel);
-    accelWin.on('closed', () => { accelWin = null; });
+    accelWin.on('closed', () => { accelWin = null; cancelAccelRecycle(); });
     accelQueued = true;
     return;
   }
@@ -923,6 +991,7 @@ function showAccelSettings() {
 ipcMain.on('acc:close', (e) => {
   if (!trustedEvent(e)) return;
   accelWin?.hide();
+  scheduleAccelRecycle(); // 隐藏即开始闲置计时(P0-3)
 });
 
 ipcMain.on('acc:copy', (e, text) => {
@@ -1040,7 +1109,7 @@ function showReport(opts) {
     reportWin = new BrowserWindow({
       width: 760, height: 600, minWidth: 640, minHeight: 480, useContentSize: true,
       frame: false, resizable: true, show: false,
-      webPreferences: { sandbox: true, preload: path.join(__dirname, 'report-preload.js') },
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'report-preload.js') },
     });
     reportWin.setMenuBarVisibility(false);
     reportWin.loadFile(path.join(__dirname, 'report.html')).catch(() => {});
@@ -1799,6 +1868,45 @@ function checkDshUpdate(manual) {
 }
 
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
+// 内存仪表(内存优化 P1-3):汇总 Electron 壳各视图/窗口渲染器内存,便于自查与验证优化效果。
+// 懒创建的把手/菜单只有在创建后才有进程;关闭后应为 null,本表能直观看到是否被及时销毁。
+async function showMemoryInfo() {
+  const views = [
+    ['dsh 页面', dshView?.webContents],
+    ['标题栏', titlebarView?.webContents],
+    ['下拉把手', revealTabView?.webContents],
+    ['菜单弹层', menuPopupView?.webContents],
+    ['状态窗', statusWin?.webContents],
+    ['对话框', dialogWin?.webContents],
+    ['加速窗', accelWin?.webContents],
+    ['报告窗', reportWin?.webContents],
+    ['托盘菜单', trayMenuWin?.webContents],
+  ];
+  const lines = [];
+  for (const [name, wc] of views) {
+    if (!wc || wc.isDestroyed()) continue;
+    try {
+      const m = await wc.getProcessMemoryInfo();
+      lines.push(`${name}: ${Math.round(m.workingSetSize / 1048576)}MB(私有 ${Math.round(m.privateBytes / 1048576)}MB)`);
+    } catch { /* 窗口销毁中 */ }
+  }
+  let shellTotal = 0;
+  let procCount = 0;
+  try {
+    for (const m of app.getAppMetrics()) {
+      if (m.memory && m.memory.workingSetSize) { shellTotal += m.memory.workingSetSize; procCount++; }
+    }
+  } catch { /* 忽略 */ }
+  lines.unshift(`Electron 壳进程合计: ${Math.round(shellTotal / 1048576)}MB(${procCount} 个进程)`);
+  if (dshChild) lines.push(`dsh 本体进程(独立于壳): pid=${dshChild.pid}`);
+  showDialog({
+    type: 'info', title: '内存占用', width: 500,
+    message: lines.join('\n'),
+    detail: '下拉把手与菜单弹层为按需创建,关闭后即销毁(表中为 null 表示已释放);辅助窗口闲置 60 秒后自动回收。',
+    buttons: [{ label: '好的', primary: true }],
+  });
+}
+
 function menuItems() {
   return [
     { type: 'item', id: 'open-workspace', label: '打开工作目录…', accel: 'Ctrl+O' },
@@ -1812,6 +1920,7 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
+    { type: 'item', id: 'memory-info', label: '内存占用…' },
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? '检查更新…(便携版请手动下载)' : `检查更新…(当前 v${app.getVersion()})` },
     { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'item', id: 'download-accel', label: '下载加速设置…' },
@@ -1828,12 +1937,46 @@ function menuItems() {
 const MENU_W = 264;
 const MENU_MARGIN = 12; // 视图四周留白,容纳阴影
 
+// 菜单弹层懒创建(内存优化 P0-2):菜单平时不可见,点开才创建视图、关闭即销毁,
+// 避免一个 0 尺寸的渲染进程常驻(典型 50-90MB)
+function ensureMenuPopup() {
+  if (!mainWindow) return;
+  if (menuPopupView && !menuPopupView.webContents.isDestroyed()) return;
+  menuPopupView = new WebContentsView({
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'menu-preload.js') },
+  });
+  // View 默认底色是白色,会把面板周围透明边距(阴影区)衬成白圈,必须置为全透明
+  menuPopupView.setBackgroundColor('#00000000');
+  menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html')).catch(() => {});
+  // 点击菜单外任意处关闭;blur 时若面板仍展开,把键盘焦点还给 dsh 页面(否则菜单关闭后打字无响应)
+  menuPopupView.webContents.on('blur', () => { if (menuPopupView && menuPopupView.getBounds().width > 0) closeMenuPopup(true); });
+  // 菜单首帧加载完成时补发排队载荷(极快点击不会出现空白菜单)
+  menuPopupView.webContents.on('did-finish-load', () => {
+    if (menuQueued && menuPopupView && menuPopupView.getBounds().width > 0) {
+      const q = menuQueued;
+      menuQueued = null;
+      menuPopupView.webContents.send('m:show', q);
+    }
+  });
+  mainWindow.contentView.addChildView(menuPopupView); // 后 add 的位于最上层
+  layoutViews();
+}
+function destroyMenuPopup() {
+  if (!menuPopupView) return;
+  const v = menuPopupView;
+  menuPopupView = null;
+  menuQueued = null;
+  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
+  try { v.webContents.close(); } catch { /* 已销毁 */ }
+}
+
 function showMenuPopup() {
-  if (!mainWindow || !menuPopupView) return;
+  if (!mainWindow) return;
   closeTrayMenu(); // 与托盘菜单互斥
   const items = menuItems();
   let mh = 20; // 上下内边距
   for (const it of items) mh += it.type === 'sep' ? 9 : 30;
+  ensureMenuPopup();
   menuPopupView.setBounds({
     x: 0,
     y: currentBarH,
@@ -1850,7 +1993,10 @@ function showMenuPopup() {
 
 function closeMenuPopup(refocus = false) {
   menuClosedAt = Date.now();
-  menuPopupView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  if (menuPopupView) {
+    try { menuPopupView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    destroyMenuPopup();
+  }
   titlebarView?.webContents.send('tb:menu-state', false);
   if (refocus) dshView?.webContents.focus();
 }
@@ -1880,6 +2026,7 @@ ipcMain.on('m:action', (e, id) => {
     case 'devtools': dshView?.webContents.toggleDevTools(); break;
     case 'dsh-home': shell.openPath(path.join(os.homedir(), '.dsh')); break;
     case 'log': shell.showItemInFolder(logFile); break;
+    case 'memory-info': showMemoryInfo(); break;
     case 'check-update': checkForUpdates(true); break;
     case 'check-dsh-update': checkDshUpdate(true); break;
     case 'download-accel': {
@@ -1958,7 +2105,7 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
 
   titlebarView = new WebContentsView({
-    webPreferences: { sandbox: true, preload: path.join(__dirname, 'titlebar-preload.js') },
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'titlebar-preload.js') },
   });
   // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露出白边,必须显式设暗色
   titlebarView.setBackgroundColor(TITLE_BAR_DEFAULT);
@@ -2028,36 +2175,11 @@ function createWindow() {
   });
   dshView.webContents.on('leave-html-full-screen', () => toggleTitlebar(barBeforeHtmlFullscreen, false));
 
-  // 标题栏收起后顶部的下拉把手
-  revealTabView = new WebContentsView({
-    webPreferences: { sandbox: true, preload: path.join(__dirname, 'titlebar-preload.js') },
-  });
-  revealTabView.setBackgroundColor('#00000000'); // 圆角处的透明角落不露白
-  revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html')).catch(() => {});
-
-  // 自绘菜单弹层(最后添加,位于最上层)
-  menuPopupView = new WebContentsView({
-    webPreferences: { sandbox: true, preload: path.join(__dirname, 'menu-preload.js') },
-  });
-  // View 默认底色是白色,会把面板周围透明边距(阴影区)衬成白圈,必须置为全透明
-  menuPopupView.setBackgroundColor('#00000000');
-  menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html')).catch(() => {});
-  // 点击菜单外任意处关闭;blur 时若面板仍展开,把键盘焦点还给 dsh 页面(否则菜单关闭后打字无响应)
-  menuPopupView.webContents.on('blur', () => { if (menuPopupView && menuPopupView.getBounds().width > 0) closeMenuPopup(true); });
-  // 菜单首帧加载完成时补发排队载荷(极快点击不会出现空白菜单)
-  menuPopupView.webContents.on('did-finish-load', () => {
-    if (menuQueued && menuPopupView && menuPopupView.getBounds().width > 0) {
-      const q = menuQueued;
-      menuQueued = null;
-      menuPopupView.webContents.send('m:show', q);
-    }
-  });
-
-  // 堆叠顺序(后加的上层):dsh 页面 → 标题栏 → 下拉把手 → 菜单弹层
+  // 堆叠顺序(后加的上层):dsh 页面 → 标题栏。
+  // 下拉把手 / 菜单弹层为按需创建(见 ensureRevealTab / ensureMenuPopup,内存优化 P0-1/P0-2),
+  // 收起标题栏或打开菜单时才加入 contentView,关闭即销毁,不常驻渲染进程。
   mainWindow.contentView.addChildView(dshView);
   mainWindow.contentView.addChildView(titlebarView);
-  mainWindow.contentView.addChildView(revealTabView);
-  mainWindow.contentView.addChildView(menuPopupView);
   layoutViews();
   applyWindowState(); // 恢复上次的位置/大小/最大化(校验仍落在某屏幕工作区内)
   mainWindow.on('resize', layoutViews);
@@ -2417,7 +2539,7 @@ if (!gotLock) {
       uiStep(() => showMenuPopup(), 13000, 'menu-open');
       uiStep(() => log(`UITEST menu-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13300, 'menu-open-verify');
       uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13500, 'menu-toggle-close');
-      uiStep(() => log(`UITEST menu-toggled-close w=${menuPopupView?.getBounds().width}(期望 0) → ${menuPopupView?.getBounds().width === 0 ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
+      uiStep(() => log(`UITEST menu-toggled-close destroyed=${!menuPopupView}(期望 true,P0-2 关闭即销毁) → ${!menuPopupView ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
       uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13900, 'menu-toggle-open');
       uiStep(() => log(`UITEST menu-toggled-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14150, 'menu-reopen-verify');
       // ⑤' 对话框高度自适应:长 detail(下载加速设置)必须加高窗口,按钮不被推出
