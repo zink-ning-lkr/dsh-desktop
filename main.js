@@ -116,7 +116,7 @@ async function dshRegistryUrl() {
 }
 const DSH_INSTALL_IDLE_TIMEOUT_MS = 60_000; // npm 安装连续无输出多久后提示"可能卡住"(dsh 运行中文件被占用/网络慢)
 const DSH_INSTALL_TOTAL_TIMEOUT_MS = 15 * 60_000; // npm 安装总超时:强制终止并报错,避免无限"请稍后"
-const DSH_COMPATIBLE_MINOR = 1; // 桌面壳验证过的 dsh 兼容区间:0.1.x(README 记录验证至 0.1.0-rc.8);0.2+ 视为未验证,不自动推送
+const DSH_COMPATIBLE_MINOR = 1; // 桌面壳验证过的 dsh 兼容区间:0.1.x(README 记录验证至 0.1.0-rc.8 / 0.1.1-rc.2 / 0.1.2-alpha.2);0.2+ 视为未验证,不自动推送
 
 let mainWindow = null;
 let dshChild = null;
@@ -315,7 +315,10 @@ function startDsh(cwd, onOut) {
       buf += text;
       if (buf.length > 262144) buf = buf.slice(-262144); // 启动输出限量:防超长日志撑爆内存
       // dsh web 启动后打印形如 "dsh web: http://127.0.0.1:7123" 的地址行;
-      // 仅匹配 "dsh web:" 前缀行(旧的兜底分支会把任意回环地址输出误判为服务地址)
+      // 仅匹配 "dsh web:" 前缀行(旧的兜底分支会把任意回环地址输出误判为服务地址)。
+      // dsh 0.1.2-alpha.2 起地址会带一次性鉴权参数(如 http://127.0.0.1:PORT/?token=xxx,
+      // 浏览器会话 Cookie 认证):\S+ 会连同 token 一起捕获,必须原样保留——桌面内嵌浏览器
+      // 正是靠它换取会话 Cookie,截断成裸地址会得到 401 空白页
       const m = buf.match(/dsh web:\s*(https?:\/\/\S+)/);
       if (m) settle(resolve, { child, url: m[1] });
     };

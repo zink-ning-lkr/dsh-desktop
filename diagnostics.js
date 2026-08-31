@@ -154,6 +154,20 @@ function classifyError(err, ctx = {}) {
       ['退出其他正在运行的 dsh / DSH Desktop 窗口后再启动。',
         '若确认没有其他实例,可能是上次异常退出残留,重启电脑后重试。']);
   }
+  // dsh 升级后最常见的启动失败:第三方插件与新版不兼容(如 0.1.2-alpha.2 移除了
+  // @deepseek-ai/dsh-settings 的 settingsNamespace 导出),插件树加载失败,报错形如
+  // "dsh: plugin tree failed to load: ... The requested module '@deepseek-ai/dsh-settings'
+  // does not provide an export named 'settingsNamespace'"。必须排在「启动后即退出」之前,
+  // 否则用户只会看到泛泛的退出提示,无从知道是哪个插件出了问题
+  if (/plugin tree failed to load|failed to apply loader entry|failed to import loader entry|does not provide an export named|The requested module .* does not provide/i.test(msg)) {
+    return mk('plugin-incompat', 'dsh 第三方插件与当前版本不兼容',
+      'dsh 升级后,旧版第三方插件不再兼容,插件树加载失败导致 dsh web 启动即退出。',
+      ['先定位下方报错中的插件名(形如 dsh-better-sidebar / @xxx/dsh-xxx):它通常装在 ~/.dsh/profiles/web 下。',
+        '临时禁用:编辑 ~/.dsh/profiles/web/cordis.patch.yml,给该插件加 disabled: true。',
+        '或更新到兼容版本:dsh plugin --profile web add <插件名>@latest',
+        '或移除该插件:dsh plugin --profile web remove <插件名>',
+        '若为官方内置插件报错,可先回退 dsh:npm install -g @deepseek-ai/dsh@0.1.1-rc.2,等官方修复后再升级。']);
+  }
   if (/EPERM|EACCES|EINVAL/.test(msg)) {
     return mk('permission', '权限或占用问题',
       msg, [
