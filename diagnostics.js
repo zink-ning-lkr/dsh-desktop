@@ -31,12 +31,9 @@ function readJson(file) {
   }, null);
 }
 
-function hr(bytes) {
-  if (!Number.isFinite(bytes)) return '未知';
-  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
-  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
-  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return bytes + ' B';
+// 报告会被用户导出分享:dsh 服务地址带一次性 ?token= 鉴权参数,未消费前可换取会话,落盘前脱敏
+function redactToken(s) {
+  return String(s).replace(/([?&]token=)[^\s&]+/gi, '$1***');
 }
 
 function safeStr(v) {
@@ -110,7 +107,7 @@ function collectDiagnostics(ctx = {}) {
     args: ctx.args || null,
     elapsedMs: ctx.elapsedMs != null ? ctx.elapsedMs : null,
     exitCode: ctx.code != null ? ctx.code : null,
-    stdoutTail: (ctx.buf || '').slice(-4000) || '',
+    stdoutTail: redactToken((ctx.buf || '').slice(-4000)) || '',
   };
 
   // 日志
@@ -304,7 +301,6 @@ module.exports = {
   writeReport,
   buildReport,
   tailFile,
-  hr,
 };
 
 // 供主进程用:contexts 仅用于测试/调试时直接运行本文件

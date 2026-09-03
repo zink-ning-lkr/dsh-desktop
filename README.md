@@ -88,6 +88,7 @@ dsh-desktop/
 │                          #  托盘、菜单、窗口管理、双通道更新编排、退出清理与崩溃处理、日志轮转
 ├── downloader.js          # 多线程分段下载器(HEAD 重定向解析/Range 探测/并发分片/sha512 校验/背压,失败自动退化单连接)
 ├── diagnostics.js         # 错误诊断:收集运行时状态 → 归类(缺失 dsh/端口占用/权限等)→ 生成可导出报告(保留最近 10 份)
+├── uitest.js              # 自动化冒烟编排(SMOKE/DEMO/UITEST 三种模式,由环境变量触发,不参与生产路径)
 ├── titlebar.html + titlebar-preload.js    # 自绘标题栏:拖拽、窗口按钮、收起按钮、鲸鱼 logo、工作目录、主题跟随
 ├── menu.html + menu-preload.js            # 自绘深色菜单(主菜单/托盘菜单共用):图标/快捷键/勾选/全键盘导航
 ├── loading.html           # dsh 启动加载页:四阶段进度 + 实时日志尾巴

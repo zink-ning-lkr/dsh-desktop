@@ -138,11 +138,20 @@ function loadConfig() {
 }
 function saveConfig(cfg) {
   const file = configPath();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  // 原子写:先写临时文件再 rename,断电/崩溃中断时不会留下半写的 config.json(否则配置静默丢失)
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-  fs.renameSync(tmp, file);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 原子写:先写临时文件再 rename,断电/崩溃中断时不会留下半写的 config.json(否则配置静默丢失)
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    // Windows 上杀软/同步盘锁定目标文件时 rename 会偶发 EBUSY/EPERM:
+    // 记录日志并返回失败,不抛出(调用方分散在 close/before-quit 等生命周期钩子里,抛错会打断流程)
+    log(`config.json 写入失败: ${e.message}`);
+    try { fs.unlinkSync(file + '.tmp'); } catch { /* 残留临时文件下次覆盖 */ }
+    return false;
+  }
 }
 // 崩溃记录统一落 userData(打包后 __dirname 是只读 asar,写那里会静默失败)
 const crashFilePath = () => {
@@ -151,6 +160,12 @@ const crashFilePath = () => {
 
 // ---------- 日志(内存缓冲 + 定期批量刷盘,避免高频 stdout 把主进程卡在同步 IO 上) ----------
 const logFile = path.join(app.getPath('userData'), 'dsh-web.log');
+// dsh 0.1.2-alpha.2 起服务地址带一次性 ?token= 鉴权参数(换取会话 Cookie),未被消费前
+// 可用于劫持会话。日志文件与导出的错误报告会被用户分享,所有对外落盘的输出统一脱敏;
+// 内存中的 dshWebUrl/lastBootBuf 保持原样(加载页面/排障需要完整地址)
+function redactToken(s) {
+  return String(s).replace(/([?&]token=)[^\s&]+/gi, '$1***');
+}
 let logBuf = [];
 let logTimer = null;
 function flushLog() {
@@ -308,7 +323,7 @@ function startDsh(cwd, onOut) {
       const text = chunk.toString();
       lastBootBuf = (lastBootBuf + text).slice(-16000);
       if (text.trim()) {
-        log(`[dsh] ${text.trim()}`);
+        log(`[dsh] ${redactToken(text.trim())}`);
         const line = text.trim().split('\n').pop();
         if (onOut) onOut(line);
       }
@@ -834,13 +849,15 @@ function centerOn(win, ref) {
 
 // 对话框内容高度估算:按信息量与当前宽度粗算(全角按 2 单位宽),并 clamp 到工作区内。
 // 宁可略高:多余空间由 detail 滚动区吸收,不会遮住按钮。
-// 半角/标点按 1 单位,全角中文字符按 2 单位;每行容量 = 2 × 可容纳全角字符数。
+// 半角/标点按 1 单位,全角字符按 2 单位;每行容量 = 2 × 可容纳全角字符数。
 function dialogTextLines(s, cpl) {
   if (!s) return 0;
   let n = 0;
   for (const seg of String(s).split('\n')) {
     let w = 0;
-    for (const ch of seg) w += ch.charCodeAt(0) > 0x2e ? 2 : 1;
+    // 阈值取 CJK 部首区起点 U+2E80:ASCII/西文/数字按 1 计,CJK/全角按 2 计
+    // (旧阈值 0x2e 会把数字与英文字母也当全角计宽,纯英文内容对话框虚高一倍)
+    for (const ch of seg) w += ch.charCodeAt(0) > 0x2e80 ? 2 : 1;
     n += Math.max(1, Math.ceil(w / (cpl * 2)));
   }
   return n;
@@ -1019,7 +1036,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     const clamped = Math.max(ACCEL_SEGMENTS_MIN, Math.min(ACCEL_SEGMENTS_MAX, v));
     const cfg = loadConfig();
     cfg.downloadSegments = clamped;
-    saveConfig(cfg);
+    if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 分段数 → ${clamped}`);
     return { ok: true, value: clamped };
   }
@@ -1033,7 +1050,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     const cfg = loadConfig();
     if (raw) cfg.downloadMirror = raw;
     else delete cfg.downloadMirror;
-    saveConfig(cfg);
+    if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 镜像源 ${raw ? '→ ' + raw : '已清除'}`);
     return { ok: true, value: raw };
   }
@@ -1096,7 +1113,7 @@ function showReport(opts) {
   reportText = rep.text;
   reportPath = rep.filePath;
   reportLogFile = logFile;
-  const logPreview = String(ctx.buf || '').slice(-3000) || diagnostics.tailFile(logFile, 60) || '';
+  const logPreview = redactToken(String(ctx.buf || '').slice(-3000)) || diagnostics.tailFile(logFile, 60) || '';
   const payload = {
     phase: opts.phase,
     badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
@@ -1925,6 +1942,9 @@ function dshTreeMemMB() {
   });
 }
 async function refreshTotalMemory() {
+  // 主窗口隐藏(收进托盘)时跳过:内存数值只出现在主菜单 label,托盘后台常驻期不值得
+  // 每 10s 拉起一次 PowerShell 枚举全系统进程(单次数百 ms CPU);恢复可见后下一轮补刷
+  if (!mainWindow || !mainWindow.isVisible()) return;
   const tree = await dshTreeMemMB();
   cachedTotalMemMB = shellMemMB() + Math.round(tree / 1048576);
 }
@@ -2369,12 +2389,12 @@ async function bootDsh() {
         ],
       });
     });
-    log(`服务地址: ${url},等待 HTTP 就绪…`);
+    log(`服务地址: ${redactToken(url)},等待 HTTP 就绪…`);
     dshWebUrl = url;
     stage(2, '等待服务就绪…');
     const ready = await waitServerReady(url, () => seq !== bootSeq);
     if (!ready || quitting || seq !== bootSeq || !dshView) return;
-    log(`加载 ${url}`);
+    log(`加载 ${redactToken(url)}`);
     stage(3, '加载页面…');
     settledUrl = true;
     dshView.webContents.loadURL(url).catch(() => {}); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
@@ -2485,222 +2505,33 @@ if (!gotLock) {
     // 12 秒后静默检查 dsh 本体更新(错开桌面端更新检查,避免两个弹窗同时出现)
     setTimeout(() => checkDshUpdate(false), 12_000);
 
-    // 自动化冒烟:DSH_DESKTOP_SMOKE=1 自动退出;DSH_DESKTOP_DEMO=1 额外按阶段
-    // 切换标题栏/全屏状态并写出窗口屏幕坐标(DSH_DEMO_BOUNDS 指定 JSON 路径),
-    // 供外部脚本对真实窗口截屏验证
-    if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO) {
-      if (process.env.DSH_DESKTOP_DEMO) {
-        const demoShot = (name, win = mainWindow) => {
-          try {
-            const b = win.getBounds();
-            const d = screen.getDisplayMatching(b);
-            fs.writeFileSync(process.env.DSH_DEMO_BOUNDS, JSON.stringify({
-              name,
-              x: Math.round(b.x * d.scaleFactor),
-              y: Math.round(b.y * d.scaleFactor),
-              w: Math.round(b.width * d.scaleFactor),
-              h: Math.round(b.height * d.scaleFactor),
-            }));
-            log(`DEMO: 阶段 ${name}`);
-          } catch (e) { log(`DEMO: 坐标输出失败 ${e.message}`); }
-        };
-        setTimeout(() => demoShot('1-bar'), 9_000);
-        setTimeout(() => { showMenuPopup(); setTimeout(() => demoShot('2-menu'), 900); }, 10_500);
-        setTimeout(() => {
-          closeMenuPopup();
-          saveConfig({ ...loadConfig(), closeAction: 'tray' });
-          mainWindow?.close(); // 应被拦截:隐藏到托盘而非退出
-          setTimeout(() => {
-            log(`SMOKE: close 后窗口可见=${mainWindow?.isVisible()}(期望 false),进程仍存活`);
-            showTrayMenu(); // 此刻外部脚本已把鼠标移到托盘区,菜单在光标处弹出
-            setTimeout(() => {
-              if (trayMenuWin) demoShot('3-tray-menu', trayMenuWin);
-              closeTrayMenu();
-              showMainWindow();
-              setTimeout(() => {
-                log(`SMOKE: 托盘恢复后窗口可见=${mainWindow?.isVisible()}(期望 true)`);
-                app.quit();
-              }, 600);
-            }, 900);
-          }, 800);
-        }, 12_300);
-      } else {
-        setTimeout(() => { log('SMOKE: 自动退出'); app.quit(); }, 16_000);
-      }
+    // 自动化冒烟(uitest.js):SMOKE 窗口/托盘闭环自动退出;DEMO 额外按阶段写出窗口屏幕坐标
+    // (DSH_DEMO_BOUNDS 指定 JSON 路径)供外部截屏;UITEST 全量 UI 断言。
+    // 测试代码本体在 uitest.js,依赖以 getters 注入:statusWin/dialogWin 等会随时重建/置空,
+    // 直接传值会固化旧实例,getter 保证测试读到当前实例
+    if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO || process.env.DSH_DESKTOP_UITEST) {
+      const uitestDeps = {
+        app, screen, log,
+        TITLEBAR_H, MENU_W, MENU_MARGIN,
+        get mainWindow() { return mainWindow; },
+        get dshView() { return dshView; },
+        get titlebarView() { return titlebarView; },
+        get statusWin() { return statusWin; },
+        get dialogWin() { return dialogWin; },
+        get reportWin() { return reportWin; },
+        get accelWin() { return accelWin; },
+        get menuPopupView() { return menuPopupView; },
+        get trayMenuWin() { return trayMenuWin; },
+        get currentBarH() { return currentBarH; },
+        showStatus, showStatusResult, updateStatus, showDialog, showReport,
+        showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
+        toggleTitlebar, showAccelSettings, installDshUpdate,
+        configPath, loadConfig, saveConfig,
+      };
+      if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO) require('./uitest').runSmokeDemo(uitestDeps);
+      if (process.env.DSH_DESKTOP_UITEST) require('./uitest').runUitest(uitestDeps);
     }
 
-    // 自动 UI 冒烟:DSH_DESKTOP_UITEST=1 依次弹出 状态窗(检查→下载→结果)/ 对话框 / 错误报告窗,
-    // 抓取各窗口渲染器控制台报错与加载失败,随后自动退出(供回归验证)
-    if (process.env.DSH_DESKTOP_UITEST) {
-      const hookWin = (win, tag) => {
-        if (!win) return;
-        win.webContents.on('console-message', (e) => {
-          log(`UITEST ${tag} console(${e.level}): ${e.message}`);
-        });
-        win.webContents.on('did-fail-load', (_e, code, desc) => {
-          log(`UITEST ${tag} did-fail-load ${code}: ${desc}`);
-        });
-      };
-      const uiStep = (fn, delay, tag) => setTimeout(() => { try { fn(); log(`UITEST ${tag} ✓`); } catch (err) { log(`UITEST ${tag} ✗ 主进程异常: ${err.stack || err}`); } }, delay);
-      const readDom = (win, expr, tag) => win?.webContents.executeJavaScript(expr)
-        .then((v) => log(`UITEST dom ${tag} = "${v}"`))
-        .catch((e) => log(`UITEST dom ${tag} ✗ ${e.message}`));
-      // ① 状态窗翻页(本版修复点:窗口已打开时结果必须能送达)与取消语义
-      uiStep(() => { showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(statusWin, 'status'); }, 3500, 'status-show');
-      // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
-      //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
-      uiStep(() => {
-        try {
-          const b = dshView.getBounds();
-          dshView.webContents.executeJavaScript('({ w: window.innerWidth, h: window.innerHeight })')
-            .then((s) => {
-              const ok = !!s && Math.abs(s.w - b.width) <= 1 && Math.abs(s.h - b.height) <= 1;
-              log(`UITEST layout-fit view=${b.width}x${b.height} page=${s && s.w}x${s && s.h} → ${ok ? 'PASS' : 'FAIL'}`);
-            })
-            .catch((e) => log(`UITEST layout-fit ✗ ${e.message}`));
-        } catch (e) { log(`UITEST layout-fit ✗ ${e.stack || e}`); }
-      }, 3050, 'layout-fit');
-      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => {}), 4200, 'flip-result');
-      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'flip'), 4600);
-      uiStep(() => log(`UITEST h-result=${statusWin?.getContentSize()[1]}(期望 250,确定按钮可见)`), 4700, 'h-result-verify');
-      // 结果态 ✕ = 仅关闭
-      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 5000, 'result-x');
-      uiStep(() => log(`UITEST result-x win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 5300, 'result-x-verify');
-      // 活动态 ✕ = 取消并关闭
-      uiStep(() => showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }), 5800, 'check2');
-      uiStep(() => log(`UITEST h-activity=${statusWin?.getContentSize()[1]}(期望 186)`), 5950, 'h-activity-verify');
-      uiStep(() => { statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 6100, 'cancel-click');
-      uiStep(() => { const ok = !statusWin; log(`UITEST cancel2 win=${!!statusWin} → ${ok ? 'PASS' : 'FAIL'}`); }, 6400, 'cancel-verify');
-      // 下载 → 进度 → 结果
-      uiStep(() => showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }), 7000, 'dl-show');
-      uiStep(() => updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 7400, 'dl-progress');
-      uiStep(() => showStatusResult({ type: 'success', title: '更新就绪(下载完成)', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => log('UITEST install-click ✓')), 7800, 'dl-result');
-      // ② 标题栏动画:收起 → 240ms 后应收敛到 0,再展开 → 应回到 TITLEBAR_H
-      uiStep(() => toggleTitlebar(false), 8400, 'bar-collapse');
-      uiStep(() => log(`UITEST bar-collapsed h=${currentBarH}(期望 0) → ${currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
-      uiStep(() => toggleTitlebar(true), 9200, 'bar-expand');
-      uiStep(() => log(`UITEST bar-expanded h=${currentBarH}(期望 ${TITLEBAR_H},PASS=${currentBarH === TITLEBAR_H}) viewH=${titlebarView?.getBounds().height}(期望 ${TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
-      // ③ 对话框复用(第二次调用必须仍能显示)
-      uiStep(() => { showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(dialogWin, 'dialog'); }, 10200, 'd1');
-      uiStep(() => showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(复用)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
-      uiStep(() => readDom(dialogWin, 'document.getElementById("title").textContent', 'd2'), 11200);
-      // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
-      uiStep(() => showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
-      uiStep(() => readDom(reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
-      // ⑤ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
-      uiStep(() => showMenuPopup(), 13000, 'menu-open');
-      uiStep(() => log(`UITEST menu-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13300, 'menu-open-verify');
-      uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13500, 'menu-toggle-close');
-      uiStep(() => log(`UITEST menu-toggled-close destroyed=${!menuPopupView}(期望 true,P0-2 关闭即销毁) → ${!menuPopupView ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
-      uiStep(() => { titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13900, 'menu-toggle-open');
-      uiStep(() => log(`UITEST menu-toggled-open w=${menuPopupView?.getBounds().width}(期望 ${MENU_W + MENU_MARGIN * 2}) → ${menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14150, 'menu-reopen-verify');
-      // ⑤' 对话框高度自适应:长 detail(下载加速设置)必须加高窗口,按钮不被推出
-      uiStep(() => showDialog({
-        type: 'info', title: '下载加速设置', width: 540,
-        message: '桌面端更新已默认启用多线程分段下载;仍慢时可配置镜像源,或为 npm 切换国内镜像。',
-        detail: `【桌面端】在配置文件中加入镜像根目录(目录内需含 latest.yml 与安装包,文件名与 GitHub Release 资产一致):\n  "downloadMirror": "https://镜像根目录/",\n配置文件位置:\n  ${configPath()}\n\n【dsh 本体】执行下面命令改用国内 npm 镜像:\n  npm config set registry https://registry.npmmirror.com\n\n提示:镜像源不稳定时,下载会自动回退官方源,不影响更新。`,
-        buttons: [{ label: '好的', primary: true }],
-      }), 14300, 'accel-dialog');
-      uiStep(() => {
-        const s = dialogWin?.getContentSize();
-        const ok = !!s && s[0] === 540 && s[1] >= 260;
-        log(`UITEST accel-h=${s?.[1]}(期望 540 宽且高≥260,原 220 会遮按钮) → ${ok ? 'PASS' : 'FAIL'}`);
-      }, 14600, 'accel-size-verify');
-      uiStep(() => readDom(dialogWin, '(()=>{const r=document.querySelector("#foot button").getBoundingClientRect();return r.bottom<=innerHeight+1?`VISIBLE bottom=${Math.round(r.bottom)}/h=${innerHeight}`:`CLIPPED bottom=${Math.round(r.bottom)}/h=${innerHeight}`})()', 'accel-btn'), 14700);
-      uiStep(() => { dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 14900, 'accel-close');
-      // ⑥ dsh 本体安装(本版修复:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
-      //    成功路径:假 npm 输出两行后正常退出 0 → 应出现"dsh 更新完成"结果窗
-      fs.writeFileSync(path.join(app.getPath('userData'), 'fake-npm-ok.js'),
-        "process.stdout.write('fetching dsh metadata...\\n');setTimeout(()=>{process.stdout.write('added 1 package in 2s\\n');process.exit(0);},900);");
-      fs.writeFileSync(path.join(app.getPath('userData'), 'fake-npm-hang.js'),
-        "process.stdout.write('hanging...\\n');setInterval(()=>{},1000);");
-      uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(app.getPath('userData'), 'fake-npm-ok.js'); installDshUpdate('9.9.9'); hookWin(statusWin, 'status'); }, 15200, 'dsh-install-ok');
-      uiStep(() => readDom(statusWin, 'document.getElementById("title").textContent', 'install-title'), 15500);
-      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'install-result'), 16400);
-      uiStep(() => { statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 16600, 'install-later');
-      uiStep(() => log(`UITEST install-later win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 16800, 'install-later-verify');
-      //    超时护栏:假 npm 挂死不退出 → 总超时应强制终止并弹"dsh 更新失败"
-      uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(app.getPath('userData'), 'fake-npm-hang.js'); installDshUpdate('9.9.9'); }, 17600, 'dsh-install-hang');
-      uiStep(() => readDom(statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 22000);
-      uiStep(() => { statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 22150, 'install-okbtn');
-      uiStep(() => log(`UITEST install-timeout win=${!!statusWin}(期望 false) → ${!statusWin ? 'PASS' : 'FAIL'}`), 22300, 'install-okbtn-verify');
-      // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
-      //    验证分段并发下载、sha512 校验、镜像 URL 拼接
-      setTimeout(async () => {
-        const http = require('node:http');
-        const cr = require('node:crypto');
-        const payload = cr.randomBytes(2 * 1024 * 1024);
-        const expect = cr.createHash('sha512').update(payload).digest('base64');
-        const server = http.createServer((req, res) => {
-          const m = /bytes=(\d+)-(\d+)/.exec(req.headers.range || '');
-          if (m) {
-            const s = +m[1], e = Math.min(+m[2], payload.length - 1);
-            res.writeHead(206, { 'Content-Type': 'application/octet-stream', 'Content-Range': `bytes ${s}-${e}/${payload.length}`, 'Content-Length': String(e - s + 1) });
-            res.end(payload.subarray(s, e + 1));
-          } else {
-            res.writeHead(200, { 'Content-Length': String(payload.length) });
-            res.end(payload);
-          }
-        });
-        await new Promise((r) => server.listen(0, '127.0.0.1', r));
-        const port = server.address().port;
-        const dest = path.join(app.getPath('userData'), 'dl-test.bin');
-        try {
-          const dl = require('./downloader');
-          await dl.multiThreadDownload(`http://127.0.0.1:${port}/pkg.bin`, dest, { sha512: expect });
-          const got = await dl.hashFile(dest);
-          const mirrorUrl = dl.resolveDownloadUrl('https://github.com/x/y/releases/download/v1/a.exe', 'https://m.example.com/dir/');
-          log(`UITEST downloader-multi PASS=${got === expect} size=${payload.length} seg=${dl.DEFAULT_SEGMENTS} mirror=${mirrorUrl}`);
-        } catch (err) {
-          log(`UITEST downloader-multi ✗ ${err.stack || err}`);
-        } finally {
-          server.close();
-          try { fs.unlinkSync(dest); } catch { /* ignore */ }
-        }
-        // ⑧ 下载加速设置窗冒烟:打开 → 读当前默认 → 保存分段数/镜像源(含非法值校验) → 关闭
-        try {
-          showAccelSettings();
-          hookWin(accelWin, 'accel');
-          await new Promise((resolve) => accelWin.webContents.once('did-finish-load', resolve));
-          await new Promise((r) => setTimeout(r, 350)); // 等渲染层 A.get() 初始化表单
-          const before = await accelWin.webContents.executeJavaScript('window.__accel.get()');
-          const uiSeg = await accelWin.webContents.executeJavaScript('document.getElementById("segN").textContent');
-          const s1 = await accelWin.webContents.executeJavaScript('window.__accel.set("segments", 12)');
-          const cfg1 = loadConfig().downloadSegments;
-          const s2 = await accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "https://m.example.com/dir/")');
-          const cfg2 = loadConfig().downloadMirror;
-          const bad = await accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "not-a-url")');
-          const s3 = await accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "")');
-          const cfg3 = loadConfig().downloadMirror; // delete 后应为 undefined
-          const ok = before.segments === 6 && before.downloadMirror === '' && uiSeg === '6'
-            && s1.ok && s1.value === 12 && cfg1 === 12
-            && s2.ok && cfg2 === 'https://m.example.com/dir/'
-            && !bad.ok && s3.ok && cfg3 === undefined;
-          log(`UITEST accel-win ✓ UIseg=${uiSeg} → ${ok ? 'PASS' : 'FAIL'} (seg=${cfg1} mirror=${cfg2} bad=${!bad.ok} cleared=${cfg3 === undefined})`);
-          accelWin.close();
-        } catch (err) {
-          log(`UITEST accel-win ✗ ${err.stack || err}`);
-        }
-      }, 23200);
-      setTimeout(() => {
-        // 清理 UITEST 写入 userData 的假 npm 脚本
-        for (const f of ['fake-npm-ok.js', 'fake-npm-hang.js']) {
-          try { fs.unlinkSync(path.join(app.getPath('userData'), f)); } catch { /* 已不存在 */ }
-        }
-        // 恢复 UITEST 动过的加速设置(segments/mirror),保证测试可重复、不污染真实配置
-        try {
-          const cfg = loadConfig();
-          if (cfg.downloadSegments !== undefined || cfg.downloadMirror !== undefined) {
-            delete cfg.downloadSegments;
-            delete cfg.downloadMirror;
-            saveConfig(cfg);
-            log('UITEST: 已恢复加速设置默认值');
-          }
-        } catch (e) { log(`UITEST: 恢复配置失败 ${e.message}`); }
-        log('UITEST: 完成,自动退出');
-        app.quit();
-      }, 25000);
-    }
   });
 
   app.on('window-all-closed', () => app.quit());

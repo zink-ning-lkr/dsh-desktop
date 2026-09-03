@@ -257,7 +257,7 @@ async function multiThreadDownload(url, destFile, opts = {}) {
   const info = await probe(finalUrl, isCancelled);
   const total = info.size || 0;
   if (!info.range || total < MIN_SEGMENT_BYTES || segments <= 1) {
-    return await singleStreamDownload(finalUrl, destFile, { sha512, onProgress, isCancelled, total });
+    return await singleStreamDownload(finalUrl, destFile, { sha512, onProgress, isCancelled });
   }
   const n = Math.max(1, Math.min(segments, total));
   const part = Math.ceil(total / n);
