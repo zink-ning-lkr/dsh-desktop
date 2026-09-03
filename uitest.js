@@ -71,6 +71,35 @@ function runUitest(d) {
   const readDom = (win, expr, tag) => win?.webContents.executeJavaScript(expr)
     .then((v) => d.log(`UITEST dom ${tag} = "${v}"`))
     .catch((e) => d.log(`UITEST dom ${tag} ✗ ${e.message}`));
+  // ⓪ 模块面与纯逻辑断言(拆分回归锁):core 脱敏与配置回环 / dsh-process 定位与启动快照 /
+  //    updates semver 兼容判定 / diagnostics 归类顺序 / updates 初始状态面
+  uiStep(() => {
+    const core = require('./core');
+    const dshProc = require('./dsh-process');
+    const upd = require('./updates');
+    const diag = require('./diagnostics');
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    t('redact', core.redactToken('http://127.0.0.1:1/?token=xy&a=1') === 'http://127.0.0.1:1/?token=***&a=1');
+    t('redact-none', core.redactToken('http://127.0.0.1:1/') === 'http://127.0.0.1:1/');
+    const cfg0 = core.loadConfig();
+    t('cfg-save', core.saveConfig(cfg0) === true);
+    t('cfg-eq', JSON.stringify(core.loadConfig()) === JSON.stringify(cfg0));
+    t('dshbin', !!dshProc.findDshBinSafe());
+    const snap = dshProc.getBootSnapshot();
+    t('bootsnap', Array.isArray(snap.args) && snap.args.includes('web') && snap.args.includes('--host'));
+    t('cmp-newer', upd.compareVersion('0.1.2-alpha.2', '0.1.1-rc.2') > 0);
+    t('cmp-pre-rel', upd.compareVersion('0.1.1', '0.1.1-rc.2') > 0);
+    t('cmp-pre-pre', upd.compareVersion('0.1.1-rc.2', '0.1.1-rc.10') < 0);
+    t('cmp-bad', upd.compareVersion('garbage', '0.1.0') === 0);
+    t('parse-v', upd.parseVersion('v0.1.1-rc.2').nums.join('.') === '0.1.1');
+    t('cls-plugin', diag.classifyError(new Error("dsh: plugin tree failed to load: The requested module '@deepseek-ai/dsh-settings' does not provide an export named 'settingsNamespace'"), { phase: 'boot' }).kind === 'plugin-incompat');
+    t('cls-missing', diag.classifyError(new Error('找不到 dsh,请先全局安装:npm install -g @deepseek-ai/dsh'), { phase: 'boot' }).kind === 'missing-dsh');
+    t('cls-exit', diag.classifyError(null, { phase: 'exit', code: 1 }).kind === 'exit');
+    t('upd-state', upd.state && upd.state.dshStoppedForInstall === false && upd.state.downloadInProgress === false && upd.state.installEpoch === 0);
+    t('upd-face', ['checkForUpdates', 'checkDshUpdate', 'installDshUpdate', 'cancelStatusOp'].every((k) => typeof upd[k] === 'function'));
+    d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
+  }, 2400, 'unit');
   // ① 状态窗翻页(修复点:窗口已打开时结果必须能送达)与取消语义
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(d.statusWin, 'status'); }, 3500, 'status-show');
   // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。

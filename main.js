@@ -3,6 +3,13 @@
 // 原理:以用户选的工作目录为 cwd,后台启动本体 `dsh web`,从 stdout 解析实际地址,
 // 窗口加载该地址。不动 $DSH_HOME,因此会话/设置/插件/文件与本体 dsh 完全共享。
 //
+// 模块划分(本文件只负责窗口/视图/托盘/菜单/辅助窗与生命周期编排):
+//   core.js          配置读写/日志缓冲与轮转/token 脱敏/限时 execSync/共享常量
+//   dsh-process.js   dsh 子进程域:定位 node/dsh、启动与地址解析、等待就绪、进程树终止、启动快照
+//   updates.js       双通道更新(桌面端 GitHub Releases + dsh 本体 npm),共享状态集中在 state
+//   diagnostics.js   错误诊断(收集 → 归类 → 渲染 → 落盘)
+//   uitest.js        自动化冒烟编排(SMOKE/DEMO/UITEST,不参与生产路径)
+//
 // UI 层(除 dsh 页面本身):
 //   - titlebar.html  自绘标题栏(可收起)
 //   - loading.html   dsh 启动加载页(阶段提示 + 日志尾巴)
@@ -38,20 +45,25 @@ process.on('uncaughtException', (err) => {
   // 模块加载期只负责落盘 + 退出,其余逻辑依赖的绑定此时可能尚未初始化,先硬退出
   try { app; } catch { try { process.exit(1); } catch {} return; }
   try {
-    log(`未捕获异常: ${err.stack || err}`);
-    flushLog(); // 日志缓冲即时刷盘,保证崩溃现场进入 dsh-web.log
+    // 日志系统在 core.js;崩溃发生在该模块加载完成之前时 require 会重抛原始错误,逐段 try 兜底
+    const core = require('./core');
+    core.log(`未捕获异常: ${err.stack || err}`);
+    core.flushLog(); // 日志缓冲即时刷盘,保证崩溃现场进入 dsh-web.log
   } catch (e) { /* 日志系统未就绪,忽略 */ }
   // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径
   try {
     if (app.isReady()) {
+      const core = require('./core');
+      const dshProc = require('./dsh-process');
+      const snap = dshProc.getBootSnapshot();
       const ctx = {
-        app, screen, phase: 'uncaught', error: err, code: null, buf: lastBootBuf,
-        logFile, crashFile: crashFilePath(), configPath: configPath(),
-        workspace: loadConfig().workspace, userData: app.getPath('userData'),
-        dshBin: findDshBinSafe(), nodeExe: findNodeSafe(), args: lastBootArgs,
-        elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
+        app, screen, phase: 'uncaught', error: err, code: null, buf: snap.buf,
+        logFile: core.logFile, crashFile: core.crashFilePath(), configPath: core.configPath(),
+        workspace: core.loadConfig().workspace, userData: app.getPath('userData'),
+        dshBin: dshProc.findDshBinSafe(), nodeExe: dshProc.findNodeSafe(), args: snap.args,
+        elapsedMs: snap.startedAt ? Date.now() - snap.startedAt : null,
       };
-      try { diagnostics.buildReport(ctx); } catch (e2) { log(`诊断落盘失败: ${e2.message}`); }
+      try { diagnostics.buildReport(ctx); } catch (e2) { core.log(`诊断落盘失败: ${e2.message}`); }
     }
   } catch (e3) { /* 模块加载期 app 未就绪等,忽略 */ }
   // 记录完毕主动退出:走 app.quit() 会触发 before-quit 正常清理(dsh 子进程树 + 日志);
@@ -59,14 +71,20 @@ process.on('uncaughtException', (err) => {
   try { app.quit(); } catch { try { process.exit(1); } catch {} }
 });
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView, Notification, clipboard } = require('electron');
-const { spawn, execSync, exec } = require('node:child_process');
+const { exec } = require('node:child_process');
 const fs = require('node:fs');
-const http = require('node:http');
-const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 const diagnostics = require('./diagnostics');
-const { multiThreadDownload, resolveDownloadUrl, hashFile, DEFAULT_SEGMENTS } = require('./downloader');
+const { DEFAULT_SEGMENTS } = require('./downloader');
+// 拆分的三个主进程模块:core(配置/日志/脱敏)、dsh-process(dsh 子进程域)、
+// updates(双通道更新)。解构导出保持本文件既有调用点不变
+const core = require('./core');
+const { log, flushLog, logFile, loadConfig, saveConfig, configPath, crashFilePath, redactToken, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = core;
+const dshProc = require('./dsh-process');
+const { findDshBinSafe, findNodeSafe, dshVersion, killTree } = dshProc;
+const updates = require('./updates');
+const { IS_PORTABLE } = updates;
 
 const IS_WIN = process.platform === 'win32';
 // Windows 规范:固定 AppUserModelID,保证任务栏图标/分组/通知归属正确
@@ -82,41 +100,6 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
 // 菜单弹层、右键菜单等原生 UI 跟随应用深色风格
 nativeTheme.themeSource = 'dark';
-const DSH_PKG_SUB = path.join('@deepseek-ai', 'dsh', 'lib', 'bin.js');
-const BOOT_URL_TIMEOUT_MS = 90_000; // 等待 dsh 打印服务地址(升级/首启时 dsh 要用 pnpm 装 40+ 个包,放宽到 90s)
-const SERVER_READY_TIMEOUT_MS = 60_000; // 等待 HTTP 就绪(首次启动要装依赖,放宽)
-const CHECK_UPDATE_TIMEOUT_MS = 15_000; // 手动检查更新的超时时间(CN 网络直连 GitHub 常需 8s+,原 8s 过紧会误报)
-const CHECK_DSH_UPDATE_TIMEOUT_MS = 12_000; // 手动检查 dsh 本体更新的超时时间
-const LATE_RESULT_GRACE_MS = 25_000; // 超时提示后,迟到结果的宽限期:期间结果仍投递一次(避免「超时」误报而实际网络通了)
-const DSH_REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh/latest'; // 兜底:dsh 本体最新版本查询地址
-let cachedDshRegistry = null;
-// 跟随用户 npm registry 配置(镜像站用户直连 npmjs 往往不可达,与安装所用 registry 保持一致),
-// 把 registry 根路径指向 @deepseek-ai/dsh/latest;解析失败退回官方地址。
-// 注意:内部 execSync 同步执行但限时 5s(npm 正常时 <300ms,挂起时最多阻塞主线程 5s 后回退官方),
-// 结果缓存,仅首次检查 dsh 更新时执行;非 https 的 registry 不作为检查源(https.get 对 http 地址
-// 直接报错导致静默失败),回退官方
-async function dshRegistryUrl() {
-  if (cachedDshRegistry) return cachedDshRegistry;
-  const fallback = () => { cachedDshRegistry = DSH_REGISTRY_URL; return cachedDshRegistry; };
-  try {
-    const reg = firstLine('npm config get registry');
-    const u = new URL(reg || 'https://registry.npmjs.org/');
-    if (u.protocol !== 'https:') {
-      log(`npm registry 非 https(${u.protocol}//…),改用官方 registry 检查 dsh 更新`);
-      return fallback();
-    }
-    // 保留 registry 自身的子路径(自建源常挂在 /artifactory/api/npm/npm/ 等子目录):
-    // 用 origin+pathname 手工拼接,而非整体替换 u.pathname(后者会丢掉子路径导致 404
-    // 静默回退官方,镜像站用户得不到镜像加速)。registry 根以 / 结尾,直接追加包路径。
-    let base = u.origin + u.pathname;
-    if (!base.endsWith('/')) base += '/';
-    cachedDshRegistry = base + '@deepseek-ai/dsh/latest';
-  } catch { return fallback(); }
-  return cachedDshRegistry || fallback();
-}
-const DSH_INSTALL_IDLE_TIMEOUT_MS = 60_000; // npm 安装连续无输出多久后提示"可能卡住"(dsh 运行中文件被占用/网络慢)
-const DSH_INSTALL_TOTAL_TIMEOUT_MS = 15 * 60_000; // npm 安装总超时:强制终止并报错,避免无限"请稍后"
-const DSH_COMPATIBLE_MINOR = 1; // 桌面壳验证过的 dsh 兼容区间:0.1.x(README 记录验证至 0.1.0-rc.8 / 0.1.1-rc.2 / 0.1.2-alpha.2);0.2+ 视为未验证,不自动推送
 
 let mainWindow = null;
 let dshChild = null;
@@ -127,243 +110,7 @@ let quitConfirmShown = false; // 退出确认对话框是否已弹出(防 before
 let forceQuit = false;        // 用户在确认框中确认退出:跳过再次确认
 let quitCleanup = null;       // 退出时的进程树清理 Promise(重入 before-quit 时等待同一同步点)
 let dshWebUrl = null; // 当前 dsh web 服务地址(供"在浏览器中打开"使用)
-let lastBootBuf = '';   // 最近一次启动的 stdout/stderr 缓冲尾部(供错误报告)
-let lastBootArgs = null; // 最近一次启动的 spawn 参数
-let lastBootStart = null; // 最近一次启动的时刻
-
-// ---------- 配置(记住上次的工作目录) ----------
-const configPath = () => path.join(app.getPath('userData'), 'config.json');
-function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; }
-}
-function saveConfig(cfg) {
-  const file = configPath();
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    // 原子写:先写临时文件再 rename,断电/崩溃中断时不会留下半写的 config.json(否则配置静默丢失)
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-    fs.renameSync(tmp, file);
-    return true;
-  } catch (e) {
-    // Windows 上杀软/同步盘锁定目标文件时 rename 会偶发 EBUSY/EPERM:
-    // 记录日志并返回失败,不抛出(调用方分散在 close/before-quit 等生命周期钩子里,抛错会打断流程)
-    log(`config.json 写入失败: ${e.message}`);
-    try { fs.unlinkSync(file + '.tmp'); } catch { /* 残留临时文件下次覆盖 */ }
-    return false;
-  }
-}
-// 崩溃记录统一落 userData(打包后 __dirname 是只读 asar,写那里会静默失败)
-const crashFilePath = () => {
-  try { return path.join(app.getPath('userData'), 'CRASH.txt'); } catch { return path.join(__dirname, 'CRASH.txt'); }
-};
-
-// ---------- 日志(内存缓冲 + 定期批量刷盘,避免高频 stdout 把主进程卡在同步 IO 上) ----------
-const logFile = path.join(app.getPath('userData'), 'dsh-web.log');
-// dsh 0.1.2-alpha.2 起服务地址带一次性 ?token= 鉴权参数(换取会话 Cookie),未被消费前
-// 可用于劫持会话。日志文件与导出的错误报告会被用户分享,所有对外落盘的输出统一脱敏;
-// 内存中的 dshWebUrl/lastBootBuf 保持原样(加载页面/排障需要完整地址)
-function redactToken(s) {
-  return String(s).replace(/([?&]token=)[^\s&]+/gi, '$1***');
-}
-let logBuf = [];
-let logTimer = null;
-function flushLog() {
-  if (!logBuf.length) return;
-  const data = logBuf.join('');
-  logBuf = [];
-  try {
-    rotateLogIfNeeded();
-    fs.appendFileSync(logFile, data);
-  } catch (e) {
-    try { fs.appendFileSync(crashFilePath(), `log失败: ${e.message}\n`); } catch { /* 彻底失败 */ }
-  }
-}
-function log(line) {
-  const s = String(line);
-  logBuf.push(`[${new Date().toISOString()}] ${s.length > 2000 ? s.slice(0, 2000) + '…' : s}\n`);
-  if (!logTimer) logTimer = setInterval(flushLog, 500);
-}
-
-// ---------- 日志轮转:单文件超过上限时归档为 .old 并重开,防长期运行无限膨胀 ----------
-const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5MB
-function rotateLogIfNeeded() {
-  try {
-    const st = fs.statSync(logFile);
-    if (st.size > LOG_MAX_BYTES) {
-      const old = logFile + '.old';
-      try { fs.unlinkSync(old); } catch { /* 无旧档 */ }
-      fs.renameSync(logFile, old);
-      logBuf.unshift(`[${new Date().toISOString()}] 日志已轮转(旧档: ${old})\n`);
-    }
-  } catch { /* 日志文件尚不存在,无需轮转 */ }
-}
-
-// ---------- 定位 node 与 dsh(不经过 dsh.cmd 转发,便于管理进程树);成功后缓存避免重复 execSync ----------
-let cachedDshBin = null;
-let cachedNode = null;
-function firstLine(cmd) {
-  // 统一 5s 超时:冷启动 npm/where 需 1-3s,挂起时不能无限冻结主进程
-  try { return execSync(cmd, { windowsHide: true, timeout: 5000 }).toString().split('\n')[0].trim(); } catch { return ''; }
-}
-function findDshBin() {
-  if (cachedDshBin && fs.existsSync(cachedDshBin)) return cachedDshBin;
-  const candidates = [];
-  if (IS_WIN && process.env.APPDATA) {
-    candidates.push(path.join(process.env.APPDATA, 'npm', 'node_modules', DSH_PKG_SUB));
-  }
-  const npmRoot = firstLine('npm root -g');
-  if (npmRoot) candidates.push(path.join(npmRoot, DSH_PKG_SUB));
-  const dshOnPath = firstLine(IS_WIN ? 'where dsh' : 'which dsh');
-  if (dshOnPath) candidates.push(path.join(path.dirname(dshOnPath), 'node_modules', DSH_PKG_SUB));
-  for (const c of candidates) {
-    if (c && fs.existsSync(c)) {
-      cachedDshBin = c;
-      return c;
-    }
-  }
-  throw new Error('找不到 dsh,请先全局安装:npm install -g @deepseek-ai/dsh');
-}
-function findDshBinSafe() { try { return findDshBin(); } catch { return null; } }
-function findNode() {
-  if (cachedNode) return cachedNode;
-  const node = firstLine(IS_WIN ? 'where node' : 'which node');
-  if (node && nodeUsable(node)) {
-    cachedNode = { exe: node, env: process.env };
-    return cachedNode;
-  }
-  // PATH 里的 node 缺失或不可用(损坏/过旧/权限异常):回退 Electron 内置 node,
-  // 否则 dsh 起不来而壳看起来正常,排障指向性差
-  if (node) log(`系统 node 不可用("${node}" -v 失败),回退 Electron 内置 node`);
-  // 兜底:让 Electron 二进制以纯 Node 模式运行
-  cachedNode = { exe: process.execPath, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
-  return cachedNode;
-}
-// 验证 node 可执行且能输出版本号(5s 超时防悬挂)
-function nodeUsable(exe) {
-  try { return execSync(`"${exe}" -v`, { windowsHide: true, timeout: 5000 }).toString().trim().length > 0; } catch { return false; }
-}
-function findNodeSafe() { try { return findNode().exe; } catch { return null; } }
-
-// ---------- 进程管理 ----------
-function killTree(child) {
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    if (IS_WIN) {
-      // dsh web 会派生自己的子进程,必须整树终止;
-      // taskkill 启动失败(如进程已消失)也要完成清理流程,error 不得泄漏到 uncaughtException
-      const p = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-      p.on('error', () => resolve());
-      p.on('close', () => resolve());
-    } else {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch { /* 已退出 */ } }
-      resolve();
-    }
-  });
-}
-
-// 读取已定位 dsh 包的版本号(写入启动日志,便于跨版本排查兼容问题);
-// 带 10s 缓存:打开菜单/检查更新时不必反复读盘;安装完成后调用 dshVersion(true) 强制刷新
-let cachedDshVersion = null;
-let cachedDshVersionAt = 0;
-function dshVersion(force = false) {
-  if (!force && cachedDshVersion && Date.now() - cachedDshVersionAt < 10_000) return cachedDshVersion;
-  try {
-    const v = JSON.parse(fs.readFileSync(path.join(path.dirname(findDshBin()), '..', 'package.json'), 'utf8')).version;
-    cachedDshVersion = v;
-    cachedDshVersionAt = Date.now();
-    return v;
-  } catch { return '未知'; }
-}
-
-function startDsh(cwd, onOut) {
-  const bin = findDshBin();
-  const node = findNode();
-  const args = [bin, 'web', '--host', '127.0.0.1', '--port', String(loadConfig().port ?? 0)];
-  // dsh 0.1.0-rc.8 起默认自动打开系统浏览器;桌面壳已内嵌 UI,默认加 --no-open 抑制,由菜单"自动打开浏览器"控制
-  if (!loadConfig().openBrowser) args.push('--no-open');
-  lastBootArgs = args;
-  lastBootStart = Date.now();
-  lastBootBuf = '';
-  log(`dsh 版本: ${dshVersion()}`);
-  log(`启动 dsh web: "${node.exe}" ${args.map((a) => `"${a}"`).join(' ')} (cwd=${cwd})`);
-  // cwd 失效(工作目录被删/可移动磁盘拔出)时 spawn 会同步抛错,wrap 后走 boot 失败报告流
-  const child = (() => {
-    try {
-      return spawn(node.exe, args, {
-        cwd,
-        env: node.env,
-        windowsHide: true,
-        detached: !IS_WIN,
-      });
-    } catch (e) { throw new Error(`无法启动 dsh 进程: ${e.message}`); }
-  })();
-  dshChild = child; // 立即登记:启动窗口期内退出应用时,before-quit 也能杀掉它,避免孤儿进程
-
-  return new Promise((resolve, reject) => {
-    let buf = '';
-    let settled = false;
-    const onError = (e) => settle(reject, new Error(`无法启动 dsh 进程: ${e.message}`));
-    const settle = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.off('exit', onExit);
-      child.off('error', onError);
-      // 启动完成:detach 启动期监听(地址解析/回显/逐行日志),只保留轻量尾部缓冲供退出报告;
-      // 运行期输出不再对 256KB 缓冲反复跑正则,也不再把 dsh 的运行日志刷进启动日志
-      const keepTail = (chunk) => { lastBootBuf = (lastBootBuf + chunk.toString()).slice(-16000); };
-      child.stdout.removeListener('data', onData);
-      child.stderr.removeListener('data', onData);
-      child.stdout.on('data', keepTail);
-      child.stderr.on('data', keepTail);
-      fn(value);
-    };
-    const onData = (chunk) => {
-      const text = chunk.toString();
-      lastBootBuf = (lastBootBuf + text).slice(-16000);
-      if (text.trim()) {
-        log(`[dsh] ${redactToken(text.trim())}`);
-        const line = text.trim().split('\n').pop();
-        if (onOut) onOut(line);
-      }
-      buf += text;
-      if (buf.length > 262144) buf = buf.slice(-262144); // 启动输出限量:防超长日志撑爆内存
-      // dsh web 启动后打印形如 "dsh web: http://127.0.0.1:7123" 的地址行;
-      // 仅匹配 "dsh web:" 前缀行(旧的兜底分支会把任意回环地址输出误判为服务地址)。
-      // dsh 0.1.2-alpha.2 起地址会带一次性鉴权参数(如 http://127.0.0.1:PORT/?token=xxx,
-      // 浏览器会话 Cookie 认证):\S+ 会连同 token 一起捕获,必须原样保留——桌面内嵌浏览器
-      // 正是靠它换取会话 Cookie,截断成裸地址会得到 401 空白页
-      const m = buf.match(/dsh web:\s*(https?:\/\/\S+)/);
-      if (m) settle(resolve, { child, url: m[1] });
-    };
-    const onExit = (code) => settle(reject, new Error(`dsh web 启动后即退出 (code=${code})\n${buf.slice(-2000)}`));
-    const timer = setTimeout(() => settle(reject, new Error(`等待 dsh web 输出服务地址超时(${BOOT_URL_TIMEOUT_MS / 1000}s)\n${buf.slice(-2000)}`)), BOOT_URL_TIMEOUT_MS);
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    child.once('exit', onExit);
-    child.once('error', onError); // node 在 findNode 与 spawn 之间被删/被杀软拦截等:转为启动失败报告,而非 uncaughtException 闪退
-  });
-}
-
-// 返回 true=就绪;false=被取消(重启/退出),调用方应静默放弃本轮
-function waitServerReady(url, shouldStop = () => false) {
-  const startedAt = Date.now();
-  return new Promise((resolve, reject) => {
-    const tryOnce = () => {
-      if (shouldStop() || quitting) return resolve(false);
-      const req = http.get(url, (res) => { res.resume(); resolve(true); }); // 任何 HTTP 状态都说明服务已监听
-      req.setTimeout(3000, () => req.destroy(new Error('socket 超时'))); // 连接挂起时及时销毁并重试,防无效连接堆积
-      req.on('error', retry);
-    };
-    const retry = () => {
-      if (shouldStop() || quitting) return resolve(false);
-      if (Date.now() - startedAt > SERVER_READY_TIMEOUT_MS) return reject(new Error(`dsh web 服务 ${SERVER_READY_TIMEOUT_MS / 1000}s 内未就绪`));
-      setTimeout(tryOnce, 400);
-    };
-    tryOnce();
-  });
-}
+// 最近一次启动的 stdout 尾/参数/时刻由 dsh-process 的 getBootSnapshot() 提供(错误报告与崩溃诊断用)
 
 // ---------- 窗口:无边框主窗 + 自绘标题栏(上) + dsh 内容(下) ----------
 // dsh 页面从标题栏下方开始渲染,与窗口按钮物理隔离,永不重叠。
@@ -655,7 +402,7 @@ function resetQuitConfirm() {
   cleaned = false;
   log('退出确认中止,取消退出');
   // 确认框挂着期间安装可能已完成:finish 因 quitting 早退跳过了服务恢复,取消后必须把 dsh 拉回来
-  if (!dshStoppedForInstall && !dshChild && !dshInstallChild) {
+  if (!updates.state.dshStoppedForInstall && !dshChild && !updates.state.dshInstallChild) {
     log('拉取 dsh 服务(安装已结束)');
     bootDsh();
   }
@@ -727,8 +474,8 @@ function statusNotify(title, body) {
 // 另一更新流的活动窗(下载/安装)正占用状态窗时,本次结果不覆盖它:
 // 覆盖会顶掉进度与取消入口,用户可能点中错位的按钮(与来源无关,主动/被动结果都受保护)
 function otherFlowActive(origin) {
-  if (origin === 'desktop') return !!(dshInstallChild || dshStoppedForInstall);
-  if (origin === 'dsh') return !!downloadInProgress;
+  if (origin === 'desktop') return !!(updates.state.dshInstallChild || updates.state.dshStoppedForInstall);
+  if (origin === 'dsh') return !!updates.state.downloadInProgress;
   return false;
 }
 
@@ -741,7 +488,7 @@ function showStatusResult(p, onAction, nonIntrusive) {
     log(`跳过结果弹窗(另一更新流活动窗占用): ${p.title}`);
     return;
   }
-  if (nonIntrusive && (downloadInProgress || dshInstallChild || dshStoppedForInstall || statusPayload?.mode === 'result' || statusPayload?.mode === 'check')) {
+  if (nonIntrusive && (updates.state.downloadInProgress || updates.state.dshInstallChild || updates.state.dshStoppedForInstall || statusPayload?.mode === 'result' || statusPayload?.mode === 'check')) {
     log(`跳过被动结果弹窗(更新流程进行中): ${p.title}`);
     return;
   }
@@ -779,40 +526,8 @@ ipcMain.on('st:action', (e, id) => {
 // ✕ 按钮语义 = 取消当前操作并关闭窗口(检查/下载/安装);「后台」按钮才是最小化
 ipcMain.on('st:cancel', (e) => {
   if (!trustedEvent(e)) return;
-  cancelStatusOp();
+  updates.cancelStatusOp(); // 取消逻辑本体在 updates.js(清计时器/忽略迟到结果/中止下载与 npm 安装)
 });
-// 取消当前状态窗对应操作:清计时器、忽略迟到结果、中止下载/停止 npm 安装、关闭窗口
-function cancelStatusOp() {
-  log('用户取消当前操作(状态窗关闭)');
-  statusOpCancelled = true;
-  // 取消语义按当前状态窗所属流收窄:取消桌面检查不得误吞在途的 dsh 自动检查结果(唯一一次自动通知),反之亦然
-  const origin = statusPayload && statusPayload.__origin;
-  if (origin !== 'dsh') {
-    if (updateCheckTimer) finishUpdateCheckTimer();
-    manualCheckDropped = true;     // 忽略迟到的桌面端检查结果(取消语义:一律丢弃)
-  }
-  if (origin !== 'desktop') {
-    if (dshCheckTimer) finishDshCheckTimer();
-    dshManualCheckDropped = true;  // 忽略迟到的 dsh 本体检查结果
-  }
-  if (downloadInProgress) desktopDownloadCanceled = true; // 正在下载:迟到结果不再弹窗
-  if (downloadToken) { downloadToken.cancel(); downloadToken = null; } // 中止桌面端下载传输
-  downloadInProgress = false;
-  updateDownloaded = false;
-  pendingVersion = null;
-  if (dshInstallChild) {
-    installCancelled = true;
-    const c = dshInstallChild;
-    dshInstallChild = null;
-    killTree(c);
-  }
-  // 安装 dsh 本体期间服务已被暂停:取消后立即恢复,避免应用失去 dsh 服务
-  if (dshStoppedForInstall) {
-    dshStoppedForInstall = false;
-    if (!quitting) bootDsh();
-  }
-  closeStatus();
-}
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
 // 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
@@ -940,8 +655,7 @@ ipcMain.on('dl:choose', (e, i, id) => {
 });
 
 // ---------- 下载加速设置窗(可视化表单:分段数 / 镜像源,改动即时写入 config.json) ----------
-const ACCEL_SEGMENTS_MIN = 2;
-const ACCEL_SEGMENTS_MAX = 16;
+// 分段数取值区间在 core.js(与 updates.js 的加速下载共用同一份契约)
 let accelWin = null;
 let accelQueued = false; // 窗口仍在加载中(等待 did-finish-load 后展示)
 let accelIdleTimer = null; // 隐藏后的空闲回收定时器(内存优化 P0-3,与对话框同策略)
@@ -972,7 +686,7 @@ function accelSettingsFromConfig() {
     downloadMirror: typeof cfg.downloadMirror === 'string' ? cfg.downloadMirror : '',
     cfgPath: configPath(), // 底部提示"改动保存到哪"
     // 有更新下载进行中:accel 窗显示提示条(新设置只对下次下载生效)
-    downloadActive: !!(downloadInProgress || (statusPayload && statusPayload.mode === 'download')),
+    downloadActive: !!(updates.state.downloadInProgress || (statusPayload && statusPayload.mode === 'download')),
   };
 }
 
@@ -1083,12 +797,13 @@ function closeReportWindow() {
 // opts: { phase:'boot'|'exit', error, code, buf, actions:[{id,label,style}] }
 function showReport(opts) {
   closeStatus();
+  const bootSnap = dshProc.getBootSnapshot(); // 最近一次启动的 stdout 尾/参数/时刻(dsh-process 维护)
   const ctx = {
     app, screen,
     phase: opts.phase,
     error: opts.error || null,
     code: opts.code != null ? opts.code : null,
-    buf: opts.buf || lastBootBuf,
+    buf: opts.buf || bootSnap.buf,
     logFile,
     crashFile: crashFilePath(),
     configPath: configPath(),
@@ -1096,8 +811,8 @@ function showReport(opts) {
     userData: app.getPath('userData'),
     dshBin: findDshBinSafe(),
     nodeExe: findNodeSafe(),
-    args: lastBootArgs,
-    elapsedMs: lastBootStart ? Date.now() - lastBootStart : null,
+    args: bootSnap.args,
+    elapsedMs: bootSnap.startedAt ? Date.now() - bootSnap.startedAt : null,
   };
   const rep = (() => {
     try { return diagnostics.buildReport(ctx); }
@@ -1181,711 +896,6 @@ ipcMain.on('rp:action', (e, id) => {
   if (id === 'quit') app.quit();
   else if (id === 'retry' || id === 'restart') bootDsh();
 });
-
-// ---------- 应用更新(对接 GitHub Releases,electron-updater) ----------
-const { autoUpdater, CancellationToken } = require('electron-updater');
-autoUpdater.autoDownload = false;        // 由用户确认后再下载
-autoUpdater.autoInstallOnAppQuit = false; // 用户选"稍后"即本次跳过,下次启动检查时再提示
-// 便携版由 electron-builder 注入 PORTABLE_EXECUTABLE_DIR:自更新会走 NsisUpdater 把用户"转正"成
-// 安装版(下载 Setup.exe 并安装),与便携预期不符,故禁用桌面端自动更新,引导手动下载
-const IS_PORTABLE = !!process.env.PORTABLE_EXECUTABLE_DIR;
-const UPDATE_CHECK_MAX_MS = 60_000; // 检查请求在途超过该时长 → 看门狗日志(自动检查无超时,只告警不弹窗)
-
-let manualCheck = false;
-let manualCheckTimedOutAt = 0; // 手动检查超时时刻(0=未超时);迟到结果在宽限期(LATE_RESULT_GRACE_MS)内仍投递
-let manualCheckDropped = false; // 用户已取消手动检查:丢弃一切迟到结果
-let updateCheckTimer = null;
-let updateCheckInFlight = false; // 是否有检查请求在途(网络挂起时用于看门狗告警)
-let pendingVersion = null; // 桌面端已发现/已下载的新版本号(仅供桌面端流程;dsh 本体更新不写此变量)
-let updateDownloaded = false;
-let downloadInProgress = false; // 处于下载阶段(错误信息区分"检查失败/下载失败")
-let desktopDownloadCanceled = false; // 用户已取消桌面端下载:迟到结果不得再弹窗
-let downloadToken = null; // 当前桌面端下载的取消令牌(✕ 取消时中止网络传输)
-let statusOpCancelled = false;  // 用户已取消当前状态窗操作(忽略迟到结果)
-
-// 超时提示后,迟到结果在宽限期内仍投递一次(网络慢但通了,不应误报「超时」);
-// 用户主动取消(dropped)则一律丢弃
-function lateResultAllowed(at, dropped) {
-  return !dropped && (!at || Date.now() - at <= LATE_RESULT_GRACE_MS);
-}
-
-function finishUpdateCheckTimer() {
-  clearTimeout(updateCheckTimer);
-  updateCheckTimer = null;
-}
-
-// ---------- 桌面端更新加速下载(多线程分段,失败回退官方) ----------
-// electron-updater 的下载缓存按 sha512 校验复用(pending/update-info.json + 安装包):
-// 我们先用自己的多线程下载器把安装包抓到缓存目录并写好校验信息,
-// 随后官方 downloadUpdate() 会命中缓存、瞬间触发 update-downloaded —— 全程复用官方安装流程。
-function updaterCachePendingDir() {
-  // updaterCacheDirName 由 electron-builder 写入打包后的 resources/app-update.yml
-  try {
-    const yml = fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8');
-    const m = /^\s*updaterCacheDirName:\s*['"]?([^'"\s#]+)/m.exec(yml);
-    if (m && m[1]) {
-      const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-      return path.join(base, m[1], 'pending');
-    }
-  } catch { /* 未打包/配置缺失,回退官方下载 */ }
-  return null;
-}
-
-// 「立即重启安装」守卫:dsh 本体 npm 安装进行中时,重启会经 before-quit 强杀 npm 进程,
-// 全局包可能写一半损坏;必须警告用户先等安装完成
-function quitAndInstallGuarded() {
-  if (dshInstallChild || dshStoppedForInstall) {
-    log('阻止立即重启安装:dsh 本体 npm 安装进行中');
-    showDialog({
-      type: 'warning', title: '暂不能重启安装',
-      message: 'dsh 本体的 npm 安装尚未结束,立即重启会中断安装,可能导致 dsh 本体损坏。',
-      detail: '请等待 dsh 安装完成(安装流程会自动重启 dsh 服务)后,再点击「立即重启安装」。',
-      buttons: [{ label: '好的', primary: true }],
-    });
-    return;
-  }
-  autoUpdater.quitAndInstall(true, true);
-}
-
-// 返回 true=加速下载完成且已写入官方缓存;false=本次回退官方下载(镜像失败/不支持分段等)
-// token:本轮下载的取消令牌——必须用入参固定:取消时 cancelStatusOp 会把全局 downloadToken 置空,
-// 若闭包读全局变量将永远拿不到 isCancelled,✕ 取消将中止不了传输
-async function acceleratedDownload(info, token) {
-  const fileInfo = (info && info.files && info.files[0]) || null;
-  const pendingDir = updaterCachePendingDir();
-  let fileName = null;
-  try { fileName = path.basename(new URL(fileInfo && fileInfo.url).pathname); } catch { /* ignore */ }
-  if (!fileInfo || !fileInfo.url || !fileInfo.sha512 || !pendingDir || !fileName) {
-    log('加速下载不可用(文件信息或缓存目录缺失),直接走官方下载');
-    return false;
-  }
-  // 镜像源(config.json 可选,默认关闭):目录形态,与 GenericProvider 一致(含同名 latest.yml 与安装包)
-  const mirror = loadConfig().downloadMirror;
-  const url = mirror ? resolveDownloadUrl(fileInfo.url, mirror) : fileInfo.url;
-  if (url !== fileInfo.url) log(`加速下载使用镜像源: ${url}`);
-  // 分段数(config.json 可选,默认 6;由"下载加速设置"窗口调整)
-  const segCfg = loadConfig().downloadSegments;
-  const segments = Math.max(ACCEL_SEGMENTS_MIN, Math.min(ACCEL_SEGMENTS_MAX, Math.round(Number(segCfg) || DEFAULT_SEGMENTS)));
-  const tempFile = path.join(pendingDir, `temp-${fileName}`);
-  const finalFile = path.join(pendingDir, fileName);
-  const updateInfoPath = path.join(pendingDir, 'update-info.json');
-  // 复用上次已下载完成的安装包:electron-updater 的缓存命中 = update-info.json 的
-  // {fileName, sha512} 与实际文件哈希一致。「稍后」跳过安装后重启再点更新,不应白下整包
-  try {
-    const cached = JSON.parse(fs.readFileSync(updateInfoPath, 'utf8'));
-    if (cached.fileName === fileName && cached.sha512 === fileInfo.sha512 && fs.existsSync(finalFile)) {
-      const h = await hashFile(finalFile);
-      if (h === fileInfo.sha512) {
-        log(`加速下载:命中上次缓存 ${finalFile},跳过下载`);
-        return true;
-      }
-      log('加速下载:缓存文件哈希不匹配,重新下载');
-    }
-  } catch { /* 无缓存或信息损坏,走正常下载 */ }
-  const speedFrom = Date.now();
-  try {
-    await fs.promises.mkdir(pendingDir, { recursive: true });
-    await fs.promises.rm(tempFile, { force: true }).catch(() => {});
-    await multiThreadDownload(url, tempFile, {
-      segments,
-      sha512: fileInfo.sha512,
-      onProgress: (p) => {
-        if (!statusWin || statusPayload?.mode !== 'download') return;
-        const dt = Math.max(1, Date.now() - speedFrom);
-        const speed = (p.transferred / dt) * 1000;
-        updateStatus({
-          mode: 'download', progress: p.percent,
-          pct: p.percent.toFixed(1) + '%',
-          size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB · ${(speed / 1048576).toFixed(1)} MB/s`,
-        });
-      },
-      isCancelled: () => !!(token && token.isCancelled) || quitting,
-    });
-    if (quitting || (token && token.isCancelled)) throw new Error('已取消'); // 下载完成后、落盘前补一次取消检查
-    // 与 electron-updater 缓存约定保持一致:文件名 = 官方 URL 的 basename,sha512 = latest.yml 的 sha512
-    await fs.promises.rename(tempFile, finalFile);
-    await fs.promises.writeFile(updateInfoPath, JSON.stringify({ fileName, sha512: fileInfo.sha512 }));
-    log(`加速下载完成: ${url} → ${finalFile}`);
-    return true;
-  } catch (e) {
-    // 只清理本次下载的临时文件:既有有效缓存(上次「稍后」留存)保留——
-    // 官方 downloadUpdate 会按 update-info.json 命中它并跳过整包重下
-    await fs.promises.rm(tempFile, { force: true }).catch(() => {});
-    log(`加速下载失败(将回退官方下载): ${e.message}`);
-    return false;
-  }
-}
-
-// 统一下载入口:先加速,再走官方 downloadUpdate()。
-// 加速成功 → 命中缓存立即 update-downloaded;加速失败 → 官方单连接下载进度照常。
-async function runUpdateDownload(info) {
-  const token = downloadToken; // 固定本轮令牌(取消会在 cancelStatusOp 里把全局变量置空)
-  await acceleratedDownload(info, token);
-  if (quitting || desktopDownloadCanceled) return;
-  await autoUpdater.downloadUpdate(token);
-}
-
-autoUpdater.on('update-available', (info) => {
-  if (!lateResultAllowed(manualCheckTimedOutAt, manualCheckDropped)) return; // 已取消/超时过宽限期:丢弃迟到结果
-  finishUpdateCheckTimer();
-  pendingVersion = info.version;
-  // 手动=直接弹窗;自动=只发桌面通知,点击通知再弹窗(不抢占当前操作;与 dsh 本体通道语义一致)
-  const showResult = (nonIntrusive) => showStatusResult({
-    type: 'info', title: '发现新版本', __origin: 'desktop',
-    detail: `新版本 v${info.version} 可用(当前 v${app.getVersion()})\n「现在更新」将用多线程加速下载,完成后自动重启安装;「稍后」则跳过本次更新。`,
-    buttons: [{ id: 'dl', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
-  }, (id) => {
-    if (id === 'later' || quitting) return closeStatus();
-    statusOpCancelled = false;
-    desktopDownloadCanceled = false; // 新一轮下载:清掉上次的取消标记
-    lastOfficialProgressAt = 0;      // 重置官方进度节流计时(每轮下载独立计)
-    downloadToken = new CancellationToken(); // ✕ 取消时可真正中止下载传输
-    showStatus({ mode: 'download', title: `正在下载 v${info.version}…`, detail: `当前 v${app.getVersion()}`, pct: '0%', size: '', __origin: 'desktop' });
-    downloadInProgress = true;
-    runUpdateDownload(info).catch((e) => {
-      downloadToken = null;
-      downloadInProgress = false;
-      if (desktopDownloadCanceled) { desktopDownloadCanceled = false; return; } // 用户取消:静默收尾
-      log(`更新下载失败: ${e.message}`);
-      if (!quitting && !downloadErrorShown()) { // error 事件可能已先弹过同一失败
-        showStatusResult({
-          type: 'error', title: '更新下载失败', __origin: 'desktop',
-          detail: `原因: ${e.message}\n可稍后重试,或重新检查更新。`,
-          buttons: [{ id: 'ok', label: '好的' }],
-        }, () => closeStatus());
-      }
-    });
-  }, nonIntrusive);
-  if (manualCheck) return showResult(false);
-  try {
-    if (Notification.isSupported()) {
-      const n = new Notification({
-        title: '发现 DSH 新版本',
-        body: `v${info.version} 可用(当前 v${app.getVersion()}),点击查看。`,
-        icon: path.join(__dirname, 'assets', 'icon.ico'),
-      });
-      n.on('click', () => showResult(true));
-      trackNotification(n); // 保持引用:GC 会导致点击回调失效
-      n.show();
-      log('自动检查发现新版本:已发桌面通知(未弹出窗口)');
-      return;
-    }
-  } catch (e) { log(`更新桌面通知失败: ${e.message}`); }
-  showResult(true);
-});
-
-// 官方下载进度:按 150ms 节流(与自研多线程下载器一致,避免每 chunk 一次 IPC 刷屏)
-let lastOfficialProgressAt = 0;
-// 是否已展示过「下载失败」结果窗:下载失败会同时走 autoUpdater 的 error 事件与
-// downloadUpdate 的 promise reject,两边都弹会双重显示,互相见结果为真则跳过
-function downloadErrorShown() {
-  const p = statusPayload;
-  return !!(p && p.mode === 'result' && p.__origin === 'desktop' && p.title && String(p.title).includes('下载失败'));
-}
-
-autoUpdater.on('download-progress', (p) => {
-  if (!statusWin || statusPayload?.mode !== 'download') return;
-  const now = Date.now();
-  if (now - lastOfficialProgressAt < 150) return;
-  lastOfficialProgressAt = now;
-  const speed = p.bytesPerSecond ? `${(p.bytesPerSecond / 1048576).toFixed(1)} MB/s` : '';
-  updateStatus({
-    mode: 'download',
-    progress: p.percent,
-    pct: p.percent.toFixed(1) + '%',
-    size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB${speed ? ' · ' + speed : ''}`,
-  });
-});
-
-autoUpdater.on('update-downloaded', () => {
-  downloadToken = null; // 下载已结束
-  if (statusOpCancelled || desktopDownloadCanceled) { updateDownloaded = false; return; } // 用户取消,迟到结果不再弹窗
-  desktopDownloadCanceled = false;
-  downloadInProgress = false;
-  updateDownloaded = true;
-  showStatusResult({
-    type: 'success', title: '更新就绪', __origin: 'desktop',
-    detail: `v${pendingVersion} 已下载完成,现在重启并安装?`,
-    buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }],
-  }, (id) => {
-    if (id === 'install') quitAndInstallGuarded();
-    else closeStatus();
-  });
-});
-
-autoUpdater.on('update-not-available', () => {
-  if (!lateResultAllowed(manualCheckTimedOutAt, manualCheckDropped)) return;
-  finishUpdateCheckTimer();
-  if (manualCheck) {
-    showStatusResult({
-      type: 'info', title: '检查更新', __origin: 'desktop',
-      detail: `当前已是最新版本(v${app.getVersion()})。`,
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-  }
-});
-
-autoUpdater.on('error', (e) => {
-  if (!lateResultAllowed(manualCheckTimedOutAt, manualCheckDropped)) return; // 已取消/超时过宽限期:不再弹错
-  finishUpdateCheckTimer();
-  const wasDownload = downloadInProgress;
-  downloadInProgress = false;
-  log(`更新检查失败: ${e.message}`);
-  if (!manualCheck && !wasDownload) return; // 自动检查出错静默
-  if (wasDownload && downloadErrorShown()) return; // catch 路径已弹过同一失败,不重复
-  showStatusResult({
-    type: 'error', title: wasDownload ? '更新下载失败' : '检查更新失败', __origin: 'desktop',
-    detail: `原因: ${e.message}${wasDownload ? '\n可稍后重试,或重新检查更新。' : '\n请确认网络可用后重试。'}`,
-    buttons: [{ id: 'ok', label: '好的' }],
-  }, () => closeStatus());
-});
-
-function checkForUpdates(manual) {
-  manualCheck = manual;
-  manualCheckTimedOutAt = 0;
-  manualCheckDropped = false;
-  statusOpCancelled = false;
-  if (manual && (dshInstallChild || dshStoppedForInstall)) {
-    // dsh 本体安装进行中:回到安装进度窗口而不是覆盖它(两个更新流互相顶掉会丢进度/按钮错位)
-    log('手动检查更新被忽略:dsh 本体安装仍在进行中');
-    noticeFlowBusy('dsh 本体的 npm 安装正在进行,暂时无法检查更新;请等安装完成后再试。', { mode: 'install', title: '正在安装 dsh 本体…', spin: true, __origin: 'dsh' });
-    return;
-  }
-  if (manual && downloadInProgress) {
-    // 已有下载在进行:回到下载进度窗口而不是覆盖它(否则进度 UI 丢失、下载仍在后台)
-    log('手动检查更新被忽略:下载仍在进行中');
-    noticeFlowBusy('桌面端更新正在下载,暂时无法开始新的检查;可在当前进度窗查看进度。', { mode: 'download', title: '正在下载更新…', spin: true, __origin: 'desktop' });
-    return;
-  }
-  if (!app.isPackaged) {
-    if (manual) {
-      showDialog({
-        type: 'info', title: '检查更新',
-        message: '开发模式下不支持在线更新,请使用打包后的应用。',
-        buttons: [{ label: '好的', primary: true }],
-      });
-    }
-    return;
-  }
-  if (IS_PORTABLE) {
-    // 便携版会走 NsisUpdater 下载 Setup.exe 并安装,把用户"转正"成安装版,与便携预期不符 → 禁用
-    if (manual) {
-      showDialog({
-        type: 'info', title: '检查更新',
-        message: '便携版不支持自动更新,请前往 GitHub Releases 下载新版本。',
-        buttons: [{ label: '好的', primary: true }],
-      });
-    }
-    return;
-  }
-  if (updateDownloaded) {
-    // 已下载过:直接询问是否重启安装
-    showStatusResult({
-      type: 'success', title: '更新就绪', __origin: 'desktop',
-      detail: `v${pendingVersion} 已下载完成,现在重启并安装?`,
-      buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '取消' }],
-    }, (id) => {
-      if (id === 'install') quitAndInstallGuarded();
-      else closeStatus();
-    });
-    return;
-  }
-  // 手动检查:显示"检查中"状态窗,设超时;超时提示后,迟到结果在宽限期内仍会送达
-  if (manual) {
-    finishUpdateCheckTimer();
-    showStatus({ mode: 'check', title: '正在检查更新…', detail: `当前 v${app.getVersion()}`, spin: true, __origin: 'desktop' });
-    updateCheckTimer = setTimeout(() => {
-      updateCheckTimer = null;
-      manualCheckTimedOutAt = Date.now();
-      log('检查更新超时(宽限期内迟到结果仍会送达)');
-      showStatusResult({
-        type: 'warning', title: '检查更新超时', __origin: 'desktop',
-        detail: `${CHECK_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取最新版本信息。\n网络较慢时结果稍后仍会送达;请确认网络可用后重试。`,
-        buttons: [{ id: 'ok', label: '好的' }],
-      }, () => closeStatus());
-    }, CHECK_UPDATE_TIMEOUT_MS);
-  }
-  // 看门狗:自动检查没有超时弹窗,网络挂起时要留痕(electron-updater 在途请求会被后续检查复用)
-  updateCheckInFlight = true;
-  setTimeout(() => {
-    if (updateCheckInFlight) log(`更新检查超过 ${UPDATE_CHECK_MAX_MS / 1000} 秒未返回,请检查网络/代理与 GitHub 连通性`);
-  }, UPDATE_CHECK_MAX_MS);
-  autoUpdater.checkForUpdates()
-    .then(() => { updateCheckInFlight = false; })
-    .catch((e) => { updateCheckInFlight = false; log(`更新检查失败: ${e.message}`); });
-}
-
-// ---------- dsh 本体更新(对接 npm registry,检查流程与桌面端更新保持一致) ----------
-// 与桌面端更新相同的语义:启动时静默检查、菜单手动检查带超时、发现新版弹"现在更新/稍后"、
-// 只有手动触发才弹"已是最新/失败",安装完成后提示重启 dsh 服务。
-// 解析 semver 版本号(支持 v 前缀与 -pre 后缀,如 0.1.1-rc.2 / v1.2.3);
-// 返回 { nums:[major,minor,patch], pre:[...] },pre 为空数组表示正式版;无法解析返回 null
-function parseVersion(v) {
-  const s = String(v || '').replace(/^v/i, '').trim();
-  const m = s.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$/);
-  if (!m) return null;
-  const nums = [1, 2, 3].map((i) => (m[i] ? parseInt(m[i], 10) : 0));
-  const pre = m[4] ? m[4].split('.') : [];
-  return { nums, pre };
-}
-// 预发布段逐段比较(semver 规则):数字段按数值、字母段按字典序、数字段 < 字母段、段耗尽者更旧
-function comparePre(a, b) {
-  if (a.length === 0 && b.length === 0) return 0;
-  if (a.length === 0) return 1; // 正式版 > 任何预发布
-  if (b.length === 0) return -1;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i], y = b[i];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    if (x === y) continue;
-    const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
-    if (nx && ny) return parseInt(x, 10) < parseInt(y, 10) ? -1 : 1;
-    if (nx) return -1;
-    if (ny) return 1;
-    return x < y ? -1 : 1;
-  }
-  return 0;
-}
-// a < b → -1;a === b → 0;a > b → 1;任一无法解析 → 0(不误报更新)
-function compareVersion(a, b) {
-  const va = parseVersion(a), vb = parseVersion(b);
-  if (!va || !vb) return 0;
-  for (let i = 0; i < 3; i++) {
-    if (va.nums[i] !== vb.nums[i]) return va.nums[i] < vb.nums[i] ? -1 : 1;
-  }
-  return comparePre(va.pre, vb.pre);
-}
-
-let cachedNpmCli = null;
-function findNpmCli() {
-  if (cachedNpmCli) return cachedNpmCli;
-  const npm = firstLine(IS_WIN ? 'where npm.cmd' : 'which npm');
-  cachedNpmCli = npm || (IS_WIN ? 'npm.cmd' : 'npm');
-  return cachedNpmCli;
-}
-
-// 定位 npm-cli.js(直接由 node 执行):Windows 上 spawn .cmd 会同步抛 EINVAL,必须走 node + cli.js
-let cachedNpmCliJs = null;
-function findNpmCliJs() {
-  if (cachedNpmCliJs) return cachedNpmCliJs;
-  const cands = [findNpmCli()];
-  if (process.env.APPDATA) cands.push(path.join(process.env.APPDATA, 'npm', 'npm.cmd'));
-  for (const c of cands) {
-    if (!c) continue;
-    const js = path.join(path.dirname(c), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-    if (fs.existsSync(js)) { cachedNpmCliJs = js; return js; }
-  }
-  return null;
-}
-
-// 从 npm registry 读取 dsh 最新版本号(带超时;返回版本号字符串,失败返回 null)
-async function fetchLatestDshVersion(timeoutMs) {
-  const url = await dshRegistryUrl();
-  if (!url) return null;
-  return new Promise((resolve) => {
-    const req = https.get(url, { timeout: timeoutMs }, (res) => {
-      let data = '';
-      res.on('data', (c) => {
-        data += c;
-        if (data.length > 1_000_000) req.destroy(new Error('响应过大'));
-      });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data).version || null); } catch { resolve(null); }
-      });
-    });
-    req.on('timeout', () => req.destroy(new Error('超时')));
-    req.on('error', () => resolve(null));
-    // 总超时兜底:连接卡死(DNS/TCP 不可达)时 socket 空闲超时不一定触发,这里保证按时返回
-    const overall = setTimeout(() => req.destroy(new Error('总超时')), timeoutMs + 1000);
-    req.on('close', () => clearTimeout(overall));
-  });
-}
-
-let dshCheckTimer = null;
-let dshManualCheckTimedOutAt = 0; // 手动检查超时时刻(0=未超时);迟到结果在宽限期内仍投递
-let dshManualCheckDropped = false; // 用户已取消:丢弃一切迟到结果
-let dshInstallChild = null; // 正在运行的 npm 安装进程(供 ✕ 取消)
-let installCancelled = false; // 用户已取消安装(忽略安装结果)
-let installEpoch = 0; // 安装代数:每次安装递增,旧安装的迟到回调(close/error/超时)一律失效
-let dshStoppedForInstall = false; // 安装期间已暂停 dsh 服务(退出路径务必恢复,成败都恢复)
-
-function finishDshCheckTimer() {
-  clearTimeout(dshCheckTimer);
-  dshCheckTimer = null;
-}
-
-// 通过 npm 全局安装 dsh 新版本;安装期间暂停当前 dsh 服务,结束(成败/取消/超时)后自动恢复。
-// 更新对象就是当前正在运行的包:Windows 上一面运行一面替换目录最容易 EPERM,先停服务再装。
-async function installDshUpdate(version) {
-  const myEpoch = ++installEpoch;
-  statusOpCancelled = false;
-  installCancelled = false;
-  if (quitting) return;
-  // 版本号白名单:纯 semver 形态,从数据结构上杜绝 shell 元字符
-  // (当前 install 走 node + npm-cli.js 数组参数无 shell;这是纵深防御,未来变更数据源也不可变注入)
-  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
-    log(`dsh 安装中止:版本号格式异常(${version})`);
-    showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `npm 返回的版本号格式异常(${version}),已中止自动安装。\n请在终端手动确认后再试。`,
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-    return;
-  }
-  // 停掉当前 dsh web 进程(本体文件正被它使用)
-  if (dshChild) {
-    bootSeq++; // 旧 dsh 的 exit 处理器因序号过期而忽略这次主动停止
-    const old = dshChild;
-    dshChild = null;
-    dshStoppedForInstall = true;
-    log('安装 dsh 本体更新:先停止当前 dsh 服务');
-    try { await killTree(old); } catch (e) { log(`停止 dsh 服务失败: ${e.message}`); }
-  }
-  // 等待停止期间可能已被 ✕ 取消 / 退出 / 更新的安装取代
-  if (quitting || installCancelled || myEpoch !== installEpoch) { dshStoppedForInstall = false; return; }
-  // Windows 上 spawn .cmd/.bat 必须走 shell,否则同步抛 EINVAL → 一律走 node + npm-cli.js(数组参数,无注入面)。
-  // 不做 shell 回退:拼接 cmd.exe 命令行会形成命令注入面(元字符不转义),找不到环境就报错引导人工处理。
-  // 注意 node 可能已回退为 Electron 二进制,必须带上其 env(含 ELECTRON_RUN_AS_NODE),否则以 GUI 模式跑 npm
-  const nodeInfo = findNode();
-  const node = nodeInfo ? nodeInfo.exe : null;
-  const npmCliJs = process.env.DSH_UITEST_FAKE_NPM || findNpmCliJs(); // UITEST 时注入假 npm 脚本
-  if (!node || !npmCliJs) {
-    log('dsh 安装中止:无法定位 node 或 npm-cli.js,拒绝 shell 回退安装');
-    dshStoppedForInstall = false;
-    if (!quitting) bootDsh();
-    showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: '未能定位 node 或 npm 的 npm-cli.js,已中止自动安装(不使用 shell 拼接以防命令注入)。\n请在终端手动执行:npm install -g @deepseek-ai/dsh\ndsh 服务已恢复(旧版本)。',
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-    return;
-  }
-  const exec = node;
-  const args = [npmCliJs, 'install', '-g', `@deepseek-ai/dsh@${version}`, '--no-audit', '--no-fund']; // 锁版本+跳过 audit/fund 减负
-  const opts = { windowsHide: true, env: nodeInfo.env };
-  log(`安装 dsh 本体更新: ${exec} ${args.join(' ')}`);
-  showStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: `npm install -g @deepseek-ai/dsh@${version}`, spin: true, __origin: 'dsh' });
-  let child = null;
-  try {
-    child = spawn(exec, args, opts);
-  } catch (e) {
-    // 启动失败必须反馈到窗口,不能静默卡在"请稍后";服务已停,先拉回来
-    log(`无法启动 npm 安装进程: ${e.message}`);
-    dshStoppedForInstall = false;
-    if (!quitting) bootDsh();
-    showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `无法启动 npm:${e.message}\ndsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-    return;
-  }
-  dshInstallChild = child;
-  let buf = '';
-  let lastOutAt = Date.now();
-  let idleTimer = null;
-  let totalTimer = null;
-  let finished = false;
-  const clearTimers = () => { clearInterval(idleTimer); clearTimeout(totalTimer); idleTimer = totalTimer = null; };
-  // 超时护栏:UITEST 压短以便回归验证;生产用常量
-  const idleMs = process.env.DSH_DESKTOP_UITEST ? 1500 : DSH_INSTALL_IDLE_TIMEOUT_MS;
-  const totalMs = process.env.DSH_DESKTOP_UITEST ? 4000 : DSH_INSTALL_TOTAL_TIMEOUT_MS;
-  // finish 幂等(spawn 失败时 Node 会同时触发 error 与 close,只处理一次)+ 安装代数隔离
-  const finish = (ok, msg) => {
-    if (finished) return;
-    finished = true;
-    clearTimers(); // 无条件先清定时器:被取代安装(myEpoch 过期)的 idle/total 定时器不得残留去改写状态窗
-    if (myEpoch !== installEpoch) return; // 已有更新的安装启动,旧结果丢弃
-    if (dshInstallChild === child) dshInstallChild = null;
-    const stoppedForInstall = dshStoppedForInstall;
-    dshStoppedForInstall = false;
-    if (quitting || installCancelled) return; // 取消/超时中止:忽略迟到结果
-    // 无论成败都恢复 dsh 服务(成功跑新版本,失败跑旧版本),不再依赖用户手动点"重启 dsh"
-    if (stoppedForInstall) bootDsh();
-    const actual = ok ? dshVersion(true) : null; // 强制刷新版本缓存,展示刚装上的版本
-    log(ok ? `dsh 本体更新完成(实际 v${actual || version})` : `dsh 更新安装失败: ${msg}`);
-    showStatusResult({
-      type: ok ? 'success' : 'error',
-      title: ok ? 'dsh 更新完成' : 'dsh 更新失败', __origin: 'dsh',
-      detail: ok
-        ? `dsh 本体已更新(当前版本 v${actual || version}),dsh 服务已自动重启生效。`
-        : `${msg}\n${buf.slice(-300)}\ndsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-  };
-  const onData = (c) => {
-    const text = c.toString();
-    if (text.trim()) log(`[npm] ${text.trim().slice(-500)}`);
-    buf += text;
-    if (buf.length > 8000) buf = buf.slice(-8000);
-    // npm 进度/日志用 \r 覆盖写,需按 \r\n|\r|\n 分段,最新一段作为详情
-    const segs = String(text).split(/\r\n|\r|\n/).map((s) => s.trim()).filter(Boolean);
-    if (segs.length) {
-      lastOutAt = Date.now();
-      updateStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: segs[segs.length - 1].slice(0, 130), spin: true });
-    }
-  };
-  child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
-  // 无输出护栏:长时间没有新输出 → 提示可能的卡因(网络慢/安装挂起),但不自动中止
-  idleTimer = setInterval(() => {
-    if (Date.now() - lastOutAt > idleMs) {
-      updateStatus({
-        mode: 'install', title: `正在安装 dsh 本体 v${version}…`,
-        detail: 'npm 长时间无输出,可能因网络慢或安装卡住;可点 ✕ 取消(将恢复 dsh 服务)重试',
-        spin: true,
-      });
-    }
-  }, 5000);
-  // 总超时护栏:强制终止并报错,绝不无限"请稍后"
-  totalTimer = setTimeout(() => {
-    if (myEpoch !== installEpoch || quitting || installCancelled || dshInstallChild !== child) return;
-    log('dsh 安装超时,强制终止 npm 进程');
-    installCancelled = true; // 让 close 回调忽略后续结果,避免重复弹窗
-    if (dshStoppedForInstall) { dshStoppedForInstall = false; if (!quitting) bootDsh(); }
-    killTree(child);
-    showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `npm 安装超时(${Math.round(totalMs / 60000)} 分钟)已中止,dsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
-    }, () => closeStatus());
-  }, totalMs);
-  child.on('close', (code) => {
-    // 权限类失败(fs 输出含 EPERM/EACCES)给出可执行的引导,而非只报 code
-    const permHint = /EPERM|EACCES/i.test(buf)
-      ? '\n如提示权限不足(EPERM/EACCES),常见原因:npm 前缀位于系统目录需管理员权限;请以管理员身份重试,或执行 npm config set prefix "%APPDATA%\\npm"。'
-      : '';
-    finish(code === 0, code === 0 ? '' : `npm 安装失败 (code=${code})${permHint}`);
-  });
-  child.on('error', (e) => finish(false, `无法启动 npm:${e.message}`));
-}
-
-function checkDshUpdate(manual) {
-  finishDshCheckTimer();
-  dshManualCheckTimedOutAt = 0;
-  dshManualCheckDropped = false;
-  statusOpCancelled = false;
-  if (manual && (downloadInProgress || updateDownloaded)) {
-    // 桌面端更新进行中(下载/已就绪):回到对应进度窗口而不是覆盖它,避免两个更新流互顶
-    log('手动检查 dsh 更新被忽略:桌面端更新流程进行中');
-    noticeFlowBusy('桌面端更新流程正在进行(下载/已就绪),暂时无法检查 dsh 本体更新;请先完成桌面端流程。', { mode: 'download', title: '正在下载更新…', spin: true, __origin: 'desktop' });
-    return;
-  }
-  if (manual && (dshInstallChild || dshStoppedForInstall)) {
-    // 本体安装进行中:回到安装进度窗口而不是覆盖
-    log('手动检查 dsh 更新被忽略:安装仍在进行中');
-    noticeFlowBusy('dsh 本体安装已在进行,暂时无法再次检查;可在当前进度窗查看安装进度。', { mode: 'install', title: '正在安装 dsh 本体…', spin: true, __origin: 'dsh' });
-    return;
-  }
-  // 仅打包版才有"桌面端更新";dsh 本体检查在开发模式同样可用,故不设 isPackaged 门槛
-  const current = dshVersion();
-  if (current === '未知') {
-    log('检查 dsh 更新: 未定位到 dsh 本体,跳过');
-    if (manual) {
-      showDialog({
-        type: 'warning', title: '检查 dsh 更新',
-        message: '未检测到 dsh 本体,请先全局安装:',
-        detail: 'npm install -g @deepseek-ai/dsh',
-        buttons: [{ label: '好的', primary: true }],
-      });
-    }
-    return;
-  }
-  // 手动检查:显示"检查中"状态窗,设超时;超时提示后,迟到结果在宽限期内仍会送达
-  if (manual) {
-    showStatus({ mode: 'check', title: '正在检查 dsh 本体更新…', detail: `当前 v${current}`, spin: true, __origin: 'dsh' });
-    dshCheckTimer = setTimeout(() => {
-      dshCheckTimer = null;
-      dshManualCheckTimedOutAt = Date.now();
-      log('检查 dsh 更新超时(宽限期内迟到结果仍会送达)');
-      showStatusResult({
-        type: 'warning', title: '检查 dsh 更新超时', __origin: 'dsh',
-        detail: `${CHECK_DSH_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取 dsh 最新版本信息。\n网络较慢时结果稍后仍会送达;请确认网络可用后再试。`,
-        buttons: [{ id: 'ok', label: '好的' }],
-      }, () => closeStatus());
-    }, CHECK_DSH_UPDATE_TIMEOUT_MS);
-  }
-  fetchLatestDshVersion(CHECK_DSH_UPDATE_TIMEOUT_MS + 1000).then((latest) => {
-    if (!lateResultAllowed(dshManualCheckTimedOutAt, dshManualCheckDropped)) return; // 已取消/超时过宽限期:忽略迟到结果
-    finishDshCheckTimer();
-    if (!latest) {
-      log('检查 dsh 更新失败: 未能获取最新版本信息');
-      if (manual) {
-        showStatusResult({
-          type: 'error', title: '检查 dsh 本体更新失败', __origin: 'dsh',
-          detail: '请确认网络可用后重试。',
-          buttons: [{ id: 'ok', label: '好的' }],
-        }, () => closeStatus());
-      }
-      return;
-    }
-    const lv = latest ? parseVersion(latest) : null;
-    if (latest && !lv) {
-      // 版本号无法解析(含 build metadata 等畸形串):不能当"已是最新"糊弄用户
-      log(`dsh 最新版本号无法解析: ${latest}`);
-      if (manual) {
-        showStatusResult({
-          type: 'error', title: '检查 dsh 本体更新失败', __origin: 'dsh',
-          detail: `未能解析 npm 返回的最新版本号(${latest}),请稍后重试。`,
-          buttons: [{ id: 'ok', label: '好的' }],
-        }, () => closeStatus());
-      }
-      return;
-    }
-    if (compareVersion(latest, current) > 0) {
-      // 兼容性断言:大版本(0.2+ 或 1.0+)未经桌面壳验证,不自动推送安装
-      // (参数形态/端口协议若变更,自动装完服务可能起不来,必须人工确认)
-      if (lv && (lv.nums[0] !== 0 || lv.nums[1] > DSH_COMPATIBLE_MINOR)) {
-        log(`dsh 新版本 v${latest} 超出已验证兼容区间(0.${DSH_COMPATIBLE_MINOR}.x),不自动推送`);
-        if (manual) {
-          showStatusResult({
-            type: 'warning', title: '发现 dsh 新版本(未验证兼容)', __origin: 'dsh',
-            detail: `dsh 本体 v${latest} 可用(当前 v${current}),但该版本尚未经桌面壳验证。\n建议先在终端执行:\nnpm install -g @deepseek-ai/dsh@${latest}\n确认兼容后再继续使用。`,
-            buttons: [{ id: 'ok', label: '好的' }],
-          }, () => closeStatus());
-        }
-        return;
-      }
-      log(`发现 dsh 新版本 v${latest}(当前 v${current})`);
-      // 注意:不写 pendingVersion(那是桌面端专用),dsh 版本号全程走闭包参数
-      const showResult = (nonIntrusive) => showStatusResult({
-        type: 'info', title: '发现 dsh 新版本', __origin: 'dsh',
-        detail: `dsh 本体新版本 v${latest} 可用(当前 v${current})\n「现在更新」将暂停 dsh 服务、通过 npm 全局安装新版本,完成后自动重启 dsh 服务。`,
-        buttons: [{ id: 'install', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
-      }, (id) => {
-        if (id === 'install' && !quitting) installDshUpdate(latest);
-        else closeStatus();
-      }, nonIntrusive);
-      if (!manual) {
-        // 自动检查:只发桌面通知(点击后再弹窗),不抢占正在进行的检查窗口;
-        // 通知点击若撞上桌面更新占位(发现新版本/下载中)则跳过,菜单仍可手动查
-        try {
-          if (Notification.isSupported()) {
-            const n = new Notification({
-              title: '发现 dsh 新版本',
-              body: `dsh 本体 v${latest} 可用(当前 v${current}),点击查看。`,
-              icon: path.join(__dirname, 'assets', 'icon.ico'),
-            });
-            n.on('click', () => showResult(true));
-            trackNotification(n); // 保持引用:GC 会导致点击回调失效
-            n.show();
-            log('自动检查发现 dsh 新版本:已发桌面通知(未弹出窗口)');
-            return;
-          }
-        } catch (e) { log(`dsh 更新桌面通知失败: ${e.message}`); }
-        showResult(true);
-      } else {
-        showResult(false);
-      }
-    } else if (manual) {
-      showStatusResult({
-        type: 'info', title: '检查 dsh 更新', __origin: 'dsh',
-        detail: `dsh 本体已是最新版本(v${current})。`,
-        buttons: [{ id: 'ok', label: '好的' }],
-      }, () => closeStatus());
-    }
-  });
-}
 
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------
 // 内存仪表(内存优化 P1-3):总占用 = Electron 壳进程(getAppMetrics 同步快照) + dsh 本体进程树(异步枚举)。
@@ -2096,8 +1106,8 @@ ipcMain.on('m:action', (e, id) => {
     case 'dsh-home': shell.openPath(path.join(os.homedir(), '.dsh')); break;
     case 'log': shell.showItemInFolder(logFile); break;
     case 'memory-info': showMemoryInfo(); break;
-    case 'check-update': checkForUpdates(true); break;
-    case 'check-dsh-update': checkDshUpdate(true); break;
+    case 'check-update': updates.checkForUpdates(true); break;
+    case 'check-dsh-update': updates.checkDshUpdate(true); break;
     case 'download-accel': {
       showAccelSettings(); // 可视化设置窗:分段数 / 镜像源即时保存到 config.json
       break;
@@ -2334,8 +1344,8 @@ async function bootDsh() {
   // before-quit 的进程快照里,退出完成后会留下孤儿 dsh 服务
   if (quitting) return;
   // dsh 本体安装期间服务已暂停:手动"重启 dsh"忽略,安装完成(成败都)会自动恢复服务;
-  // 恢复路径(installDshUpdate/cancelStatusOp)在调用前已置 dshStoppedForInstall=false,不受影响
-  if (dshStoppedForInstall) { log('dsh 本体安装进行中,忽略重启请求(安装完成后自动恢复服务)'); return; }
+  // 恢复路径(updates.installDshUpdate/cancelStatusOp)在调用前已置 dshStoppedForInstall=false,不受影响
+  if (updates.state.dshStoppedForInstall) { log('dsh 本体安装进行中,忽略重启请求(安装完成后自动恢复服务)'); return; }
   const seq = ++bootSeq;
   if (dshChild) {
     const old = dshChild;
@@ -2367,9 +1377,12 @@ async function bootDsh() {
   try {
     stage(0, '定位 dsh 本体…'); // 加载页阶段 0(findDshBin 定位可能耗时,点亮对应阶段)
     stage(1, '启动 dsh web 服务…');
-    const { child, url } = await startDsh(cwd, (line) => {
-      if (seq !== bootSeq || settledUrl || !dshView || loadingFlush) return;
-      dshView.webContents.executeJavaScript(`pushLog(${JSON.stringify(line.slice(0, 160))})`).catch(() => {});
+    const { child, url } = await dshProc.startDsh(cwd, {
+      onOut: (line) => {
+        if (seq !== bootSeq || settledUrl || !dshView || loadingFlush) return;
+        dshView.webContents.executeJavaScript(`pushLog(${JSON.stringify(line.slice(0, 160))})`).catch(() => {});
+      },
+      onChild: (c) => { dshChild = c; }, // 立即登记:启动窗口期内退出应用时,before-quit 也能杀掉它,避免孤儿进程
     });
     dshChild = child;
     child.once('exit', (code) => {
@@ -2382,7 +1395,7 @@ async function bootDsh() {
         phase: 'exit',
         error: null,
         code,
-        buf: lastBootBuf,
+        buf: dshProc.getBootSnapshot().buf,
         actions: [
           { id: 'restart', label: '重启 dsh', style: 'primary' },
           { id: 'quit', label: '退出', style: 'danger' },
@@ -2392,7 +1405,7 @@ async function bootDsh() {
     log(`服务地址: ${redactToken(url)},等待 HTTP 就绪…`);
     dshWebUrl = url;
     stage(2, '等待服务就绪…');
-    const ready = await waitServerReady(url, () => seq !== bootSeq);
+    const ready = await dshProc.waitServerReady(url, () => seq !== bootSeq || quitting);
     if (!ready || quitting || seq !== bootSeq || !dshView) return;
     log(`加载 ${redactToken(url)}`);
     stage(3, '加载页面…');
@@ -2405,7 +1418,7 @@ async function bootDsh() {
       phase: 'boot',
       error: err,
       code: null,
-      buf: lastBootBuf,
+      buf: dshProc.getBootSnapshot().buf,
       actions: [
         { id: 'retry', label: '重试', style: 'primary' },
         { id: 'quit', label: '退出', style: 'danger' },
@@ -2470,7 +1483,7 @@ function buildMenu() {
       submenu: [
         { label: '打开 dsh 数据目录 (~/.dsh)', click: () => shell.openPath(path.join(os.homedir(), '.dsh')) },
         { label: '打开日志文件', click: () => shell.showItemInFolder(logFile) },
-        { label: '检查 dsh 本体更新', click: () => checkDshUpdate(true) },
+        { label: '检查 dsh 本体更新', click: () => updates.checkDshUpdate(true) },
       ],
     },
   ]));
@@ -2492,6 +1505,18 @@ if (!gotLock) {
       return;
     }
     log(`工作目录: ${ws}`);
+    // 更新模块注入编排能力:状态窗/对话框/通知/重启 dsh 均在 main.js,
+    // updates.js 只依赖此注入面,不反向 require main.js
+    updates.init({
+      bootDsh,
+      showStatus, showStatusResult, updateStatus, closeStatus,
+      showDialog, noticeFlowBusy, trackNotification,
+      getStatusPayload: () => statusPayload,
+      isQuitting: () => quitting,
+      getDshChild: () => dshChild,
+      setDshChild: (c) => { dshChild = c; },
+      bumpBootSeq: () => { bootSeq++; },
+    });
     buildMenu();
     createWindow();
     createTray();
@@ -2501,9 +1526,9 @@ if (!gotLock) {
     setInterval(refreshTotalMemory, 10_000);
 
     // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
-    setTimeout(() => { if (app.isPackaged) checkForUpdates(false); }, 6_000);
+    setTimeout(() => { if (app.isPackaged) updates.checkForUpdates(false); }, 6_000);
     // 12 秒后静默检查 dsh 本体更新(错开桌面端更新检查,避免两个弹窗同时出现)
-    setTimeout(() => checkDshUpdate(false), 12_000);
+    setTimeout(() => updates.checkDshUpdate(false), 12_000);
 
     // 自动化冒烟(uitest.js):SMOKE 窗口/托盘闭环自动退出;DEMO 额外按阶段写出窗口屏幕坐标
     // (DSH_DEMO_BOUNDS 指定 JSON 路径)供外部截屏;UITEST 全量 UI 断言。
@@ -2525,7 +1550,7 @@ if (!gotLock) {
         get currentBarH() { return currentBarH; },
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
-        toggleTitlebar, showAccelSettings, installDshUpdate,
+        toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
         configPath, loadConfig, saveConfig,
       };
       if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO) require('./uitest').runSmokeDemo(uitestDeps);
@@ -2548,7 +1573,7 @@ if (!gotLock) {
     // 未决条件:安装进行中(dshInstallChild)或确认框已挂起(quitConfirmShown)。
     // 安装恰好完成时 quitConfirmShown 仍为 true:所有 quit 请求继续挂起等用户决策,
     // 不再落入清理段——否则 cleaned 被提前置真,取消退出后 dsh 复拉成功、下次退出却跳过 killTree,新进程成孤儿
-    if ((dshInstallChild || quitConfirmShown) && !forceQuit) {
+    if ((updates.state.dshInstallChild || quitConfirmShown) && !forceQuit) {
       e.preventDefault();
       if (!quitConfirmShown) {
         quitConfirmShown = true;
@@ -2570,7 +1595,7 @@ if (!gotLock) {
     flushLog();
     stopHandlePolling();
     // dsh web 与进行中的 npm 安装都要随退出终止,避免留下孤儿进程
-    const children = [dshChild, dshInstallChild].filter(Boolean);
+    const children = [dshChild, updates.state.dshInstallChild].filter(Boolean);
     if (cleaned) return;
     if (children.length === 0) {
       // 清理在途(首次已 killTree 且把 children 变量置空):等待同一同步点,不抢跑退出,
@@ -2581,7 +1606,7 @@ if (!gotLock) {
     }
     e.preventDefault();
     dshChild = null;
-    dshInstallChild = null;
+    updates.state.dshInstallChild = null;
     log('退出:终止 dsh web / npm 安装进程树');
     quitCleanup = Promise.all(children.map(killTree));
     quitCleanup.finally(() => {
