@@ -300,7 +300,10 @@ let trayStartedAt = 0;   // 最近一次进入 ok 的时间戳(菜单运行时�
 
 function trayStatusText() {
   const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
-  const dl = statusPayload?.mode === 'download' && statusPayload.pct ? ` · 下载中 ${statusPayload.pct}` : '';
+  let dl = '';
+  for (const t of statusTasks.values()) { // 任一进行中下载任务(任务中心模型,P1-1)
+    if (!t.done && t.mode === 'download' && t.pct) { dl = ` · 下载中 ${t.pct}`; break; }
+  }
   const ws = loadConfig().workspace || '';
   return `DSH Desktop — ${st}${dl}${ws ? ` · ${ws}` : ''}`;
 }
@@ -394,44 +397,97 @@ function createTray() {
 // ---------- 统一状态窗(检查更新/下载/安装/结果,可挂后台到任务栏) ----------
 let statusWin = null;        // 状态窗实例
 let statusMinimized = false; // 处于"挂后台"(最小化到任务栏)状态
-let statusPayload = null;    // 当前展示的载荷(用于增量更新)
-let statusQueued = null;     // 窗口未加载完成时排队的载荷
-let statusActions = null;    // 结果视图按钮 id → 回调
+let statusQueued = false;    // 窗口未加载完成:任务帧待发标记
+let statusPayload = null;    // 最近活动任务载荷(updates.js 兼容读取 / 兜底语义)
+
+// ---------- 任务注册表(P1-1 通知/任务中心) ----------
+// 状态窗从"单槽翻页"改为任务列表渲染器:desktop(桌面端更新)与 dsh(本体安装)
+// 双流各有独立任务槽,幂等 upsert,多任务并存,完成项保留为历史折叠。
+// 旧 API(showStatus/updateStatus/showStatusResult/closeStatus)签名不变、内部映射注册表——
+// updates.js 无需感知模型变化;otherFlowActive 双更新流互斥链随之删除(任务不再互相顶掉)。
+const statusTasks = new Map();   // id → task { id, mode, title, detail, pct, size, spin, progress, type, buttons, done, ephemeral, ts }
+const statusActions = new Map(); // 任务 id → 结果按钮回调(按任务隔离,替代全局单槽)
+
+function taskIdOf(p) { return (p && p.__origin) || 'default'; }
 
 // 下载时把进度同步到任务栏按钮(窗口挂后台也能看到),其余状态清除进度
-function applyStatusProgress(p) {
+function applyStatusProgress() {
   if (!statusWin) return;
   try {
-    if (p && p.mode === 'download' && typeof p.progress === 'number') {
-      statusWin.setProgressBar(Math.max(0, Math.min(1, p.progress / 100)));
-    } else {
-      statusWin.setProgressBar(-1);
+    let pct = null;
+    for (const t of statusTasks.values()) {
+      if (!t.done && t.mode === 'download' && typeof t.progress === 'number') { pct = t.progress; break; }
     }
+    statusWin.setProgressBar(pct === null ? -1 : Math.max(0, Math.min(1, pct / 100)));
   } catch { /* 窗口已销毁等 */ }
 }
 
-function sendStatus(p) {
+// 窗口内容高度:单任务保持旧尺寸(活动 186 / 结果 250,UITEST 锁定);
+// 多任务列表按行数增长并封顶 460,超出由列表内部滚动吸收
+function statusHeight() {
+  const n = statusTasks.size;
+  if (n <= 1) {
+    const t = statusTasks.values().next().value;
+    return t && t.done ? 250 : 186;
+  }
+  const vals = [...statusTasks.values()];
+  const act = vals.filter((t) => !t.done).length;
+  const done = vals.filter((t) => t.done && !t.ephemeral).length; // 瞬时 toast 不占历史位
+  const eph = n - act - done;
+  const collapsed = act > 0 && done > 0; // 有进行中任务时完成项折叠进历史条
+  const rows = act + (collapsed ? 0 : done) + eph;
+  return Math.min(46 + rows * 118 + (collapsed ? 30 : 0) + 12, 460);
+}
+
+function statusWinTitle(tasks) {
+  if (tasks.length === 1) return tasks[0].title || 'DSH';
+  const act = tasks.filter((t) => !t.done).length;
+  return act ? `任务中心(${act} 项进行中)` : '任务中心';
+}
+
+// 推送整帧任务数组给渲染器(渲染器单任务时退化为旧单视图,多任务渲染列表)
+function pushTasks({ focus = false } = {}) {
   if (!statusWin) return;
-  statusPayload = p;
-  // 结果视图需要 ~226px 内容高度(大图标+标题+多行详情+按钮),固定 186px 会裁掉确定按钮
-  const h = p.mode === 'result' ? 250 : 186;
-  statusWin.setContentSize(410, h);
-  statusWin.setTitle(p.title || 'DSH');
-  statusWin.webContents.send('st:set', p);
-  applyStatusProgress(p);
-  // 挂后台(最小化)期间结果到达:不强制拉起窗口,由桌面通知引导,点击通知再恢复。
+  const tasks = [...statusTasks.values()];
+  const act = tasks.filter((t) => !t.done);
+  statusPayload = act[act.length - 1] || null; // "最近活动载荷":托盘 tooltip/updates 进度守卫读取
+  statusWin.setContentSize(410, statusHeight());
+  statusWin.setTitle(statusWinTitle(tasks));
+  statusWin.webContents.send('st:tasks', tasks);
+  applyStatusProgress();
+  refreshTray(); // 下载进度/状态变化同步进托盘 tooltip(P0-3)
+  // 挂后台(最小化)期间不强制拉起窗口,由桌面通知引导,点击通知再恢复
   // (否则"挂后台=不打扰"被破坏:窗口自己弹回来 + 通知双提醒)
-  if (statusMinimized && p.mode === 'result') return;
+  if (!focus || statusMinimized) return;
   if (statusWin.isMinimized()) statusWin.restore();
   statusWin.show();
   statusWin.focus();
 }
 
-function flushStatus() {
-  if (!statusQueued || !statusWin) return;
-  const p = statusQueued;
-  statusQueued = null;
-  sendStatus(p);
+function ensureStatusWindow() {
+  if (statusWin) return true;
+  statusWin = new BrowserWindow({
+    width: 410, height: 186, useContentSize: true,
+    frame: false, resizable: false, skipTaskbar: false, show: false,
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'status-preload.js') },
+  });
+  statusWin.setMenuBarVisibility(false);
+  // 与对话框/报告窗一致:在主窗口所在显示器居中(否则副屏用户会在主屏看到状态窗/进度窗)
+  centerOn(statusWin, mainWindow);
+  statusWin.loadFile(path.join(__dirname, 'status.html')).catch(() => {});
+  statusWin.webContents.once('did-finish-load', () => {
+    statusQueued = false;
+    pushTasks({ focus: true });
+  });
+  statusWin.on('closed', () => {
+    statusWin = null; statusMinimized = false; statusQueued = false;
+    statusTasks.clear(); statusActions.clear(); statusPayload = null;
+    refreshTray();
+  });
+  statusWin.on('minimize', () => { statusMinimized = true; });
+  statusWin.on('restore', () => { statusMinimized = false; });
+  statusQueued = true;
+  return false;
 }
 
 // 退出确认未决时的复位(「取消」语义):三处触发源复用(点「取消」/确认框被直接关闭/确认框加载失败)。
@@ -451,43 +507,52 @@ function resetQuitConfirm() {
 }
 
 function showStatus(p) {
-  statusPayload = p;
-  if (!statusWin) {
-    statusWin = new BrowserWindow({
-      width: 410, height: 186, useContentSize: true,
-      frame: false, resizable: false, skipTaskbar: false, show: false,
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'status-preload.js') },
-    });
-    statusWin.setMenuBarVisibility(false);
-    // 与对话框/报告窗一致:在主窗口所在显示器居中(否则副屏用户会在主屏看到状态窗/进度窗)
-    centerOn(statusWin, mainWindow);
-    statusWin.loadFile(path.join(__dirname, 'status.html')).catch(() => {});
-    statusWin.webContents.once('did-finish-load', flushStatus);
-    statusWin.on('closed', () => { statusWin = null; statusMinimized = false; statusActions = null; statusPayload = null; });
-    statusWin.on('minimize', () => { statusMinimized = true; });
-    statusWin.on('restore', () => { statusMinimized = false; });
-    statusQueued = p;
-    return;
-  }
-  if (statusQueued) { statusQueued = p; return; } // 窗口仍在加载:更新排队载荷
-  sendStatus(p); // 窗口已就绪:直接下发(修复"检查后结果永远不显示")
+  const id = taskIdOf(p);
+  // 幂等 upsert:同一任务源重复 show(如重新检查)只更新自己的槽位,不影响另一流任务
+  statusTasks.set(id, { ...statusTasks.get(id), ...p, id, done: false, ephemeral: false, ts: Date.now() });
+  if (!ensureStatusWindow()) return; // 窗口加载中:did-finish-load 统一补发
+  pushTasks({ focus: true });
 }
 
 function updateStatus(patch) {
-  if (statusQueued) { statusQueued = { ...statusQueued, ...patch }; statusPayload = statusQueued; refreshTray(); return; }
-  if (!statusWin) return;
-  statusPayload = { ...(statusPayload || {}), ...patch };
-  statusWin.webContents.send('st:set', statusPayload);
-  applyStatusProgress(statusPayload);
-  refreshTray(); // 下载进度同步进托盘 tooltip(P0-3)
+  const id = taskIdOf(patch);
+  const cur = statusTasks.get(id);
+  if (!cur) return; // 任务已被取消/窗口已关:迟到进度帧丢弃
+  statusTasks.set(id, { ...cur, ...patch, id });
+  if (!statusWin || statusQueued) return;
+  pushTasks(); // 进度帧不抢焦点
+}
+
+function dismissTask(id) {
+  statusTasks.delete(id);
+  statusActions.delete(id);
+  if (!statusTasks.size) { closeStatus(); return; } // 最后一条关闭即收窗(保持旧 ✕ 语义)
+  pushTasks();
 }
 
 function closeStatus() {
   statusWin?.destroy();
   statusWin = null;
-  statusActions = null;
+  statusQueued = false;
+  statusTasks.clear();
+  statusActions.clear();
   statusPayload = null; // 清残留:否则 result 残留会让后续 nonIntrusive 结果被永久跳过
   refreshTray(); // 状态窗关闭,tooltip 去掉"下载中"段
+}
+
+// 轻量确认反馈三合一(P1-1):accel 保存 / report 导出复制等瞬时确认统一进任务中心活动流。
+// 窗口未开时不强拉窗口(不打扰),只在已有窗口内追加;4s 自动消退,不留历史
+let toastTimer = null;
+function notifyToast(text) {
+  if (!statusWin) return;
+  statusTasks.set('toast', { id: 'toast', mode: 'toast', title: String(text), done: true, ephemeral: true, ts: Date.now() });
+  pushTasks();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastTimer = null;
+    if (!statusTasks.delete('toast')) return;
+    if (!statusTasks.size) closeStatus(); else pushTasks();
+  }, 4000);
 }
 
 // 更新流程占用时的菜单反馈:有状态窗则回到进度窗;否则弹提示(用户点了菜单不能静默无响应)
@@ -515,29 +580,25 @@ function statusNotify(title, body) {
   } catch (e) { log(`通知失败: ${e.message}`); }
 }
 
-// 另一更新流的活动窗(下载/安装)正占用状态窗时,本次结果不覆盖它:
-// 覆盖会顶掉进度与取消入口,用户可能点中错位的按钮(与来源无关,主动/被动结果都受保护)
-function otherFlowActive(origin) {
-  if (origin === 'desktop') return !!(updates.state.dshInstallChild || updates.state.dshStoppedForInstall);
-  if (origin === 'dsh') return !!updates.state.downloadInProgress;
-  return false;
-}
-
-// 结果视图:type=info/success/warning/error;回程按钮走 onAction(id)
-// nonIntrusive=true 用于被动路径(自动检查的通知点击等):任一更新流程正占着状态窗
-// (桌面下载 / dsh 安装 / 任意结果视图 / 检查中)时跳过本次弹窗,避免两个更新流互相顶掉按钮——
+// 结果视图:type=info/success/warning/error;回程按钮走 onAction(id)。
+// P1-1 起结果为任务槽中的一条完成项:不再顶掉进行中的另一更新流(otherFlowActive 互斥链已删);
+// 有其他进行中任务时结果不抢焦点(参照 VS Code 通知:出现但不打断),用户从列表处置。
+// nonIntrusive=true 用于被动路径(自动检查的通知点击等):任一更新流程进行中时仍跳过弹窗,避免打扰——
 // 用户仍可从菜单重查
 function showStatusResult(p, onAction, nonIntrusive) {
-  if (otherFlowActive(p.__origin)) {
-    log(`跳过结果弹窗(另一更新流活动窗占用): ${p.title}`);
-    return;
-  }
-  if (nonIntrusive && (updates.state.downloadInProgress || updates.state.dshInstallChild || updates.state.dshStoppedForInstall || statusPayload?.mode === 'result' || statusPayload?.mode === 'check')) {
+  if (nonIntrusive && (updates.state.downloadInProgress || updates.state.dshInstallChild || updates.state.dshStoppedForInstall || [...statusTasks.values()].some((t) => !t.done))) {
     log(`跳过被动结果弹窗(更新流程进行中): ${p.title}`);
     return;
   }
-  statusActions = onAction || null;
-  showStatus({ ...p, mode: 'result' });
+  const id = taskIdOf(p);
+  if (onAction) statusActions.set(id, onAction); else statusActions.delete(id);
+  statusTasks.set(id, { ...statusTasks.get(id), ...p, id, mode: 'result', done: true, ephemeral: false, ts: Date.now() });
+  if (!ensureStatusWindow()) { statusQueued = true; }
+  else {
+    // 有其他进行中任务:结果只入列表不抢焦点;否则正常聚焦
+    const hasActive = [...statusTasks.values()].some((t) => !t.done);
+    pushTasks({ focus: !hasActive });
+  }
   statusNotify(p.title || 'DSH', String(p.detail || '').split('\n')[0]);
 }
 
@@ -561,16 +622,27 @@ ipcMain.on('st:close', (e) => {
   if (!trustedEvent(e)) return;
   closeStatus();
 });
-ipcMain.on('st:action', (e, id) => {
+ipcMain.on('st:action', (e, m) => {
+  if (!trustedEvent(e) || !m) return;
+  const fn = statusActions.get(m.taskId);
+  statusActions.delete(m.taskId); // 回调一次性:防重复点击/迟到帧二次触发
+  if (fn) fn(m.btnId);
+});
+// 关闭单条已完成任务(列表模式);最后一条关闭即收窗
+ipcMain.on('st:dismiss', (e, taskId) => {
   if (!trustedEvent(e)) return;
-  const fn = statusActions;
-  statusActions = null;
-  if (fn) fn(id);
+  dismissTask(String(taskId));
 });
 // ✕ 按钮语义 = 取消当前操作并关闭窗口(检查/下载/安装);「后台」按钮才是最小化
 ipcMain.on('st:cancel', (e) => {
   if (!trustedEvent(e)) return;
-  updates.cancelStatusOp(); // 取消逻辑本体在 updates.js(清计时器/忽略迟到结果/中止下载与 npm 安装)
+  updates.cancelStatusOp(statusPayload?.__origin); // 取消逻辑本体在 updates.js(清计时器/忽略迟到结果/中止下载与 npm 安装)
+});
+// 列表模式行级取消:按任务 id 精确取消所属流,不误伤另一更新流
+ipcMain.on('st:cancel-one', (e, taskId) => {
+  if (!trustedEvent(e)) return;
+  const id = String(taskId);
+  updates.cancelStatusOp(id === 'default' ? undefined : id);
 });
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
@@ -796,6 +868,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     cfg.downloadSegments = clamped;
     if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 分段数 → ${clamped}`);
+    notifyToast(`加速设置已保存:并发 ${clamped} 段`); // 瞬时确认进任务中心活动流(P1-1)
     return { ok: true, value: clamped };
   }
   if (field === 'mirror') {
@@ -810,6 +883,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     else delete cfg.downloadMirror;
     if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 镜像源 ${raw ? '→ ' + raw : '已清除'}`);
+    notifyToast(raw ? '镜像源已保存' : '已恢复官方下载源');
     return { ok: true, value: raw };
   }
   return { ok: false, error: '未知设置项' };
@@ -919,6 +993,7 @@ ipcMain.on('rp:export', (e) => {
   try {
     fs.writeFileSync(save, reportText, 'utf8');
     reportWin.webContents.send('rp:exported', save);
+    notifyToast('错误报告已导出');
     shell.showItemInFolder(save);
   } catch (e2) {
     log(`报告导出失败: ${e2.message}`);
@@ -928,6 +1003,7 @@ ipcMain.on('rp:copy', (e) => {
   if (!trustedEvent(e)) return;
   clipboard.writeText(reportText);
   reportWin?.webContents.send('rp:copied');
+  notifyToast('错误报告已复制到剪贴板');
 });
 ipcMain.on('rp:open-log', (e) => {
   if (!trustedEvent(e)) return;
@@ -1581,7 +1657,8 @@ if (!gotLock) {
       bootDsh,
       showStatus, showStatusResult, updateStatus, closeStatus,
       showDialog, noticeFlowBusy, trackNotification,
-      getStatusPayload: () => statusPayload,
+      dismissTask, // 任务中心(P1-1):按任务关闭单条(取消语义精确到流)
+      getStatusPayload: (origin) => (origin ? statusTasks.get(origin) || null : statusPayload),
       isQuitting: () => quitting,
       getDshChild: () => dshChild,
       setDshChild: (c) => { dshChild = c; },
@@ -1621,6 +1698,7 @@ if (!gotLock) {
         get trayState() { return trayState; },
         trayStatusText,
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
+        notifyToast,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
         toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
         configPath, loadConfig, saveConfig,

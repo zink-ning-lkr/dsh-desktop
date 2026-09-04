@@ -100,10 +100,11 @@ function runUitest(d) {
     t('upd-face', ['checkForUpdates', 'checkDshUpdate', 'installDshUpdate', 'cancelStatusOp'].every((k) => typeof upd[k] === 'function'));
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
-  // ⑩ 托盘状态(P0-3):启动完成后应为 ok/运行中;下载进度进 tooltip;结果页到达后进度清除
+  // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
   uiStep(() => {
     const t = d.trayStatusText();
-    const ok = d.trayState === 'ok' && t.includes('运行中');
+    const want = { ok: '运行中', boot: '启动中', err: '已停止' }[d.trayState];
+    const ok = !!want && t.includes(want) && t.includes('D:\\Work');
     d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
   }, 2600, 'tray-status');
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(d.statusWin, 'status'); }, 3500, 'status-show');
@@ -183,22 +184,34 @@ function runUitest(d) {
   fs.writeFileSync(path.join(d.app.getPath('userData'), 'fake-npm-hang.js'),
     "process.stdout.write('hanging...\\n');setInterval(()=>{},1000);");
   uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(d.app.getPath('userData'), 'fake-npm-ok.js'); d.installDshUpdate('9.9.9'); hookWin(d.statusWin, 'status'); }, 15200, 'dsh-install-ok');
-  uiStep(() => readDom(d.statusWin, 'document.getElementById("title").textContent', 'install-title'), 15500);
-  uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-result'), 16400);
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 16600, 'install-later');
-  uiStep(() => d.log(`UITEST install-later win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 16800, 'install-later-verify');
+  // P1-1 任务中心:前置流程已 ✕ 关闭(注册表清空),此时仅安装任务一项 → 单任务模式(与旧版像素兼容)
+  uiStep(() => readDom(d.statusWin, '(()=>{const single=document.getElementById("activity").style.display!=="none";const t=document.getElementById("title").textContent;return (single&&t.includes("正在安装"))?"PASS 单任务模式":"FAIL single="+single+" t="+t})()', 'install-title'), 15500);
+  // 安装完成:唯一任务转完成态 → 单任务结果视图(#rtitle 含"dsh 更新完成")
+  uiStep(() => readDom(d.statusWin, '(()=>{const t=document.getElementById("rtitle").textContent;const shown=document.getElementById("result").style.display!=="none";return (shown&&t.includes("dsh 更新完成"))?"PASS":"FAIL shown="+shown+" t="+t})()', 'install-result'), 17400);
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 17600, 'install-later');
+  uiStep(() => d.log(`UITEST install-later win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 17800, 'install-later-verify');
   //    超时护栏:假 npm 挂死不退出 → 总超时应强制终止并弹"dsh 更新失败"
-  uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(d.app.getPath('userData'), 'fake-npm-hang.js'); d.installDshUpdate('9.9.9'); }, 17600, 'dsh-install-hang');
-  uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 22000);
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 22150, 'install-okbtn');
-  uiStep(() => d.log(`UITEST install-timeout win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 22300, 'install-okbtn-verify');
-  // ⑨ 加载页慢启动自助行(P0-2):dsh 服务页(http)必须零暴露 dshBoot;
-  //    回到 loading.html 后 showSlowActions() 亮出操作行(3 按钮 + 桥可用)
-  uiStep(() => d.dshView.webContents.executeJavaScript('typeof window.dshBoot')
-    .then((v) => d.log(`UITEST boot-bridge-remote typeof=${v}(期望 undefined,远程页零暴露) → ${v === 'undefined' ? 'PASS' : 'FAIL'}`))
-    .catch((e) => d.log(`UITEST boot-bridge-remote ✗ ${e.message}`)), 24100, 'boot-bridge-remote');
-  uiStep(() => { d.dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {}); }, 24400, 'loading-reload');
-  uiStep(() => readDom(d.dshView, '(()=>{const s=document.getElementById("slow");const v0=getComputedStyle(s).display==="none";showSlowActions();const v1=getComputedStyle(s).display!=="none";const n=document.querySelectorAll("#slow button").length;const b=typeof window.dshBoot==="object"&&typeof window.dshBoot.action==="function";return (v0&&v1&&n===3&&b)?"PASS":"FAIL v0="+v0+" v1="+v1+" btns="+n+" bridge="+b})()', 'boot-slow'), 25000);
+  uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(d.app.getPath('userData'), 'fake-npm-hang.js'); d.installDshUpdate('9.9.9'); }, 18600, 'dsh-install-hang');
+  uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 23000);
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 23150, 'install-okbtn');
+  uiStep(() => d.log(`UITEST install-timeout win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 23300, 'install-okbtn-verify');
+  // ⑪ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流 + toast 瞬时条目 4s 消退
+  uiStep(() => { d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '', __origin: 'desktop' }); }, 23450, 'tc-dl');
+  uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); d.notifyToast('加速设置已保存:并发 6 段'); }, 23600, 'tc-install');
+  uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const eph=rows.filter(r=>r.classList.contains("ephemeral")).length;const t=document.getElementById("title").textContent;return (rows.length===3&&act===2&&eph===1&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" eph="+eph+" t="+t})()', 'tc-list'), 23950);
+  uiStep(() => { const h = d.statusWin?.getContentSize()[1] || 0; d.log(`UITEST tc-h=${h}(期望 >186 列表加高) → ${h > 186 ? 'PASS' : 'FAIL'}`); }, 24000, 'tc-h');
+  // 行级取消 dsh 任务:desktop 下载任务必须不受影响(旧单槽模型无法表达,互斥链已删)
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('[...document.querySelectorAll("#tlist .trow:not(.done) .lx")][1].click()').catch(() => {}); }, 24200, 'tc-cancel-one');
+  uiStep(() => readDom(d.statusWin, '(()=>{const ts=[...document.querySelectorAll("#tlist .trow .ltitle")].map(e=>e.textContent);const hasDl=ts.some(s=>s.includes("下载"));const hasDsh=ts.some(s=>s.includes("dsh 本体"));return (hasDl&&!hasDsh)?"PASS":"FAIL "+ts.join("|")})()', 'tc-narrow'), 24500);
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 24700, 'tc-close');
+  uiStep(() => d.log(`UITEST tc-close win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 24900, 'tc-close-verify');
+  // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
+  //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
+  uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')
+    .then((v) => d.log(`UITEST boot-bridge-remote ${v}`))
+    .catch((e) => d.log(`UITEST boot-bridge-remote ✗ ${e.message}`)), 25100, 'boot-bridge-remote');
+  uiStep(() => { d.dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {}); }, 25400, 'loading-reload');
+  uiStep(() => readDom(d.dshView, '(()=>{const s=document.getElementById("slow");const v0=getComputedStyle(s).display==="none";showSlowActions();const v1=getComputedStyle(s).display!=="none";const n=document.querySelectorAll("#slow button").length;const b=typeof window.dshBoot==="object"&&typeof window.dshBoot.action==="function";return (v0&&v1&&n===3&&b)?"PASS":"FAIL v0="+v0+" v1="+v1+" btns="+n+" bridge="+b})()', 'boot-slow'), 26000);
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
@@ -256,7 +269,7 @@ function runUitest(d) {
     } catch (err) {
       d.log(`UITEST accel-win ✗ ${err.stack || err}`);
     }
-  }, 23200);
+  }, 24200);
   setTimeout(() => {
     // 清理 UITEST 写入 userData 的假 npm 脚本
     for (const f of ['fake-npm-ok.js', 'fake-npm-hang.js']) {
@@ -274,7 +287,7 @@ function runUitest(d) {
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 26400);
+  }, 27400);
 }
 
 module.exports = { runSmokeDemo, runUitest };

@@ -1,4 +1,5 @@
-<!-- 统一状态窗:检查更新/下载进度/dsh 安装/结果视图,可挂后台(最小化到任务栏),完成时通知 -->
+<!-- 统一状态窗(任务中心 P1-1):单任务时保持旧单视图(像素级兼容);
+     多任务并存时渲染任务列表,完成项可折叠进历史;可挂后台(最小化到任务栏),完成时通知 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -52,7 +53,7 @@
   .fill.indet::after { display: none; }
   @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
   .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-fg2); }
-  /* -------- 结果视图 -------- */
+  /* -------- 结果视图(单任务) -------- */
   .result { display: none; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center;
     gap: 12px; padding: 14px 20px 18px; }
   .result .big { width: 46px; height: 46px; } /* 尺寸覆盖 ui.css 公共 .big(40px),配色仍走 .big.<type> */
@@ -61,6 +62,39 @@
   .rdetail { font-size: 12px; color: var(--c-fg2); text-align: center; line-height: 1.5; max-height: 62px; min-height: 0; overflow-y: auto;
     white-space: pre-wrap; word-break: break-all; user-select: text; }
   .btns { flex: none; display: flex; gap: 8px; margin-top: 2px; }
+  /* -------- 任务列表(多任务) -------- */
+  .tlist { display: none; flex: 1; min-height: 0; flex-direction: column; gap: 4px; padding: 8px 10px 12px; overflow-y: auto; }
+  .trow {
+    display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px;
+    border: 1px solid var(--c-border); border-radius: var(--radius-l); background: var(--c-bg1);
+  }
+  .trow .lico { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--c-brand-hi); }
+  .trow .lico svg { width: 18px; height: 18px; }
+  .trow.done .lico.info { color: var(--c-brand-hi); }
+  .trow.done .lico.success { color: var(--c-ok); }
+  .trow.done .lico.warning { color: var(--c-warn); }
+  .trow.done .lico.error { color: var(--c-err); }
+  .trow .lbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .trow .ltitle { font-size: 13px; color: var(--c-fg0); font-weight: 600; line-height: 1.35; }
+  .trow .ldetail { font-size: 11.5px; color: var(--c-fg2); line-height: 1.45; white-space: pre-wrap; word-break: break-all;
+    max-height: 34px; overflow-y: auto; user-select: text; }
+  .trow .lbtns { display: flex; gap: 6px; }
+  .trow .lbtns .btn { padding: 4px 10px; font-size: 11.5px; }
+  .trow .lx {
+    width: 22px; height: 22px; flex: none; border: none; border-radius: var(--radius-s); background: transparent;
+    color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
+    transition: background var(--dur-mid), color var(--dur-mid);
+  }
+  .trow .lx:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
+  .trow .lx svg { width: 11px; height: 11px; }
+  .hist {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px 2px; font-size: 11.5px; color: var(--c-fg2);
+    cursor: default; border: none; background: transparent; width: 100%; text-align: left;
+  }
+  .hist:hover { color: var(--c-fg1); }
+  .hist .tri { transition: transform var(--dur-mid); font-size: 9px; }
+  .hist.open .tri { transform: rotate(90deg); }
+  .trow.ephemeral { opacity: .8; border-style: dashed; }
   @media (prefers-reduced-motion: reduce) { .fill.indet, .fill::after { animation: none; } }
 </style>
 </head>
@@ -85,6 +119,7 @@
     <div class="rdetail" id="rdetail"></div>
     <div class="btns" id="btns"></div>
   </div>
+  <div class="tlist" id="tlist"></div>
 </div>
 <script>
   const S = window.__status;
@@ -93,6 +128,7 @@
     download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     install: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="7.5"/><path d="M12 6v6l3.5 2" stroke-linecap="round"/></svg>',
     restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 3.5v3.2h-3.2" stroke-linecap="round"/></svg>',
+    toast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4a5 5 0 0 0-5 5v3.2L5 15h14l-2-2.8V9a5 5 0 0 0-5-5zM10 18a2 2 0 0 0 4 0" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   };
   const RES = {
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.2" stroke-linecap="round"/></svg>',
@@ -100,14 +136,18 @@
     warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4.5 22 20H2z"/><path d="M12 10v4.5M12 17.4v.2" stroke-linecap="round"/></svg>',
     error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6" stroke-linecap="round"/></svg>',
   };
-  let cur = null;
+  let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
+  let listMode = false;
+  let histOpen = false;
 
+  /* -------- 单任务视图(与旧版逐行一致,像素级兼容) -------- */
   function render(p) {
     cur = p;
     document.title = p.title || 'DSH';
     const isRes = p.mode === 'result';
     document.getElementById('activity').style.display = isRes ? 'none' : 'flex';
     document.getElementById('result').style.display = isRes ? 'flex' : 'none';
+    document.getElementById('tlist').style.display = 'none';
     document.getElementById('bgBtn').style.display = isRes ? 'none' : '';
     document.getElementById('ico').innerHTML = isRes ? (RES[p.type || 'info'] || RES.info) : (ACT[p.mode] || ACT.check);
     document.getElementById('title').textContent = p.title || '';
@@ -127,7 +167,7 @@
         const el = document.createElement('button');
         el.textContent = b.label;
         el.className = 'btn' + (b.primary ? ' primary' : '');
-        el.addEventListener('click', () => S.action(b.id));
+        el.addEventListener('click', () => S.action(p.id, b.id));
         btns.appendChild(el);
       });
       // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮
@@ -146,13 +186,119 @@
     document.getElementById('size').textContent = p.size || '';
   }
 
+  /* -------- 多任务列表(任务中心) -------- */
+  function taskRow(t) {
+    const row = document.createElement('div');
+    row.className = 'trow' + (t.done ? ' done' : '') + (t.ephemeral ? ' ephemeral' : '');
+    row.dataset.taskId = t.id;
+    const ico = document.createElement('span');
+    ico.className = 'lico' + (t.done ? ' ' + (t.type || 'info') : '');
+    ico.innerHTML = t.done ? (RES[t.type || 'info'] || RES.info) : (ACT[t.mode] || ACT.check);
+    const body = document.createElement('div');
+    body.className = 'lbody';
+    const title = document.createElement('div');
+    title.className = 'ltitle';
+    title.textContent = t.title || '';
+    body.appendChild(title);
+    if (t.detail) {
+      const det = document.createElement('div');
+      det.className = 'ldetail';
+      det.textContent = t.detail;
+      body.appendChild(det);
+    }
+    if (!t.done) {
+      // 进行中:进度条 + pct/size(与单视图同一套样式)
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      const fill = document.createElement('div');
+      const has = typeof t.progress === 'number';
+      fill.className = 'fill' + (has ? '' : ' indet');
+      if (has) fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%';
+      bar.appendChild(fill);
+      body.appendChild(bar);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const pct = document.createElement('span');
+      pct.textContent = t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? '请稍候…' : ''));
+      const size = document.createElement('span');
+      size.textContent = t.size || '';
+      meta.append(pct, size);
+      body.appendChild(meta);
+    } else if (!t.ephemeral && (t.buttons || []).length) {
+      const btns = document.createElement('div');
+      btns.className = 'lbtns';
+      t.buttons.forEach((b) => {
+        const el = document.createElement('button');
+        el.textContent = b.label;
+        el.className = 'btn' + (b.primary ? ' primary' : '');
+        el.addEventListener('click', () => S.action(t.id, b.id));
+        btns.appendChild(el);
+      });
+      body.appendChild(btns);
+    }
+    const x = document.createElement('button');
+    x.className = 'lx';
+    x.title = t.done ? '关闭此条' : '取消此项';
+    x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    x.addEventListener('click', () => (t.done ? S.dismiss(t.id) : S.cancelOne(t.id)));
+    row.append(ico, body, x);
+    return row;
+  }
+
+  function renderList(tasks) {
+    cur = null;
+    const act = tasks.filter((t) => !t.done);
+    const done = tasks.filter((t) => t.done && !t.ephemeral);
+    const eph = tasks.filter((t) => t.done && t.ephemeral);
+    document.getElementById('activity').style.display = 'none';
+    document.getElementById('result').style.display = 'none';
+    const list = document.getElementById('tlist');
+    list.style.display = 'flex';
+    list.innerHTML = '';
+    document.getElementById('ico').innerHTML = ACT.check;
+    document.getElementById('title').textContent = act.length ? `任务中心(${act.length} 项进行中)` : '任务中心';
+    document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
+    document.getElementById('xBtn').title = '全部关闭';
+    // 进行中任务置顶;短暂提示紧随其后;完成项有进行中任务时折叠进历史
+    act.forEach((t) => list.appendChild(taskRow(t)));
+    eph.forEach((t) => list.appendChild(taskRow(t)));
+    if (done.length && act.length) {
+      const h = document.createElement('button');
+      h.className = 'hist' + (histOpen ? ' open' : '');
+      h.innerHTML = `<span class="tri">▶</span><span>已完成 ${done.length} 项</span>`;
+      h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); toggleHist(); });
+      list.appendChild(h);
+      const wrap = document.createElement('div');
+      wrap.id = 'histWrap';
+      wrap.style.display = histOpen ? 'contents' : 'none';
+      done.forEach((t) => wrap.appendChild(taskRow(t)));
+      list.appendChild(wrap);
+    } else {
+      done.forEach((t) => list.appendChild(taskRow(t)));
+    }
+  }
+  function toggleHist() {
+    const w = document.getElementById('histWrap');
+    if (w) w.style.display = histOpen ? 'contents' : 'none';
+  }
+
+  function renderTasks(tasks) {
+    listMode = tasks.length > 1;
+    if (!listMode && tasks.length === 1) { render(tasks[0]); return; }
+    if (!tasks.length) return; // 主进程随即关窗,忽略空帧
+    renderList(tasks);
+  }
+
   document.getElementById('bgBtn').addEventListener('click', () => S.background());
-  // 活动态 ✕ = 取消并关闭(检查/下载/安装);结果态 ✕ = 仅关闭
-  document.getElementById('xBtn').addEventListener('click', () => (cur && cur.mode === 'result' ? S.close() : S.cancel()));
+  // 单任务:活动态 ✕ = 取消并关闭,结果态 ✕ = 仅关闭;多任务列表:✕ = 全部关闭
+  document.getElementById('xBtn').addEventListener('click', () => {
+    if (listMode) { S.close(); return; }
+    (cur && cur.mode === 'result' ? S.close() : S.cancel());
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') document.getElementById('xBtn').click();
   });
-  S.onSet(render);
+  S.onTasks(renderTasks);
 </script>
 </body>
 </html>

@@ -88,8 +88,9 @@ function finishDshCheckTimer() {
 // 是否已展示过「下载失败」结果窗:下载失败会同时走 autoUpdater 的 error 事件与
 // downloadUpdate 的 promise reject,两边都弹会双重显示,互相见结果为真则跳过
 function downloadErrorShown() {
-  const p = deps && deps.getStatusPayload();
-  return !!(p && p.mode === 'result' && p.__origin === 'desktop' && p.title && String(p.title).includes('下载失败'));
+  // 任务中心模型:按流直取 desktop 任务槽(完成态结果仍保留在注册表,直到用户关闭)
+  const p = deps && deps.getStatusPayload('desktop');
+  return !!(p && p.mode === 'result' && p.title && String(p.title).includes('下载失败'));
 }
 
 // ---------- 桌面端更新加速下载(多线程分段,失败回退官方) ----------
@@ -168,12 +169,12 @@ async function acceleratedDownload(info, token) {
       segments,
       sha512: fileInfo.sha512,
       onProgress: (p) => {
-        const cur = deps.getStatusPayload();
+        const cur = deps.getStatusPayload('desktop');
         if (!cur || cur.mode !== 'download') return;
         const dt = Math.max(1, Date.now() - speedFrom);
         const speed = (p.transferred / dt) * 1000;
         deps.updateStatus({
-          mode: 'download', progress: p.percent,
+          mode: 'download', progress: p.percent, __origin: 'desktop',
           pct: p.percent.toFixed(1) + '%',
           size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB · ${(speed / 1048576).toFixed(1)} MB/s`,
         });
@@ -257,14 +258,14 @@ function onUpdateAvailable(info) {
 // 官方下载进度:按 150ms 节流(与自研多线程下载器一致,避免每 chunk 一次 IPC 刷屏)
 function onDownloadProgress(p) {
   if (!deps) return;
-  const cur = deps.getStatusPayload();
+  const cur = deps.getStatusPayload('desktop');
   if (!cur || cur.mode !== 'download') return;
   const now = Date.now();
   if (now - state.lastOfficialProgressAt < 150) return;
   state.lastOfficialProgressAt = now;
   const speed = p.bytesPerSecond ? `${(p.bytesPerSecond / 1048576).toFixed(1)} MB/s` : '';
   deps.updateStatus({
-    mode: 'download',
+    mode: 'download', __origin: 'desktop',
     progress: p.percent,
     pct: p.percent.toFixed(1) + '%',
     size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB${speed ? ' · ' + speed : ''}`,
@@ -777,38 +778,39 @@ function checkDshUpdate(manual) {
   });
 }
 
-// 取消当前状态窗对应操作:清计时器、忽略迟到结果、中止下载/停止 npm 安装、关闭窗口
-function cancelStatusOp() {
+// 取消状态窗任务对应操作:清计时器、忽略迟到结果、中止下载/停止 npm 安装、关闭对应任务。
+// origin 显式传入(任务中心行级取消)或取最近活动任务的 __origin(窗口级 ✕);
+// 取消语义按流收窄:中止/清理只落在所属流,不误伤另一更新流(P1-1 任务中心)
+function cancelStatusOp(originArg) {
   log('用户取消当前操作(状态窗关闭)');
   state.statusOpCancelled = true;
-  // 取消语义按当前状态窗所属流收窄:取消桌面检查不得误吞在途的 dsh 自动检查结果(唯一一次自动通知),反之亦然
-  const payload = deps.getStatusPayload();
-  const origin = payload && payload.__origin;
+  const origin = originArg || (deps.getStatusPayload() || {}).__origin;
   if (origin !== 'dsh') {
     if (state.updateCheckTimer) finishUpdateCheckTimer();
     state.manualCheckDropped = true;     // 忽略迟到的桌面端检查结果(取消语义:一律丢弃)
+    if (state.downloadInProgress) state.desktopDownloadCanceled = true; // 正在下载:迟到结果不再弹窗
+    if (state.downloadToken) { state.downloadToken.cancel(); state.downloadToken = null; } // 中止桌面端下载传输
+    state.downloadInProgress = false;
+    state.updateDownloaded = false;
+    state.pendingVersion = null;
   }
   if (origin !== 'desktop') {
     if (state.dshCheckTimer) finishDshCheckTimer();
     state.dshManualCheckDropped = true;  // 忽略迟到的 dsh 本体检查结果
+    if (state.dshInstallChild) {
+      state.installCancelled = true;
+      const c = state.dshInstallChild;
+      state.dshInstallChild = null;
+      killTree(c);
+    }
+    // 安装 dsh 本体期间服务已被暂停:取消后立即恢复,避免应用失去 dsh 服务
+    if (state.dshStoppedForInstall) {
+      state.dshStoppedForInstall = false;
+      if (!deps.isQuitting()) deps.bootDsh();
+    }
   }
-  if (state.downloadInProgress) state.desktopDownloadCanceled = true; // 正在下载:迟到结果不再弹窗
-  if (state.downloadToken) { state.downloadToken.cancel(); state.downloadToken = null; } // 中止桌面端下载传输
-  state.downloadInProgress = false;
-  state.updateDownloaded = false;
-  state.pendingVersion = null;
-  if (state.dshInstallChild) {
-    state.installCancelled = true;
-    const c = state.dshInstallChild;
-    state.dshInstallChild = null;
-    killTree(c);
-  }
-  // 安装 dsh 本体期间服务已被暂停:取消后立即恢复,避免应用失去 dsh 服务
-  if (state.dshStoppedForInstall) {
-    state.dshStoppedForInstall = false;
-    if (!deps.isQuitting()) deps.bootDsh();
-  }
-  deps.closeStatus();
+  // 任务中心:按流关闭对应任务槽;无明确流(旧窗口级语义)才整窗关闭
+  if (origin) deps.dismissTask(origin); else deps.closeStatus();
 }
 
 module.exports = {
