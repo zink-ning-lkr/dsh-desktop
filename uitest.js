@@ -220,6 +220,39 @@ function runUitest(d) {
   uiStep(() => readDom(d.menuPopupView, '(()=>{const before=document.querySelector(".item.sel");document.dispatchEvent(new KeyboardEvent("keydown",{key:"重"}));const after=document.querySelector(".item.sel");return (after&&after!==before&&after.textContent.includes("重"))?"PASS → "+after.textContent.trim().slice(0,10):"FAIL before="+(before&&before.textContent.trim().slice(0,10))+" after="+(after&&after.textContent.trim().slice(0,10))})()', 'a11y-typeahead'), 27300);
   uiStep(() => { d.menuPopupView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 27600, 'a11y-esc');
   uiStep(() => d.log(`UITEST a11y-closed win=${!!d.menuPopupView}(期望 false) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 27900, 'a11y-closed-verify');
+  // ⑫ 外观主题(P1-2):菜单项存在 → 点击循环(auto→dark→light→auto) → config/themeSource 映射
+  //    → 渲染层 data-theme + 令牌覆写 + 鲸鱼 logo 黑白换版;结束恢复原配置
+  const theme0 = d.loadConfig().theme;
+  const clickThemeItem = (win) => win?.webContents.executeJavaScript(
+    '(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("外观:"));if(!it)return "FAIL no-item";const label=it.textContent.trim();it.parentElement.click();return label})()'
+  ).catch((e) => 'ERR ' + e.message);
+  uiStep(() => { d.showMenuPopup(); }, 28200, 'theme-menu-open');
+  uiStep(() => clickThemeItem(d.menuPopupView), 28500, 'theme-click-1');
+  uiStep(() => { const cfg = d.loadConfig().theme; const src = d.getThemeSource(); const ok = cfg === 'dark' && src === 'dark'; d.log(`UITEST theme-1 auto→dark cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`); }, 28800, 'theme-1-verify');
+  uiStep(() => { d.showMenuPopup(); }, 29100, 'theme-menu-open2');
+  uiStep(() => clickThemeItem(d.menuPopupView), 29400, 'theme-click-2');
+  uiStep(() => {
+    const cfg = d.loadConfig().theme; const src = d.getThemeSource();
+    const ok = cfg === 'light' && src === 'light';
+    d.log(`UITEST theme-2 dark→light cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`);
+    // 已开窗的渲染器应实时换肤(reportWin 自 11.8s 起一直开着,未重建)
+    readDom(d.reportWin,
+      `(()=>{const attr=document.documentElement.getAttribute("data-theme");const bg0=getComputedStyle(document.documentElement).getPropertyValue("--c-bg0").trim();const logo=document.querySelector(".logo").src;return (attr==="light"&&bg0==="#ffffff"&&logo.includes("whale-black"))?"PASS attr="+attr+" bg0="+bg0:"FAIL attr="+attr+" bg0="+bg0+" logo="+logo})()`,
+      'theme-light-dom');
+  }, 29700, 'theme-2-verify');
+  uiStep(() => { d.showMenuPopup(); }, 30100, 'theme-menu-open3');
+  uiStep(() => clickThemeItem(d.menuPopupView), 30400, 'theme-click-3');
+  uiStep(() => {
+    const cfg = d.loadConfig().theme; const src = d.getThemeSource();
+    const ok = cfg === 'auto' && src === 'system';
+    d.log(`UITEST theme-3 light→auto cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`);
+    // 回到 auto:渲染层 data-theme 应与系统 prefers-color-scheme 自洽(测试机系统主题未知,断言一致性而非具体值)
+    readDom(d.reportWin,
+      `(()=>{const attr=document.documentElement.getAttribute("data-theme")||"";const want=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"";return (attr===want)?"PASS attr="+attr:"FAIL attr="+attr+" want="+want})()`,
+      'theme-auto-dom');
+  }, 30700, 'theme-3-verify');
+  uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 31100, 'theme-report-close');
+  uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 31350, 'theme-report-close-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
@@ -283,7 +316,7 @@ function runUitest(d) {
     for (const f of ['fake-npm-ok.js', 'fake-npm-hang.js']) {
       try { fs.unlinkSync(path.join(d.app.getPath('userData'), f)); } catch { /* 已不存在 */ }
     }
-    // 恢复 UITEST 动过的加速设置(segments/mirror),保证测试可重复、不污染真实配置
+    // 恢复 UITEST 动过的加速设置(segments/mirror)与外观主题(theme),保证测试可重复、不污染真实配置
     try {
       const cfg = d.loadConfig();
       if (cfg.downloadSegments !== undefined || cfg.downloadMirror !== undefined) {
@@ -292,10 +325,18 @@ function runUitest(d) {
         d.saveConfig(cfg);
         d.log('UITEST: 已恢复加速设置默认值');
       }
+      if (d.loadConfig().theme !== theme0) {
+        const cfg2 = d.loadConfig();
+        if (theme0 === undefined) delete cfg2.theme;
+        else cfg2.theme = theme0;
+        d.saveConfig(cfg2);
+        d.applyTheme();
+        d.log(`UITEST: 已恢复外观主题(${theme0 === undefined ? 'auto 默认' : theme0})`);
+      }
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 28800);
+  }, 33600);
 }
 
 module.exports = { runSmokeDemo, runUitest };

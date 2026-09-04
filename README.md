@@ -75,6 +75,7 @@ npm start
 | `port` | 固定 dsh 服务端口(不设则随机空闲端口) |
 | `openBrowser` | `true` = 启动 dsh 时不传 `--no-open`(随带打开系统浏览器) |
 | `closeAction` | `"tray"`(默认,关闭收进托盘)或 `"quit"`(关闭即退出) |
+| `theme` | `"auto"`(默认,跟随系统)、`"dark"` 或 `"light"`;由菜单「外观」项循环切换 |
 | `downloadSegments` | 桌面端更新下载的分段数(2-16,默认 6;由「下载加速设置」窗管理) |
 | `downloadMirror` | 镜像根目录 URL(可选;目录内放置与 GitHub Release 资产同名的安装包,版本检查与完整性校验仍走 GitHub 官方) |
 | `winBounds` / `winMaximized` | 窗口位置/大小/最大化状态的记忆(自动维护) |

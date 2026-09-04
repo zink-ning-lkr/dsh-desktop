@@ -98,8 +98,14 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // 本地磁盘/内存缓存限额:避免 userData 缓存无限增长(内存优化方案 P1-2)
 app.commandLine.appendSwitch('disk-cache-size', String(64 * 1024 * 1024));
-// 菜单弹层、右键菜单等原生 UI 跟随应用深色风格
-nativeTheme.themeSource = 'dark';
+// 主题决策链:config.theme(auto/dark/light,默认 auto 跟随系统) → themeSource。
+// 渲染层经 ui-theme.js 的 matchMedia 自动跟随(themeSource=system 时随 OS 实时切换)
+const THEME_SOURCE = { auto: 'system', dark: 'dark', light: 'light' };
+function applyTheme() {
+  const t = loadConfig().theme || 'auto';
+  nativeTheme.themeSource = THEME_SOURCE[t] || 'system';
+}
+applyTheme();
 
 let mainWindow = null;
 let dshChild = null;
@@ -120,6 +126,11 @@ const TITLEBAR_H = 30;
 // 而该区实际是不透明的(视图表面底色 + html 实色背景把渐变完全遮住),等于把 dsh 页面顶部
 // 裁掉一截,视觉突兀;主题跟随下栏底色与页面一致,栏底与页面顶边在 30px 处自然无缝
 const TITLE_BAR_DEFAULT = '#0d1117';
+// 窗口/视图画布底色随主题:浅色主题下启动首帧与未绘制边缘不再露深色(loading 页底色即
+// --c-bg0,与画布同色才无缝);主题切换时对窗口内全部自绘页即时生效
+function chromeBgColor() {
+  return nativeTheme.shouldUseDarkColors ? TITLE_BAR_DEFAULT : '#ffffff';
+}
 let dshView = null;
 let titlebarView = null;
 let revealTabView = null;
@@ -1126,6 +1137,8 @@ function menuItems() {
     { type: 'sep' },
     { type: 'item', id: 'auto-open-browser', label: '自动打开浏览器', checked: !!loadConfig().openBrowser },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
+    // 外观三态循环(auto→dark→light):扁平菜单无子菜单,单条目循环最省行数,label 即当前值
+    { type: 'item', id: 'cycle-theme', label: `外观:${{ auto: '跟随系统', dark: '深色', light: '浅色' }[loadConfig().theme || 'auto']}` },
     { type: 'sep' },
     // 注意:这里不显示 Alt+F4 快捷键。默认「关闭时最小化到托盘」下,Alt+F4 只隐藏窗口而非退出,
     // 提示该快捷键会误导用户;点击本项是真正的 app.quit()
@@ -1249,6 +1262,27 @@ ipcMain.on('m:action', (e, id) => {
       log(`关闭行为已切换为: ${cfg.closeAction === 'quit' ? '直接退出' : '最小化到托盘'}`);
       break;
     }
+    case 'cycle-theme': {
+      // 外观三态循环:auto(跟随系统) → dark → light → auto
+      // themeSource 变更后,全部自绘页经 ui-theme.js 的 matchMedia 自动换肤,无需逐窗通知
+      const cfg = loadConfig();
+      const order = ['auto', 'dark', 'light'];
+      cfg.theme = order[(order.indexOf(cfg.theme || 'auto') + 1) % order.length];
+      saveConfig(cfg);
+      applyTheme();
+      // 窗口画布底色随主题刷新:浅色启动时 loading 页(底色 = --c-bg0)与未绘制边缘无缝
+      try {
+        const bg = chromeBgColor();
+        mainWindow?.setBackgroundColor(bg);
+        dshView?.setBackgroundColor(bg);
+        // 标题栏 surface 以 dsh 页面采样色为准(与栏视觉一致),无采样时才回落画布色
+        titlebarView?.setBackgroundColor(lastTitlebarTheme || bg);
+      } catch { /* 窗口销毁竞态等,忽略 */ }
+      const label = { auto: '跟随系统', dark: '深色', light: '浅色' }[cfg.theme];
+      log(`外观已切换为: ${label}`);
+      notifyToast(`外观已切换:${label}`);
+      break;
+    }
     case 'quit': app.quit(); break;
   }
 });
@@ -1284,7 +1318,8 @@ async function syncTitleBarTheme() {
     const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
     if (hex === lastTitlebarTheme) return; // 主题未变化:不重复 IPC/刷色
     lastTitlebarTheme = hex;
-    titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#8b949e' : '#5f6368' }); // 前景与 ui.css --c-fg2 同源,消灭 #9aa0a6/#8b949e 双写漂移
+    // light 标志供标题栏切换鲸鱼 logo 黑白版(浅色页面上白鲸不可见;前景与 ui.css --c-fg2 同源)
+    titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#8b949e' : '#5f6368', light: lum >= 0.5 });
     // 视图表面底色跟随页面色:缩放/未绘制边缘露出的底色与页面一致,不突兀
     titlebarView.setBackgroundColor(hex);
   } catch { /* 页面未就绪等,忽略 */ } finally { titlebarThemeInFlight = false; }
@@ -1297,7 +1332,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: TITLE_BAR_DEFAULT,
+    backgroundColor: chromeBgColor(),
     frame: false,
     icon: path.join(__dirname, 'assets', 'icon.ico'), // 用 ico:任务栏/标题栏小尺寸有原生 16/24/32 档
   });
@@ -1306,8 +1341,8 @@ function createWindow() {
   titlebarView = new WebContentsView({
     webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'titlebar-preload.js') },
   });
-  // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露出白边,必须显式设暗色
-  titlebarView.setBackgroundColor(TITLE_BAR_DEFAULT);
+  // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露白边,必须显式设主题色
+  titlebarView.setBackgroundColor(chromeBgColor());
   titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html')).catch(() => {});
   // 页面加载完成后同步一次关闭语义 tooltip(loadFile 前 send 会丢)
   titlebarView.webContents.on('did-finish-load', sendCloseTip);
@@ -1323,7 +1358,7 @@ function createWindow() {
   dshView.webContents.setBackgroundThrottling(false);
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
-  dshView.setBackgroundColor(TITLE_BAR_DEFAULT);
+  dshView.setBackgroundColor(chromeBgColor());
   dshView.webContents.on('did-finish-load', () => {
     syncTitleBarTheme();
     forceViewRelayout(); // 页面加载完成后再确认一次 surface 尺寸(首帧可能仍按旧 viewport 绘制)
@@ -1699,6 +1734,8 @@ if (!gotLock) {
         trayStatusText,
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         notifyToast,
+        getThemeSource: () => nativeTheme.themeSource,
+        applyTheme,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
         toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
         configPath, loadConfig, saveConfig,

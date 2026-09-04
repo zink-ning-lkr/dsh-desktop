@@ -6,6 +6,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>titlebar</title>
 <link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
 <style>
   :root { --bg: var(--c-bg0); --fg: var(--c-fg2); }
   html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -88,15 +89,25 @@
   </div>
 <script>
   const t = window.__titlebar;
+  // 鲸鱼 logo 黑白版:标题栏底色跟 dsh 页面采样色(而非主题),logo 也随之切换,
+  // 否则浅色页面背景上白鲸不可见。采样到达前(加载页阶段)底色是令牌色,跟随 data-theme。
+  const logo = document.querySelector('.logo');
+  let sampled = false; // 已收到页面采样:此后 logo 完全由采样亮度决定,不再跟随主题属性
+  const setLogo = (light) => { logo.src = 'assets/whale-' + (light ? 'black' : 'white') + '.png'; };
+  setLogo(document.documentElement.hasAttribute('data-theme'));
+  new MutationObserver(() => { if (!sampled) setLogo(document.documentElement.hasAttribute('data-theme')); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   document.getElementById('menuBtn').onclick = () => t.openMenu();
   document.getElementById('minBtn').onclick = () => t.minimize();
   document.getElementById('maxBtn').onclick = () => t.toggleMaximize();
   document.getElementById('closeBtn').onclick = () => t.close();
   document.getElementById('collapseBtn').onclick = () => t.hideTitlebar();
-  t.onTheme(({ bg, fg }) => {
+  t.onTheme(({ bg, fg, light }) => {
     // 跟随 dsh 页面背景色:纯色栏底与页面顶边相接,同色下无缝
+    sampled = true;
     document.body.style.backgroundColor = bg;
     document.body.style.color = fg;
+    setLogo(light);
   });
   t.onMenuState((open) => {
     const el = document.getElementById('menuBtn');

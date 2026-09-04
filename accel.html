@@ -6,11 +6,11 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>下载加速设置</title>
 <link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
 <style>
-  :root { color-scheme: dark; }
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  .win { --win-bg: rgba(22, 27, 34, .985); --win-shadow: 0 14px 44px rgba(0, 0, 0, .55); }
+  /* 背景/阴影直接用 --c-win-bg/--c-win-shadow 语义默认值(随主题切换) */
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; flex: none; }
   .head .ico { width: 18px; height: 18px; flex: none; color: var(--c-brand); display: flex; align-items: center; justify-content: center; }
   .head .ico svg { width: 17px; height: 17px; }
@@ -38,7 +38,7 @@
   .seg-row { display: flex; align-items: center; gap: 14px; }
   input[type=range] { flex: 1; accent-color: var(--c-brand); height: 4px; cursor: default; }
   .seg-n {
-    flex: none; min-width: 58px; text-align: center; font-size: 13px; font-weight: 600; color: #fff;
+    flex: none; min-width: 58px; text-align: center; font-size: 13px; font-weight: 600; color: var(--c-fg0);
     background: var(--c-bg2); border: 1px solid var(--c-border); border-radius: var(--radius-m); padding: 6px 0;
   }
   .seg-n b { color: var(--c-brand-hi); }
@@ -51,7 +51,7 @@
     transition: border-color var(--dur-mid);
   }
   input[type=text]:focus { border-color: var(--c-brand); }
-  input[type=text]::placeholder { color: #484f58; }
+  input[type=text]::placeholder { color: var(--c-placeholder); }
   .err { min-height: 0; font-size: 11.5px; color: var(--c-err); line-height: 1.4; }
   .cmd {
     display: flex; align-items: center; gap: 8px; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);

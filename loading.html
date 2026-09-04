@@ -6,8 +6,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH</title>
 <link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
 <style>
-  :root { color-scheme: dark; }
   html, body {
     margin: 0;
     height: 100%;
@@ -78,7 +78,7 @@
 </style>
 </head>
 <body>
-  <img class="logo" src="assets/whale-white.png" alt="">
+  <img class="logo" src="assets/whale-white.png" alt="" data-logo>
   <div class="ring" aria-hidden="true"></div>
   <p class="stage" id="stage" role="status" aria-live="polite">正在启动…</p>
   <div class="dots" id="dots" aria-hidden="true"></div>

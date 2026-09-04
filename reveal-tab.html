@@ -6,13 +6,14 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>reveal</title>
 <link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; }
   body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(13, 17, 23, .78);
+    background: var(--c-reveal-bg);
     border-radius: 0 0 11px 11px;
     color: var(--c-fg2);
     cursor: default;
@@ -22,7 +23,7 @@
     animation: dropIn .18s ease;
   }
   @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-  body:hover { background: rgba(38, 44, 56, .95); color: var(--c-fg1); }
+  body:hover { background: var(--c-reveal-bg-hover); color: var(--c-fg1); }
   svg { width: 14px; height: 14px; transition: transform .16s ease; }
   body:hover svg { transform: translateY(1px); }
   @media (prefers-reduced-motion: reduce) { body { animation: none; } }

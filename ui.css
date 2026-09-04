@@ -13,6 +13,7 @@
   --c-fg1: #c9d1d9;
   --c-fg2: #8b949e;
   --c-fg3: #6e7681; /* 仅装饰性文字;正文最低用 --c-fg2(对比度 ≥4.5:1) */
+  --c-placeholder: #484f58; /* 输入框占位符(浅色主题下换浅灰) */
   --c-brand: #4d6bfe;
   --c-brand-hi: #79b8ff;
   --c-ok: #3fb950;
@@ -29,6 +30,48 @@
   /* 字栈 */
   --font-ui: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
   --font-mono: "Cascadia Mono", Consolas, monospace;
+  /* 语义令牌:窗口壳/浮层/选中态(浅色主题整体覆写,页面不得再硬编码这些值) */
+  --c-win-bg: rgba(22, 27, 34, .98);
+  --c-win-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+  --c-panel-bg: rgba(22, 27, 34, .97);
+  --c-panel-shadow: 0 10px 32px rgba(0, 0, 0, .5);
+  --c-sel-bg: #1f6feb2e;
+  --c-sel-fg: #ffffff;
+  --c-danger-bg: #da363433;
+  --c-reveal-bg: rgba(13, 17, 23, .78);
+  --c-reveal-bg-hover: rgba(38, 44, 56, .95);
+  color-scheme: dark;
+}
+
+/* ---- 浅色主题(GitHub Light 系):仅覆写令牌,组件零改动 ----
+   激活方式:ui-theme.js 按 prefers-color-scheme 在 <html> 上写 data-theme="light"。
+   主题来源链:config.theme(auto/dark/light) → nativeTheme.themeSource → matchMedia。 */
+[data-theme="light"] {
+  --c-bg0: #ffffff;
+  --c-bg1: #f6f8fa;
+  --c-bg2: #eff1f3;
+  --c-border: #d1d9e0;
+  --c-border-hover: #b7c0c9;
+  --c-fg0: #1f2328;
+  --c-fg1: #24292f;
+  --c-fg2: #59636e;
+  --c-fg3: #8c959f;
+  --c-placeholder: #8c959f;
+  --c-brand: #4d6bfe;
+  --c-brand-hi: #0969da;
+  --c-ok: #1a7f37;
+  --c-warn: #9a6700;
+  --c-err: #d1242f;
+  --c-win-bg: rgba(255, 255, 255, .97);
+  --c-win-shadow: 0 12px 40px rgba(0, 0, 0, .28);
+  --c-panel-bg: rgba(255, 255, 255, .98);
+  --c-panel-shadow: 0 10px 32px rgba(0, 0, 0, .22);
+  --c-sel-bg: rgba(31, 111, 235, .14);
+  --c-sel-fg: #0a3069;
+  --c-danger-bg: rgba(209, 36, 47, .12);
+  --c-reveal-bg: rgba(255, 255, 255, .85);
+  --c-reveal-bg-hover: rgba(240, 243, 246, .98);
+  color-scheme: light;
 }
 
 /* ---- 公共:盒模型重置(各窗口页面原本各自重复同一段) ---- */
@@ -46,10 +89,10 @@
 .win {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
-  background: var(--win-bg, rgba(22, 27, 34, .98));
+  background: var(--win-bg, var(--c-win-bg));
   border: 1px solid var(--c-border);
   border-radius: var(--win-radius, var(--radius-l));
-  box-shadow: var(--win-shadow, 0 12px 40px rgba(0, 0, 0, .55));
+  box-shadow: var(--win-shadow, var(--c-win-shadow));
   animation: winIn var(--dur-win) var(--ease-win);
 }
 @keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }

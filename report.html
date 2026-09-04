@@ -6,11 +6,11 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH 错误报告</title>
 <link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
 <style>
-  :root { color-scheme: dark; }
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  .win { --win-bg: rgba(13, 17, 23, .985); --win-radius: 12px; --win-shadow: 0 16px 48px rgba(0, 0, 0, .6); }
+  .win { --win-radius: 12px; } /* 背景/阴影用 --c-win-bg/--c-win-shadow 语义默认值(随主题切换) */
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; }
   .head .logo { width: 18px; height: 18px; flex: none; }
   .head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -54,7 +54,7 @@
 <body>
 <div class="win">
   <div class="head">
-    <img class="logo" src="assets/whale-white.png" alt="">
+    <img class="logo" src="assets/whale-white.png" alt="" data-logo>
     <span class="t" id="headTitle">DSH 错误报告 — 启动诊断</span>
     <button class="x" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
