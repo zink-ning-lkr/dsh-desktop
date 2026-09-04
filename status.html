@@ -101,25 +101,25 @@
 <body>
 <div class="win">
   <div class="head" id="head">
-    <span class="ico" id="ico"></span>
-    <span class="t" id="title">…</span>
-    <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
+    <span class="ico" id="ico" aria-hidden="true"></span>
+    <span class="t" id="title" aria-live="polite">…</span>
+    <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知" aria-label="挂到后台,完成时通知">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
     </button>
-    <button class="hmbtn" id="xBtn" title="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="hmbtn" id="xBtn" title="取消并关闭" aria-label="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="activity" id="activity">
     <div class="detail" id="detail"></div>
-    <div class="bar"><div class="fill indet" id="fill"></div></div>
+    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="进度"><div class="fill indet" id="fill"></div></div>
     <div class="meta"><span id="pct"></span><span id="size"></span></div>
   </div>
-  <div class="result" id="result">
-    <div class="big" id="big"></div>
+  <div class="result" id="result" role="alertdialog" aria-labelledby="rtitle" aria-describedby="rdetail">
+    <div class="big" id="big" aria-hidden="true"></div>
     <div class="rtitle" id="rtitle"></div>
     <div class="rdetail" id="rdetail"></div>
     <div class="btns" id="btns"></div>
   </div>
-  <div class="tlist" id="tlist"></div>
+  <div class="tlist" id="tlist" role="list" aria-label="任务列表"></div>
 </div>
 <script>
   const S = window.__status;
@@ -152,6 +152,7 @@
     document.getElementById('ico').innerHTML = isRes ? (RES[p.type || 'info'] || RES.info) : (ACT[p.mode] || ACT.check);
     document.getElementById('title').textContent = p.title || '';
     document.getElementById('xBtn').title = isRes ? '关闭' : '取消并关闭';
+    document.getElementById('xBtn').setAttribute('aria-label', isRes ? '关闭' : '取消并关闭');
     if (isRes) {
       const type = p.type || 'info';
       document.getElementById('result').className = 'result';
@@ -178,10 +179,12 @@
       return;
     }
     document.getElementById('detail').textContent = p.detail || '';
+    const bar = document.getElementById('bar');
     const fill = document.getElementById('fill');
     const has = typeof p.progress === 'number';
     fill.classList.toggle('indet', !has);
-    if (has) fill.style.width = Math.max(0, Math.min(100, p.progress)) + '%';
+    if (has) { fill.style.width = Math.max(0, Math.min(100, p.progress)) + '%'; bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, p.progress))))); }
+    else bar.removeAttribute('aria-valuenow'); // 不定态进度条按 ARIA 规范不携带 valuenow
     document.getElementById('pct').textContent = p.pct || (has ? p.progress.toFixed(1) + '%' : (p.spin ? '请稍候…' : ''));
     document.getElementById('size').textContent = p.size || '';
   }
@@ -191,8 +194,10 @@
     const row = document.createElement('div');
     row.className = 'trow' + (t.done ? ' done' : '') + (t.ephemeral ? ' ephemeral' : '');
     row.dataset.taskId = t.id;
+    row.setAttribute('role', 'listitem');
     const ico = document.createElement('span');
     ico.className = 'lico' + (t.done ? ' ' + (t.type || 'info') : '');
+    ico.setAttribute('aria-hidden', 'true');
     ico.innerHTML = t.done ? (RES[t.type || 'info'] || RES.info) : (ACT[t.mode] || ACT.check);
     const body = document.createElement('div');
     body.className = 'lbody';
@@ -210,10 +215,14 @@
       // 进行中:进度条 + pct/size(与单视图同一套样式)
       const bar = document.createElement('div');
       bar.className = 'bar';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.setAttribute('aria-label', t.title || '进度');
       const fill = document.createElement('div');
       const has = typeof t.progress === 'number';
       fill.className = 'fill' + (has ? '' : ' indet');
-      if (has) fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%';
+      if (has) { fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%'; bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, t.progress))))); }
       bar.appendChild(fill);
       body.appendChild(bar);
       const meta = document.createElement('div');
@@ -239,7 +248,8 @@
     const x = document.createElement('button');
     x.className = 'lx';
     x.title = t.done ? '关闭此条' : '取消此项';
-    x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    x.setAttribute('aria-label', (t.done ? '关闭此条:' : '取消此项:') + (t.title || ''));
+    x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
     x.addEventListener('click', () => (t.done ? S.dismiss(t.id) : S.cancelOne(t.id)));
     row.append(ico, body, x);
     return row;
@@ -259,14 +269,17 @@
     document.getElementById('title').textContent = act.length ? `任务中心(${act.length} 项进行中)` : '任务中心';
     document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
     document.getElementById('xBtn').title = '全部关闭';
+    document.getElementById('xBtn').setAttribute('aria-label', '全部关闭');
     // 进行中任务置顶;短暂提示紧随其后;完成项有进行中任务时折叠进历史
     act.forEach((t) => list.appendChild(taskRow(t)));
     eph.forEach((t) => list.appendChild(taskRow(t)));
     if (done.length && act.length) {
       const h = document.createElement('button');
       h.className = 'hist' + (histOpen ? ' open' : '');
-      h.innerHTML = `<span class="tri">▶</span><span>已完成 ${done.length} 项</span>`;
-      h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); toggleHist(); });
+      h.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
+      h.setAttribute('aria-controls', 'histWrap');
+      h.innerHTML = `<span class="tri" aria-hidden="true">▶</span><span>已完成 ${done.length} 项</span>`;
+      h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); h.setAttribute('aria-expanded', histOpen ? 'true' : 'false'); toggleHist(); });
       list.appendChild(h);
       const wrap = document.createElement('div');
       wrap.id = 'histWrap';

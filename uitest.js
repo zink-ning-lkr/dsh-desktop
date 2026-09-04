@@ -212,6 +212,14 @@ function runUitest(d) {
     .catch((e) => d.log(`UITEST boot-bridge-remote ✗ ${e.message}`)), 25100, 'boot-bridge-remote');
   uiStep(() => { d.dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {}); }, 25400, 'loading-reload');
   uiStep(() => readDom(d.dshView, '(()=>{const s=document.getElementById("slow");const v0=getComputedStyle(s).display==="none";showSlowActions();const v1=getComputedStyle(s).display!=="none";const n=document.querySelectorAll("#slow button").length;const b=typeof window.dshBoot==="object"&&typeof window.dshBoot.action==="function";return (v0&&v1&&n===3&&b)?"PASS":"FAIL v0="+v0+" v1="+v1+" btns="+n+" bridge="+b})()', 'boot-slow'), 26000);
+  // ⑧ a11y(P1-3):菜单角色标注(menu/menuitem/menuitemcheckbox+aria-checked)、
+  //    键盘导航(aria-activedescendant 跟随)与 typeahead(前缀匹配跳转),Escape 关闭
+  uiStep(() => { d.showMenuPopup(); }, 26300, 'a11y-menu-open');
+  uiStep(() => readDom(d.menuPopupView, '(()=>{const p=document.getElementById("panel");const items=p.querySelectorAll("[role=menuitem],[role=menuitemcheckbox]").length;const chk=p.querySelectorAll("[role=menuitemcheckbox][aria-checked=true]").length;const sep=p.querySelectorAll("[role=separator]").length;return (p.getAttribute("role")==="menu"&&items>=10&&chk>=1&&sep>=1)?"PASS items="+items+" chk="+chk+" sep="+sep:"FAIL role="+p.getAttribute("role")+" items="+items+" chk="+chk+" sep="+sep})()', 'a11y-roles'), 26700);
+  uiStep(() => readDom(d.menuPopupView, '(()=>{document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));const ad=document.getElementById("panel").getAttribute("aria-activedescendant");const sel=document.querySelector(".item.sel");return (ad&&sel&&sel.id===ad)?"PASS activedescendant="+ad:"FAIL ad="+ad+" sel="+(sel&&sel.id)})()', 'a11y-arrownav'), 27000);
+  uiStep(() => readDom(d.menuPopupView, '(()=>{const before=document.querySelector(".item.sel");document.dispatchEvent(new KeyboardEvent("keydown",{key:"重"}));const after=document.querySelector(".item.sel");return (after&&after!==before&&after.textContent.includes("重"))?"PASS → "+after.textContent.trim().slice(0,10):"FAIL before="+(before&&before.textContent.trim().slice(0,10))+" after="+(after&&after.textContent.trim().slice(0,10))})()', 'a11y-typeahead'), 27300);
+  uiStep(() => { d.menuPopupView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 27600, 'a11y-esc');
+  uiStep(() => d.log(`UITEST a11y-closed win=${!!d.menuPopupView}(期望 false) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 27900, 'a11y-closed-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
@@ -287,7 +295,7 @@ function runUitest(d) {
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 27400);
+  }, 28800);
 }
 
 module.exports = { runSmokeDemo, runUitest };

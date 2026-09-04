@@ -56,7 +56,7 @@
   <div class="head">
     <img class="logo" src="assets/whale-white.png" alt="">
     <span class="t" id="headTitle">DSH 错误报告 — 启动诊断</span>
-    <button class="x" id="xBtn" title="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="x" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="body">
     <div class="cls">
@@ -64,7 +64,7 @@
       <span class="name" id="name"></span>
     </div>
     <div class="cause" id="cause"></div>
-    <div class="advice" id="advice"></div>
+    <div class="advice" id="advice" role="list" aria-label="处理建议"></div>
     <div class="log-wrap">
       <span class="sec-label">关键日志预览(完整内容见「日志文件」)</span>
       <div class="log" id="log"></div>
@@ -99,6 +99,7 @@
     (p.suggestions || []).forEach((s) => {
       const row = document.createElement('div');
       row.className = 'row';
+      row.setAttribute('role', 'listitem');
       row.textContent = s;
       advice.appendChild(row);
     });

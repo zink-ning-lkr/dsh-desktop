@@ -28,10 +28,15 @@
   @media (prefers-reduced-motion: reduce) { body { animation: none; } }
 </style>
 </head>
-<body title="显示标题栏">
-  <svg viewBox="0 0 11 11"><path d="M1.5 4 L5.5 8 L9.5 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+<body title="显示标题栏" role="button" aria-label="显示标题栏" tabindex="0">
+  <svg viewBox="0 0 11 11" aria-hidden="true"><path d="M1.5 4 L5.5 8 L9.5 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
 <script>
-  document.body.addEventListener('click', () => window.__titlebar && window.__titlebar.showTitlebar());
+  const show = () => window.__titlebar && window.__titlebar.showTitlebar();
+  document.body.addEventListener('click', show);
+  // role=button 需自带键盘激活:Enter/Space 与鼠标点击同效
+  document.body.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(); }
+  });
 </script>
 </body>
 </html>

@@ -78,12 +78,12 @@
 </style>
 </head>
 <body>
-  <img class="logo" src="assets/whale-white.png" alt="DSH">
-  <div class="ring"></div>
-  <p class="stage" id="stage">正在启动…</p>
-  <div class="dots" id="dots"></div>
+  <img class="logo" src="assets/whale-white.png" alt="">
+  <div class="ring" aria-hidden="true"></div>
+  <p class="stage" id="stage" role="status" aria-live="polite">正在启动…</p>
+  <div class="dots" id="dots" aria-hidden="true"></div>
   <p class="hint" id="hint">正在启动 dsh…(首次启动可能需要安装依赖,耗时较长)</p>
-  <div class="slow" id="slow">
+  <div class="slow" id="slow" role="group" aria-label="启动较慢时的自助操作">
     <p class="slow-tip">启动耗时比平时长(可能是首次安装依赖或网络较慢)</p>
     <div class="slow-btns">
       <button class="btn" id="btnLog" type="button">查看日志</button>
