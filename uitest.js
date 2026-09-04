@@ -179,6 +179,13 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 22000);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 22150, 'install-okbtn');
   uiStep(() => d.log(`UITEST install-timeout win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 22300, 'install-okbtn-verify');
+  // ⑨ 加载页慢启动自助行(P0-2):dsh 服务页(http)必须零暴露 dshBoot;
+  //    回到 loading.html 后 showSlowActions() 亮出操作行(3 按钮 + 桥可用)
+  uiStep(() => d.dshView.webContents.executeJavaScript('typeof window.dshBoot')
+    .then((v) => d.log(`UITEST boot-bridge-remote typeof=${v}(期望 undefined,远程页零暴露) → ${v === 'undefined' ? 'PASS' : 'FAIL'}`))
+    .catch((e) => d.log(`UITEST boot-bridge-remote ✗ ${e.message}`)), 24100, 'boot-bridge-remote');
+  uiStep(() => { d.dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {}); }, 24400, 'loading-reload');
+  uiStep(() => readDom(d.dshView, '(()=>{const s=document.getElementById("slow");const v0=getComputedStyle(s).display==="none";showSlowActions();const v1=getComputedStyle(s).display!=="none";const n=document.querySelectorAll("#slow button").length;const b=typeof window.dshBoot==="object"&&typeof window.dshBoot.action==="function";return (v0&&v1&&n===3&&b)?"PASS":"FAIL v0="+v0+" v1="+v1+" btns="+n+" bridge="+b})()', 'boot-slow'), 25000);
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
@@ -254,7 +261,7 @@ function runUitest(d) {
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 25000);
+  }, 26400);
 }
 
 module.exports = { runSmokeDemo, runUitest };

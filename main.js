@@ -1196,6 +1196,8 @@ function createWindow() {
     webPreferences: {
       sandbox: true,
       backgroundThrottling: false,
+      // 仅本地 file:// 加载页暴露 dshBoot 动作桥,dsh 服务页零暴露(见 dsh-preload.js)
+      preload: path.join(__dirname, 'dsh-preload.js'),
     },
   });
   dshView.webContents.setBackgroundThrottling(false);
@@ -1339,6 +1341,16 @@ ipcMain.on('tb:show-bar', (e) => {
 });
 
 // ---------- 启动 / 重启 dsh 并加载页面 ----------
+// 加载页慢启动自助动作(P0-2):查看日志 / 重试 / 取消并退出。
+// 双重校验:发送者必须是 dshView,且当前框架必须是本地 file:// 页面——
+// dsh 服务页(http://127.0.0.1)即使被注入恶意脚本也无权触发这些动作
+ipcMain.on('boot:action', (e, id) => {
+  if (!dshView || e.sender !== dshView.webContents || !trustedEvent(e)) return;
+  if (id === 'view-log') shell.showItemInFolder(logFile);
+  else if (id === 'retry') bootDsh();
+  else if (id === 'quit') app.quit();
+});
+
 async function bootDsh() {
   // 退出流程已开始(before-quit 已置 quitting):不再新拉服务,否则新进程不在
   // before-quit 的进程快照里,退出完成后会留下孤儿 dsh 服务
@@ -1371,6 +1383,14 @@ async function bootDsh() {
     if (loadingFlush) { loadingFlush.push(cmd); return; }
     dshView.webContents.executeJavaScript(cmd).catch(() => {});
   };
+  // 慢启动兜底(P0-2):15s 仍未加载出服务页 → 加载页亮出自助操作行(查看日志/重试/取消并退出),
+  // dsh 卡死时用户不再只能关窗(参照 VS Code "taking longer than expected" 的渐进披露)
+  const slowTimer = setTimeout(() => {
+    if (seq !== bootSeq || settledUrl || !dshView) return;
+    const cmd = 'showSlowActions()';
+    if (loadingFlush) { loadingFlush.push(cmd); return; }
+    dshView.webContents.executeJavaScript(cmd).catch(() => {});
+  }, 15_000);
 
   const cwd = loadConfig().workspace;
   titlebarView?.webContents.send('tb:workspace', cwd);
@@ -1410,8 +1430,10 @@ async function bootDsh() {
     log(`加载 ${redactToken(url)}`);
     stage(3, '加载页面…');
     settledUrl = true;
+    clearTimeout(slowTimer); // 服务页已接管,慢启动提示不再出现
     dshView.webContents.loadURL(url).catch(() => {}); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
   } catch (err) {
+    clearTimeout(slowTimer); // 失败已转错误报告窗,不再亮加载页操作行
     if (quitting || seq !== bootSeq) return;
     log(`启动失败: ${err.message}`);
     showReport({

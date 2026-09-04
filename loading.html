@@ -65,7 +65,16 @@
     opacity: .8;
   }
   .hint { margin: 0; font-size: 12px; color: var(--c-fg2); }
-  @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i { animation: none; } }
+  /* 慢启动自助行(P0-2):默认隐藏,主进程 15s 未就绪时经 showSlowActions() 亮出 */
+  .slow {
+    position: absolute; left: 0; right: 0; bottom: 46px;
+    display: none; flex-direction: column; align-items: center; gap: 12px;
+    animation: fadeUp .3s ease;
+  }
+  .slow.show { display: flex; }
+  .slow-tip { font-size: 12px; color: var(--c-warn); }
+  .slow-btns { display: flex; gap: 10px; }
+  @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i, .slow { animation: none; } }
 </style>
 </head>
 <body>
@@ -74,6 +83,14 @@
   <p class="stage" id="stage">正在启动…</p>
   <div class="dots" id="dots"></div>
   <p class="hint" id="hint">正在启动 dsh…(首次启动可能需要安装依赖,耗时较长)</p>
+  <div class="slow" id="slow">
+    <p class="slow-tip">启动耗时比平时长(可能是首次安装依赖或网络较慢)</p>
+    <div class="slow-btns">
+      <button class="btn" id="btnLog" type="button">查看日志</button>
+      <button class="btn primary" id="btnRetry" type="button">重试</button>
+      <button class="btn danger-ghost" id="btnQuit" type="button">取消并退出</button>
+    </div>
+  </div>
   <div class="logtail" id="logtail"></div>
 <script>
   const stage = document.getElementById('stage');
@@ -96,6 +113,14 @@
   const tailEl = document.getElementById('logtail');
   function pushLog(line) {
     tailEl.textContent = line || '';
+  }
+  // 慢启动兜底:主进程 15s 未加载出服务页时调用,亮出自助操作行
+  function showSlowActions() {
+    document.getElementById('slow').classList.add('show');
+  }
+  // 动作桥 dshBoot 由 dsh-preload.js 按 file:// 协议条件暴露;远程 dsh 页无此对象
+  for (const [btnId, act] of [['btnLog', 'view-log'], ['btnRetry', 'retry'], ['btnQuit', 'quit']]) {
+    document.getElementById(btnId).addEventListener('click', () => window.dshBoot?.action(act));
   }
 </script>
 </body>
