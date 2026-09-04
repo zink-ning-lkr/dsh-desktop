@@ -5,13 +5,14 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH</title>
+<link rel="stylesheet" href="ui.css">
 <style>
   :root { color-scheme: dark; }
   html, body {
     margin: 0;
     height: 100%;
-    background: #0d1117;
-    color: #8b949e;
+    background: var(--c-bg0);
+    color: var(--c-fg2);
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
     display: flex;
     flex-direction: column;
@@ -38,7 +39,7 @@
     border: 3px solid transparent;
   }
   .ring::before {
-    border-top-color: #4d6bfe; border-right-color: rgba(77, 107, 254, .35);
+    border-top-color: var(--c-brand); border-right-color: rgba(77, 107, 254, .35);
     animation: spin .85s linear infinite;
   }
   .ring::after {
@@ -47,23 +48,23 @@
     opacity: .6;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .stage { margin: 0; font-size: 13px; color: #c9d1d9; min-height: 18px; animation: fadeUp .3s ease; }
+  .stage { margin: 0; font-size: 13px; color: var(--c-fg1); min-height: 18px; animation: fadeUp .3s ease; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   .dots { display: flex; gap: 7px; height: 6px; }
   .dots i {
-    width: 6px; height: 6px; border-radius: 50%; background: #21262d;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--c-bg2);
     transition: background .3s, transform .3s;
   }
-  .dots i.on { background: #4d6bfe; transform: scale(1.15); animation: dotPulse 1.4s ease-in-out infinite; }
+  .dots i.on { background: var(--c-brand); transform: scale(1.15); animation: dotPulse 1.4s ease-in-out infinite; }
   @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
   .logtail {
     position: absolute; left: 16px; right: 16px; bottom: 14px;
     font: 11px/1.7 "Cascadia Mono", Consolas, monospace;
-    color: #8b949e; text-align: center;
+    color: var(--c-fg2); text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     opacity: .8;
   }
-  .hint { margin: 0; font-size: 12px; color: #8b949e; }
+  .hint { margin: 0; font-size: 12px; color: var(--c-fg2); }
   @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i { animation: none; } }
 </style>
 </head>

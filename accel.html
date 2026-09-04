@@ -5,89 +5,66 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>下载加速设置</title>
+<link rel="stylesheet" href="ui.css">
 <style>
   :root { color-scheme: dark; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
-    font: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif; }
-  .win {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    background: rgba(22, 27, 34, .985);
-    border: 1px solid #30363d; border-radius: 10px;
-    box-shadow: 0 14px 44px rgba(0, 0, 0, .55);
-    animation: winIn .2s cubic-bezier(.2, .9, .3, 1.1);
-  }
-  @keyframes winIn { from { opacity: 0; transform: scale(.96) translateY(-6px); } to { opacity: 1; transform: none; } }
+    font: var(--font-ui); }
+  .win { --win-bg: rgba(22, 27, 34, .985); --win-shadow: 0 14px 44px rgba(0, 0, 0, .55); }
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; flex: none; }
-  .head .ico { width: 18px; height: 18px; flex: none; color: #4d6bfe; display: flex; align-items: center; justify-content: center; }
+  .head .ico { width: 18px; height: 18px; flex: none; color: var(--c-brand); display: flex; align-items: center; justify-content: center; }
   .head .ico svg { width: 17px; height: 17px; }
-  .head .t { flex: 1; font-size: 14px; font-weight: 600; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .head .x {
-    -webkit-app-region: no-drag; width: 28px; height: 24px; border: none; border-radius: 6px;
-    background: transparent; color: #8b949e; cursor: default; display: flex; align-items: center; justify-content: center;
-    transition: background .15s, color .15s;
+    -webkit-app-region: no-drag; width: 28px; height: 24px; border: none; border-radius: var(--radius-s);
+    background: transparent; color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
+    transition: background var(--dur-mid), color var(--dur-mid);
   }
-  .head .x:hover { background: rgba(127, 127, 127, .22); color: #e6edf3; }
+  .head .x:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
   .head .x svg { width: 12px; height: 12px; }
   .content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 14px; }
   .sec { display: flex; flex-direction: column; gap: 9px; }
-  .sec-t { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #e6edf3; }
+  .sec-t { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--c-fg0); }
   .sec-t .tag {
-    font-size: 10px; font-weight: 500; color: #79b8ff; background: rgba(121, 184, 255, .12);
+    font-size: 10px; font-weight: 500; color: var(--c-brand-hi); background: rgba(121, 184, 255, .12);
     border: 1px solid rgba(121, 184, 255, .25); border-radius: 999px; padding: 2px 8px; letter-spacing: .02em;
   }
-  .hint { font-size: 12px; color: #8b949e; line-height: 1.55; }
-  .hint code { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 1px 5px; font-size: 11.5px; color: #c9d1d9; }
+  .hint { font-size: 12px; color: var(--c-fg2); line-height: 1.55; }
+  .hint code { background: var(--c-bg1); border: 1px solid var(--c-bg2); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; color: var(--c-fg1); }
   .dl-note {
-    font-size: 12px; color: #d29922; background: rgba(210, 153, 34, .1);
-    border: 1px solid rgba(210, 153, 34, .3); border-radius: 7px; padding: 7px 10px; line-height: 1.5;
+    font-size: 12px; color: var(--c-warn); background: rgba(210, 153, 34, .1);
+    border: 1px solid rgba(210, 153, 34, .3); border-radius: var(--radius-m); padding: 7px 10px; line-height: 1.5;
   }
   .seg-row { display: flex; align-items: center; gap: 14px; }
-  input[type=range] { flex: 1; accent-color: #4d6bfe; height: 4px; cursor: default; }
+  input[type=range] { flex: 1; accent-color: var(--c-brand); height: 4px; cursor: default; }
   .seg-n {
     flex: none; min-width: 58px; text-align: center; font-size: 13px; font-weight: 600; color: #fff;
-    background: #21262d; border: 1px solid #30363d; border-radius: 7px; padding: 6px 0;
+    background: var(--c-bg2); border: 1px solid var(--c-border); border-radius: var(--radius-m); padding: 6px 0;
   }
-  .seg-n b { color: #79b8ff; }
+  .seg-n b { color: var(--c-brand-hi); }
   .row { display: flex; align-items: center; gap: 8px; }
   .row .grow { flex: 1; }
   input[type=text] {
-    flex: 1; min-width: 0; background: #0d1117; border: 1px solid #30363d; border-radius: 7px;
-    color: #e6edf3; font-size: 12.5px; padding: 8px 10px; outline: none; user-select: text;
+    flex: 1; min-width: 0; background: var(--c-bg0); border: 1px solid var(--c-border); border-radius: var(--radius-m);
+    color: var(--c-fg0); font-size: 12.5px; padding: 8px 10px; outline: none; user-select: text;
     font-family: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
-    transition: border-color .15s;
+    transition: border-color var(--dur-mid);
   }
-  input[type=text]:focus { border-color: #4d6bfe; }
+  input[type=text]:focus { border-color: var(--c-brand); }
   input[type=text]::placeholder { color: #484f58; }
-  .err { min-height: 0; font-size: 11.5px; color: #f85149; line-height: 1.4; }
-  .btn {
-    flex: none; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 7px 16px; border-radius: 7px;
-    font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s; white-space: nowrap;
-  }
-  .btn:hover { background: #30363d; border-color: #3d444d; }
-  .btn:active { transform: scale(.97); }
-  .btn.primary { background: linear-gradient(180deg, #4d6bfe, #3b5bdb); border-color: transparent; color: #fff; }
-  .btn.primary:hover { filter: brightness(1.12); }
-  .btn.danger { background: transparent; border-color: #f8514955; color: #f85149; }
-  .btn.danger:hover { background: rgba(248, 81, 73, .12); border-color: #f85149; }
+  .err { min-height: 0; font-size: 11.5px; color: var(--c-err); line-height: 1.4; }
   .cmd {
-    display: flex; align-items: center; gap: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 7px;
-    padding: 9px 11px; font: 11.5px/1.5 "Cascadia Mono", Consolas, monospace; color: #79b8ff;
+    display: flex; align-items: center; gap: 8px; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
+    padding: 9px 11px; font: 11.5px/1.5 var(--font-mono); color: var(--c-brand-hi);
     word-break: break-all; user-select: text;
   }
-  .foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid #21262d; }
-  .foot .note { flex: 1; min-width: 0; font-size: 11px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .foot .note code { color: #8b949e; }
+  .foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 20px 14px; border-top: 1px solid var(--c-bg2); }
+  .foot .note { flex: 1; min-width: 0; font-size: 11px; color: var(--c-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .foot .note code { color: var(--c-fg2); }
   .toast { flex: none; font-size: 12px; font-weight: 600; opacity: 0; transition: opacity .2s; white-space: nowrap; }
-  .toast.ok { color: #3fb950; }
-  .toast.bad { color: #f85149; }
+  .toast.ok { color: var(--c-ok); }
+  .toast.bad { color: var(--c-err); }
   .toast.on { opacity: 1; }
-  ::-webkit-scrollbar { width: 8px; }
-  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #3d444d; }
-  .head .x:focus-visible, .btn:focus-visible, input[type=range]:focus-visible { outline: 2px solid #4d6bfe; outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { .win { animation: none; } }
 </style>
 </head>
 <body>
@@ -121,7 +98,7 @@
       </div>
       <div class="row">
         <button class="btn primary" id="mirrorSave">保存镜像</button>
-        <button class="btn danger" id="mirrorClear">清除</button>
+        <button class="btn danger-ghost" id="mirrorClear">清除</button>
         <span class="err" id="mirrorErr"></span>
       </div>
       <div class="hint">

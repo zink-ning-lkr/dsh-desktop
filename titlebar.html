@@ -5,8 +5,9 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>titlebar</title>
+<link rel="stylesheet" href="ui.css">
 <style>
-  :root { --bg: #0d1117; --fg: #9aa0a6; }
+  :root { --bg: var(--c-bg0); --fg: var(--c-fg2); }
   html, body { margin: 0; height: 100%; overflow: hidden; }
   /* 画布底层兜底暗色:主题未送达时页面任何像素都不是白 */
   html { background-color: var(--bg); }
@@ -27,19 +28,18 @@
     align-items: center;
     justify-content: center;
     cursor: default;
-    transition: background .15s ease, color .15s ease;
+    transition: background var(--dur-mid) ease, color var(--dur-mid) ease;
   }
-  /* all:unset 会清掉默认焦点轮廓,Tab 键盘导航必须有可见焦点环(a11y) */
-  button:focus-visible { outline: 2px solid #4d6bfe; outline-offset: 2px; }
-  #menuBtn { width: 32px; height: 22px; border-radius: 6px; margin-left: 5px; }
+  /* 焦点环走 ui.css 公共 :focus-visible(all:unset 清掉默认轮廓后由它补回) */
+  #menuBtn { width: 32px; height: 22px; border-radius: var(--radius-s); margin-left: 5px; }
   #menuBtn svg { width: 13px; height: 13px; }
   #menuBtn:hover { background: rgba(127, 127, 127, .25); }
-  #menuBtn:hover svg { color: #79b8ff; }
+  #menuBtn:hover svg { color: var(--c-brand-hi); }
   #menuBtn.active, #menuBtn.active:hover { background: rgba(127, 127, 127, .30); }
-  #menuBtn.active svg { color: #79b8ff; }
+  #menuBtn.active svg { color: var(--c-brand-hi); }
   #collapseBtn { width: 34px; }
-  #collapseBtn svg { width: 11px; height: 11px; transition: transform .15s ease; }
-  #collapseBtn:hover svg { color: #c9d1d9; transform: translateY(-1px); }
+  #collapseBtn svg { width: 11px; height: 11px; transition: transform var(--dur-mid) ease; }
+  #collapseBtn:hover svg { color: var(--c-fg1); transform: translateY(-1px); }
   .title { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; }
   .logo {
     width: 16px; height: 16px; flex: none;
@@ -47,12 +47,13 @@
     opacity: .9;
   }
   .name { white-space: nowrap; opacity: .85; }
-  .workspace { opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  /* 工作目录次要信息:opacity .72(原 .5 对比度低于 WCAG AA 4.5:1) */
+  .workspace { opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
   .spacer { flex: 1; }
   .cap { display: flex; height: 100%; flex: none; }
   .cap button { width: 44px; }
   .cap button:hover { background: rgba(127, 127, 127, .18); }
-  .cap svg { width: 11px; height: 11px; transition: transform .12s ease; }
+  .cap svg { width: 11px; height: 11px; transition: transform var(--dur-fast) ease; }
   .cap button:hover svg { transform: scale(1.12); }
   #closeBtn:hover { background: #c42b1c; color: #fff; }
   #closeBtn:hover svg { transform: scale(1.08); }

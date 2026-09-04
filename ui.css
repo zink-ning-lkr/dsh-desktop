@@ -1,0 +1,92 @@
+/* ui.css —— 全部自绘页面共享的设计令牌与公共组件(单一事实源)。
+   令牌命名:--c-* 颜色 / --radius-* 圆角 / --dur-* 时长 / --ease-* 曲线 / --font-* 字栈。
+   各页面经 <link rel="stylesheet" href="ui.css"> 引入(CSP 已允许 style-src 'self');
+   页面内联 <style> 在其后声明,需要微调时用更高优先级或 --win-* 变量覆写。 */
+:root {
+  /* 色板:GitHub Dark 系,与 dsh 生态视觉一致 */
+  --c-bg0: #0d1117;
+  --c-bg1: #161b22;
+  --c-bg2: #21262d;
+  --c-border: #30363d;
+  --c-border-hover: #3d444d;
+  --c-fg0: #e6edf3;
+  --c-fg1: #c9d1d9;
+  --c-fg2: #8b949e;
+  --c-fg3: #6e7681; /* 仅装饰性文字;正文最低用 --c-fg2(对比度 ≥4.5:1) */
+  --c-brand: #4d6bfe;
+  --c-brand-hi: #79b8ff;
+  --c-ok: #3fb950;
+  --c-warn: #d29922;
+  --c-err: #f85149;
+  /* 尺寸/动效 */
+  --radius-s: 6px;
+  --radius-m: 7px;
+  --radius-l: 10px;
+  --dur-fast: .12s;
+  --dur-mid: .15s;
+  --dur-win: .22s;
+  --ease-win: cubic-bezier(.2, .9, .3, 1.15);
+  /* 字栈 */
+  --font-ui: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+}
+
+/* ---- 公共:盒模型重置(各窗口页面原本各自重复同一段) ---- */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ---- 公共:滚动条 ---- */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
+
+/* ---- 公共:键盘焦点环(all:unset/透明背景按钮后必须有可见焦点,a11y) ---- */
+:where(button, input, [tabindex]):focus-visible { outline: 2px solid var(--c-brand); outline-offset: 2px; }
+
+/* ---- 公共:无边框窗口外壳(页面可用 --win-bg/--win-radius/--win-shadow 微调) ---- */
+.win {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  background: var(--win-bg, rgba(22, 27, 34, .98));
+  border: 1px solid var(--c-border);
+  border-radius: var(--win-radius, var(--radius-l));
+  box-shadow: var(--win-shadow, 0 12px 40px rgba(0, 0, 0, .55));
+  animation: winIn var(--dur-win) var(--ease-win);
+}
+@keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* ---- 公共:按钮(status/dialog/accel/report 原本各自重复 4 份) ---- */
+.btn {
+  border: 1px solid var(--c-border); background: var(--c-bg2); color: var(--c-fg1);
+  padding: 7px 16px; border-radius: var(--radius-m);
+  font-size: 12px; cursor: default; white-space: nowrap;
+  transition: background var(--dur-mid), border-color var(--dur-mid), transform .08s;
+}
+.btn:hover { background: var(--c-border); border-color: var(--c-border-hover); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: linear-gradient(180deg, var(--c-brand), #3b5bdb); border-color: transparent; color: #fff; }
+.btn.primary:hover { filter: brightness(1.12); }
+.btn.success { background: linear-gradient(180deg, #2ea043, #238636); border-color: transparent; color: #fff; }
+.btn.success:hover { filter: brightness(1.12); }
+.btn.danger { background: linear-gradient(180deg, #da3633, #b62324); border-color: transparent; color: #fff; }
+.btn.danger:hover { filter: brightness(1.12); }
+/* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充 */
+.btn.danger-ghost { background: transparent; border-color: #f8514955; color: var(--c-err); }
+.btn.danger-ghost:hover { background: rgba(248, 81, 73, .12); border-color: var(--c-err); }
+
+/* ---- 公共:类型圆标(status 结果视图与 dialog 原本逐字符重复 2 份) ----
+   用法:class="big info|success|warning|error"(与图标同元素携带类型) */
+.big {
+  width: 40px; height: 40px; flex: none; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.big svg { width: 21px; height: 21px; }
+.big.info { background: rgba(121, 184, 255, .12); color: var(--c-brand-hi); }
+.big.success { background: rgba(63, 185, 80, .14); color: var(--c-ok); animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
+.big.warning { background: rgba(210, 153, 34, .14); color: var(--c-warn); }
+.big.error { background: rgba(248, 81, 73, .14); color: var(--c-err); animation: shake .34s ease; }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .win, .big { animation: none; }
+}

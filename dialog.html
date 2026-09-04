@@ -5,61 +5,29 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH</title>
+<link rel="stylesheet" href="ui.css">
 <style>
   :root { color-scheme: dark; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
-    font: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif; }
-  .win {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    background: rgba(22, 27, 34, .98);
-    border: 1px solid #30363d; border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
-    animation: winIn .2s cubic-bezier(.2, .9, .3, 1.15);
-  }
-  @keyframes winIn { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+    font: var(--font-ui); }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 14px; }
   .top { display: flex; align-items: flex-start; gap: 12px; min-height: 0;
     -webkit-app-region: drag; } /* 无边框窗口需拖动区(与其他窗口一致);消息/详情显式 no-drag 保住文本选择 */
-  .big {
-    width: 40px; height: 40px; flex: none; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-app-region: no-drag;
-  }
-  .big svg { width: 21px; height: 21px; }
-  .info .big { background: rgba(121, 184, 255, .12); color: #79b8ff; }
-  .success .big { background: rgba(63, 185, 80, .14); color: #3fb950; animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
-  .warning .big { background: rgba(210, 153, 34, .14); color: #d29922; }
-  .error .big { background: rgba(248, 81, 73, .14); color: #f85149; animation: shake .34s ease; }
-  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+  .big { -webkit-app-region: no-drag; } /* 配色/尺寸走 ui.css 公共 .big.<type>;拖动语义为本页增量 */
   .txt { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; min-width: 0; min-height: 0; }
-  .title { font-size: 15px; font-weight: 600; color: #e6edf3; line-height: 1.3; }
-  .message { font-size: 13px; color: #c9d1d9; line-height: 1.5; white-space: pre-wrap; word-break: break-word; user-select: text;
+  .title { font-size: 15px; font-weight: 600; color: var(--c-fg0); line-height: 1.3; }
+  .message { font-size: 13px; color: var(--c-fg1); line-height: 1.5; white-space: pre-wrap; word-break: break-word; user-select: text;
     -webkit-app-region: no-drag; }
-  .detail { font-size: 12px; color: #8b949e; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  .detail { font-size: 12px; color: var(--c-fg2); line-height: 1.5; white-space: pre-wrap; word-break: break-all;
     max-height: 140px; min-height: 0; overflow-y: auto; user-select: text; -webkit-app-region: no-drag; }
   .foot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 4px 20px 16px; }
-  .foot button {
-    border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 7px 18px; border-radius: 7px;
-    font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s;
-  }
-  .foot button:hover { background: #30363d; border-color: #3d444d; }
-  .foot button:active { transform: scale(.97); }
-  .foot button.primary { background: linear-gradient(180deg, #4d6bfe, #3b5bdb); border-color: transparent; color: #fff; }
-  .foot button.primary:hover { filter: brightness(1.12); }
-  ::-webkit-scrollbar { width: 8px; }
-  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-  .foot button:focus-visible { outline: 2px solid #4d6bfe; outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { .win, .big { animation: none; } }
 </style>
 </head>
 <body>
 <div class="win">
   <div class="body">
     <div class="top">
-      <div class="big" id="big"></div>
+      <div class="big info" id="big"></div>
       <div class="txt">
         <div class="title" id="title"></div>
         <div class="message" id="message"></div>
@@ -83,8 +51,10 @@
     payload = p;
     document.title = p.title || 'DSH';
     const type = p.type || 'info';
-    document.querySelector('.win').className = 'win ' + type;
-    document.getElementById('big').innerHTML = ICONS[type] || ICONS.info;
+    // 类型配色走 ui.css 公共 .big.<type>(与状态窗结果视图同一套)
+    const big = document.getElementById('big');
+    big.className = 'big ' + type;
+    big.innerHTML = ICONS[type] || ICONS.info;
     document.getElementById('title').textContent = p.title || '';
     document.getElementById('message').textContent = p.message || '';
     document.getElementById('detail').textContent = p.detail || '';
@@ -94,7 +64,7 @@
     (p.buttons || []).forEach((b, i) => {
       const el = document.createElement('button');
       el.textContent = b.label;
-      if (b.primary) el.className = 'primary';
+      el.className = 'btn' + (b.primary ? ' primary' : '');
       if (b.id) el.dataset.id = b.id;
       el.addEventListener('click', () => D.choose(i, b.id || null));
       foot.appendChild(el);

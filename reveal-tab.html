@@ -5,6 +5,7 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>reveal</title>
+<link rel="stylesheet" href="ui.css">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; }
   body {
@@ -13,7 +14,7 @@
     justify-content: center;
     background: rgba(13, 17, 23, .78);
     border-radius: 0 0 11px 11px;
-    color: #9aa0a6;
+    color: var(--c-fg2);
     cursor: default;
     user-select: none;
     -webkit-app-region: no-drag;
@@ -21,7 +22,7 @@
     animation: dropIn .18s ease;
   }
   @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-  body:hover { background: rgba(38, 44, 56, .95); color: #c9d1d9; }
+  body:hover { background: rgba(38, 44, 56, .95); color: var(--c-fg1); }
   svg { width: 14px; height: 14px; transition: transform .16s ease; }
   body:hover svg { transform: translateY(1px); }
   @media (prefers-reduced-motion: reduce) { body { animation: none; } }

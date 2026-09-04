@@ -1164,7 +1164,7 @@ async function syncTitleBarTheme() {
     const hex = '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
     if (hex === lastTitlebarTheme) return; // 主题未变化:不重复 IPC/刷色
     lastTitlebarTheme = hex;
-    titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#9aa0a6' : '#5f6368' });
+    titlebarView.webContents.send('tb:theme', { bg: hex, fg: lum < 0.5 ? '#8b949e' : '#5f6368' }); // 前景与 ui.css --c-fg2 同源,消灭 #9aa0a6/#8b949e 双写漂移
     // 视图表面底色跟随页面色:缩放/未绘制边缘露出的底色与页面一致,不突兀
     titlebarView.setBackgroundColor(hex);
   } catch { /* 页面未就绪等,忽略 */ } finally { titlebarThemeInFlight = false; }

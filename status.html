@@ -5,45 +5,36 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <title>DSH</title>
+<link rel="stylesheet" href="ui.css">
 <style>
   :root { color-scheme: dark; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
-    font: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif; }
-  .win {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column;
-    background: rgba(22, 27, 34, .98);
-    border: 1px solid #30363d; border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
-    animation: winIn .22s cubic-bezier(.2, .9, .3, 1.15);
-  }
-  @keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
+    font: var(--font-ui); }
   .head {
     display: flex; align-items: center; gap: 10px; padding: 12px 14px 0;
     -webkit-app-region: drag;
   }
-  .head .ico { width: 20px; height: 20px; flex: none; color: #79b8ff; }
+  .head .ico { width: 20px; height: 20px; flex: none; color: var(--c-brand-hi); }
   .head .ico svg { width: 20px; height: 20px; }
-  .head .t { flex: 1; font-size: 14px; color: #e6edf3; font-weight: 600; white-space: nowrap;
+  .head .t { flex: 1; font-size: 14px; color: var(--c-fg0); font-weight: 600; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .hmbtn {
-    -webkit-app-region: no-drag; border: none; border-radius: 6px; background: transparent;
-    color: #8b949e; cursor: default; display: flex; align-items: center; justify-content: center;
-    transition: background .15s, color .15s;
+    -webkit-app-region: no-drag; border: none; border-radius: var(--radius-s); background: transparent;
+    color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
+    transition: background var(--dur-mid), color var(--dur-mid);
   }
-  .hmbtn:hover { background: rgba(127, 127, 127, .22); color: #e6edf3; }
+  .hmbtn:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
   #bgBtn { width: 60px; height: 24px; font-size: 12px; gap: 4px; }
   #bgBtn svg { width: 12px; height: 12px; }
   #xBtn { width: 26px; height: 24px; }
   #xBtn svg { width: 12px; height: 12px; }
   .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; }
-  .detail { font-size: 12px; color: #8b949e; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  .detail { font-size: 12px; color: var(--c-fg2); line-height: 1.5; white-space: pre-wrap; word-break: break-all;
     max-height: 60px; min-height: 0; overflow-y: auto; user-select: text; }
-  .bar { height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; }
+  .bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
   .fill {
     height: 100%; width: 0%; border-radius: 3px; position: relative;
-    background: linear-gradient(90deg, #4d6bfe, #8b5cf6);
+    background: linear-gradient(90deg, var(--c-brand), #8b5cf6);
     transition: width .18s ease-out;
   }
   .fill::after {
@@ -55,42 +46,22 @@
   .fill.indet {
     width: 100%; transition: none;
     background-size: 200% 100%;
-    background-image: linear-gradient(90deg, #21262d 0%, #4d6bfe 35%, #8b5cf6 50%, #4d6bfe 65%, #21262d 100%);
+    background-image: linear-gradient(90deg, var(--c-bg2) 0%, var(--c-brand) 35%, #8b5cf6 50%, var(--c-brand) 65%, var(--c-bg2) 100%);
     animation: indet 1.3s linear infinite;
   }
   .fill.indet::after { display: none; }
   @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
-  .meta { display: flex; justify-content: space-between; font-size: 12px; color: #8b949e; }
+  .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-fg2); }
   /* -------- 结果视图 -------- */
   .result { display: none; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center;
     gap: 12px; padding: 14px 20px 18px; }
-  .result .big {
-    width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  }
+  .result .big { width: 46px; height: 46px; } /* 尺寸覆盖 ui.css 公共 .big(40px),配色仍走 .big.<type> */
   .result .big svg { width: 24px; height: 24px; }
-  .result.info .big { background: rgba(121, 184, 255, .12); color: #79b8ff; }
-  .result.success .big { background: rgba(63, 185, 80, .14); color: #3fb950; animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
-  .result.warning .big { background: rgba(210, 153, 34, .14); color: #d29922; }
-  .result.error .big { background: rgba(248, 81, 73, .14); color: #f85149; animation: shake .34s ease; }
-  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
-  .rtitle { font-size: 15px; font-weight: 600; color: #e6edf3; text-align: center; }
-  .rdetail { font-size: 12px; color: #8b949e; text-align: center; line-height: 1.5; max-height: 62px; min-height: 0; overflow-y: auto;
+  .rtitle { font-size: 15px; font-weight: 600; color: var(--c-fg0); text-align: center; }
+  .rdetail { font-size: 12px; color: var(--c-fg2); text-align: center; line-height: 1.5; max-height: 62px; min-height: 0; overflow-y: auto;
     white-space: pre-wrap; word-break: break-all; user-select: text; }
   .btns { flex: none; display: flex; gap: 8px; margin-top: 2px; }
-  .btns button {
-    border: 1px solid #30363d; background: #21262d; color: #c9d1d9; padding: 7px 18px; border-radius: 7px;
-    font-size: 12px; cursor: default; transition: background .15s, border-color .15s, transform .08s;
-  }
-  .btns button:hover { background: #30363d; border-color: #3d444d; }
-  .btns button:active { transform: scale(.97); }
-  .btns button.primary { background: linear-gradient(180deg, #4d6bfe, #3b5bdb); border-color: transparent; color: #fff; }
-  .btns button.primary:hover { filter: brightness(1.12); }
-  ::-webkit-scrollbar { width: 8px; }
-  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #3d444d; }
-  .hmbtn:focus-visible, .btns button:focus-visible { outline: 2px solid #4d6bfe; outline-offset: 2px; }
-  @media (prefers-reduced-motion: reduce) { .win, .result .big, .fill.indet, .fill::after { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .fill.indet, .fill::after { animation: none; } }
 </style>
 </head>
 <body>
@@ -143,9 +114,11 @@
     document.getElementById('xBtn').title = isRes ? '关闭' : '取消并关闭';
     if (isRes) {
       const type = p.type || 'info';
-      const rv = document.getElementById('result');
-      rv.className = 'result ' + type;
-      document.getElementById('big').innerHTML = RES[type] || RES.info;
+      document.getElementById('result').className = 'result';
+      // 类型配色走 ui.css 公共 .big.<type>(与对话框同一套)
+      const big = document.getElementById('big');
+      big.className = 'big ' + type;
+      big.innerHTML = RES[type] || RES.info;
       document.getElementById('rtitle').textContent = p.title || '';
       document.getElementById('rdetail').textContent = p.detail || '';
       const btns = document.getElementById('btns');
@@ -153,7 +126,7 @@
       (p.buttons || []).forEach((b) => {
         const el = document.createElement('button');
         el.textContent = b.label;
-        if (b.primary) el.className = 'primary';
+        el.className = 'btn' + (b.primary ? ' primary' : '');
         el.addEventListener('click', () => S.action(b.id));
         btns.appendChild(el);
       });
