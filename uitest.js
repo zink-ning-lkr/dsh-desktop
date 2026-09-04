@@ -100,7 +100,12 @@ function runUitest(d) {
     t('upd-face', ['checkForUpdates', 'checkDshUpdate', 'installDshUpdate', 'cancelStatusOp'].every((k) => typeof upd[k] === 'function'));
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
-  // ① 状态窗翻页(修复点:窗口已打开时结果必须能送达)与取消语义
+  // ⑩ 托盘状态(P0-3):启动完成后应为 ok/运行中;下载进度进 tooltip;结果页到达后进度清除
+  uiStep(() => {
+    const t = d.trayStatusText();
+    const ok = d.trayState === 'ok' && t.includes('运行中');
+    d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 2600, 'tray-status');
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(d.statusWin, 'status'); }, 3500, 'status-show');
   // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
   //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
@@ -129,7 +134,15 @@ function runUitest(d) {
   // 下载 → 进度 → 结果
   uiStep(() => d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }), 7000, 'dl-show');
   uiStep(() => d.updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 7400, 'dl-progress');
+  uiStep(() => {
+    const t = d.trayStatusText();
+    d.log(`UITEST tray-dl tip 含"下载中 42.0%" → ${t.includes('下载中 42.0%') ? 'PASS' : 'FAIL'} ("${t}")`);
+  }, 7500, 'tray-dl');
   uiStep(() => d.showStatusResult({ type: 'success', title: '更新就绪(下载完成)', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => d.log('UITEST install-click ✓')), 7800, 'dl-result');
+  uiStep(() => {
+    const t = d.trayStatusText();
+    d.log(`UITEST tray-dl-clear 结果页后无"下载中" → ${!t.includes('下载中') ? 'PASS' : 'FAIL'}`);
+  }, 8000, 'tray-dl-clear');
   // ② 标题栏动画:收起 → 240ms 后应收敛到 0,再展开 → 应回到 TITLEBAR_H
   uiStep(() => d.toggleTitlebar(false), 8400, 'bar-collapse');
   uiStep(() => d.log(`UITEST bar-collapsed h=${d.currentBarH}(期望 0) → ${d.currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');

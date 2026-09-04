@@ -45,6 +45,7 @@
   .item .accel { color: var(--c-fg2); font-size: 12px; padding-left: 18px; }
   .sep { height: 1px; background: var(--c-bg2); margin: 4px 8px; }
   .item.danger:hover, .item.danger.sel { background: #da363433; }
+  .item.off { opacity: .55; }
   @media (prefers-reduced-motion: reduce) { .panel, .item { animation: none; } }
 </style>
 </head>
@@ -69,6 +70,7 @@
     'check-dsh-update': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 5l6-3 6 3v6l-6 3-6-3zM2 5l6 3 6-3M8 8v6"/></svg>',
     'download-accel': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 9.5a5.5 5.5 0 1 1 11 0M2.5 9.5h2.8M10.7 9.5h2.8M8 9.5l2.6-3.6"/><circle cx="8" cy="9.5" r="1"/></svg>',
     'quit': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2v5M4.5 4a5 5 0 1 0 7 0"/></svg>',
+    'tray-status': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>',
   };
 
   const panel = document.getElementById('panel');
@@ -82,6 +84,20 @@
         const sep = document.createElement('div');
         sep.className = 'sep';
         panel.appendChild(sep);
+        return;
+      }
+      // 只读条目(如托盘菜单首行状态项):不入 actionable,不可选不可点,降透明度
+      if (it.enabled === false) {
+        const row = document.createElement('div');
+        row.className = 'item off';
+        const ico = document.createElement('span');
+        ico.className = 'ico';
+        ico.innerHTML = ICONS[it.id] || '';
+        const lbl = document.createElement('span');
+        lbl.className = 'lbl';
+        lbl.textContent = it.label;
+        row.append(ico, lbl);
+        panel.appendChild(row);
         return;
       }
       actionable.push(i);

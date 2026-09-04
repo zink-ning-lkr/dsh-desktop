@@ -292,8 +292,50 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
+// ---------- 托盘状态(P0-3):tooltip 动态化 + 状态角标 + 菜单首行只读状态项 ----------
+// 三档状态:boot(启动中,黄点) / ok(运行中,绿点) / err(已停止或崩溃,红点);
+// 收托盘后用户一眼可知 dsh 死活,崩溃不再无感知(参照 Discord presence 的状态外显)
+let trayState = 'boot';  // 应用启动即进入 boot,bootDsh 成功加载服务页后转 ok
+let trayStartedAt = 0;   // 最近一次进入 ok 的时间戳(菜单运行时长)
+
+function trayStatusText() {
+  const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
+  const dl = statusPayload?.mode === 'download' && statusPayload.pct ? ` · 下载中 ${statusPayload.pct}` : '';
+  const ws = loadConfig().workspace || '';
+  return `DSH Desktop — ${st}${dl}${ws ? ` · ${ws}` : ''}`;
+}
+
+function refreshTray() {
+  if (!tray) return;
+  tray.setToolTip(trayStatusText());
+  // 角标图标为构建期预生成资产;缺失(旧包升级)时回退基础图标,不阻断状态文字
+  const badge = trayState === 'ok' ? 'icon-ok.ico' : trayState === 'boot' ? 'icon-warn.ico' : 'icon-err.ico';
+  const p = path.join(__dirname, 'assets', badge);
+  tray.setImage(fs.existsSync(p) ? p : path.join(__dirname, 'assets', 'icon.ico'));
+}
+
+function setTrayState(s) {
+  const changed = trayState !== s;
+  trayState = s;
+  if (s === 'ok' && changed) trayStartedAt = Date.now();
+  refreshTray();
+}
+
+function trayMenuStatusLabel() {
+  const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
+  let up = '';
+  if (trayState === 'ok' && trayStartedAt) {
+    const m = Math.floor((Date.now() - trayStartedAt) / 60000);
+    up = m < 1 ? ' · 刚刚启动' : m < 60 ? ` · ${m} 分钟` : ` · ${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+  }
+  const v = dshProc.dshVersion() || '';
+  return `dsh${v ? ` v${v}` : ''} · ${st}${up}`;
+}
+
 function trayMenuItems() {
   return [
+    { type: 'item', id: 'tray-status', label: trayMenuStatusLabel(), enabled: false }, // 只读状态行(P0-3)
+    { type: 'sep' },
     { type: 'item', id: 'show-main', label: '显示 DSH' },
     { type: 'item', id: 'open-workspace', label: '打开工作目录…', accel: 'Ctrl+O' },
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? '检查更新…' : `检查更新…(当前 v${app.getVersion()})` },
@@ -344,7 +386,7 @@ function showTrayMenu() {
 function createTray() {
   if (tray) return;
   tray = new Tray(path.join(__dirname, 'assets', 'icon.ico'));
-  tray.setToolTip('DSH Desktop');
+  refreshTray(); // 动态 tooltip + 状态角标(初始为启动中)
   tray.on('click', () => showMainWindow());
   tray.on('right-click', () => showTrayMenu());
 }
@@ -432,11 +474,12 @@ function showStatus(p) {
 }
 
 function updateStatus(patch) {
-  if (statusQueued) { statusQueued = { ...statusQueued, ...patch }; statusPayload = statusQueued; return; }
+  if (statusQueued) { statusQueued = { ...statusQueued, ...patch }; statusPayload = statusQueued; refreshTray(); return; }
   if (!statusWin) return;
   statusPayload = { ...(statusPayload || {}), ...patch };
   statusWin.webContents.send('st:set', statusPayload);
   applyStatusProgress(statusPayload);
+  refreshTray(); // 下载进度同步进托盘 tooltip(P0-3)
 }
 
 function closeStatus() {
@@ -444,6 +487,7 @@ function closeStatus() {
   statusWin = null;
   statusActions = null;
   statusPayload = null; // 清残留:否则 result 残留会让后续 nonIntrusive 结果被永久跳过
+  refreshTray(); // 状态窗关闭,tooltip 去掉"下载中"段
 }
 
 // 更新流程占用时的菜单反馈:有状态窗则回到进度窗;否则弹提示(用户点了菜单不能静默无响应)
@@ -1366,6 +1410,7 @@ async function bootDsh() {
   }
   if (!dshView) return;
   dshWebUrl = null; // 重启期间旧地址失效
+  setTrayState('boot'); // 托盘转"启动中"(黄点)
 
   // 加载页阶段提示:窗口未加载完成的阶段入队,加载完成后统一补发
   const loading = dshView.webContents.loadFile(path.join(__dirname, 'loading.html'));
@@ -1410,6 +1455,7 @@ async function bootDsh() {
       // 意外退出:清理死状态(否则「在浏览器中打开」会打开连接被拒的旧地址,安装判断也会误以为服务在跑)
       if (dshChild === child) dshChild = null;
       dshWebUrl = null;
+      setTrayState('err'); // 托盘转"已停止"(红点):收托盘后崩溃不再无感知
       log(`dsh web 进程意外退出 (code=${code})`);
       showReport({
         phase: 'exit',
@@ -1431,9 +1477,11 @@ async function bootDsh() {
     stage(3, '加载页面…');
     settledUrl = true;
     clearTimeout(slowTimer); // 服务页已接管,慢启动提示不再出现
+    setTrayState('ok'); // 托盘转"运行中"(绿点)
     dshView.webContents.loadURL(url).catch(() => {}); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
   } catch (err) {
     clearTimeout(slowTimer); // 失败已转错误报告窗,不再亮加载页操作行
+    setTrayState('err'); // 启动失败:托盘转"已停止"(红点)
     if (quitting || seq !== bootSeq) return;
     log(`启动失败: ${err.message}`);
     showReport({
@@ -1570,6 +1618,8 @@ if (!gotLock) {
         get menuPopupView() { return menuPopupView; },
         get trayMenuWin() { return trayMenuWin; },
         get currentBarH() { return currentBarH; },
+        get trayState() { return trayState; },
+        trayStatusText,
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
         toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
