@@ -122,7 +122,45 @@
   let listMode = false;
   let histOpen = false;
 
-  /* -------- 单任务视图(与旧版逐行一致,像素级兼容) -------- */
+  /* -------- 共享语义构件(P1-3):进度条/进度文案/结果按钮只此一份实现,
+     单任务视图与列表行分别组合;DOM 形态各自保持像素契约(UITEST 锁定 186/250) -------- */
+  function fmtPct(t, has) {
+    return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? '请稍候…' : ''));
+  }
+  function makeBar(t, ariaLabel) {
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-label', ariaLabel || '进度');
+    const fill = document.createElement('div');
+    const has = typeof t.progress === 'number';
+    fill.className = 'fill' + (has ? '' : ' indet');
+    if (has) {
+      fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%';
+      bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, t.progress)))));
+    } else bar.removeAttribute('aria-valuenow'); // 不定态进度条按 ARIA 规范不携带 valuenow
+    bar.appendChild(fill);
+    return bar;
+  }
+  function fillButtons(container, t, cls) {
+    container.className = cls;
+    container.innerHTML = '';
+    (t.buttons || []).forEach((b) => {
+      const el = document.createElement('button');
+      el.textContent = b.label;
+      el.className = 'btn' + (b.primary ? ' primary' : '');
+      el.addEventListener('click', () => S.action(t.id, b.id));
+      container.appendChild(el);
+    });
+    return container;
+  }
+
+  /* -------- 单任务视图(与旧版逐行一致,像素级兼容) --------
+     P1-3 说明:语义构件已抽为上方共享函数,本函数只保留单视图布局壳——
+     结果态大图标居中布局与列表行是两种视觉契约,不强行并入 taskRow;
+     新增能力一律先进共享构件,两路径自动同享 */
   function render(p) {
     cur = p;
     document.title = p.title || 'DSH';
@@ -144,30 +182,21 @@
       big.innerHTML = RES[type] || RES.info;
       document.getElementById('rtitle').textContent = p.title || '';
       document.getElementById('rdetail').textContent = p.detail || '';
-      const btns = document.getElementById('btns');
-      btns.innerHTML = '';
-      (p.buttons || []).forEach((b) => {
-        const el = document.createElement('button');
-        el.textContent = b.label;
-        el.className = 'btn' + (b.primary ? ' primary' : '');
-        el.addEventListener('click', () => S.action(p.id, b.id));
-        btns.appendChild(el);
-      });
+      fillButtons(document.getElementById('btns'), p, 'btns');
       // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮
       window.setTimeout(() => {
+        const btns = document.getElementById('btns');
         const main = btns.querySelector('.primary') || btns.querySelector('button');
         if (main && document.getElementById('result').style.display !== 'none') main.focus();
       }, 30);
       return;
     }
     document.getElementById('detail').textContent = p.detail || '';
-    const bar = document.getElementById('bar');
-    const fill = document.getElementById('fill');
+    const barWrap = document.getElementById('bar');
+    barWrap.innerHTML = '';
+    barWrap.appendChild(makeBar(p, p.title || '进度'));
     const has = typeof p.progress === 'number';
-    fill.classList.toggle('indet', !has);
-    if (has) { fill.style.width = Math.max(0, Math.min(100, p.progress)) + '%'; bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, p.progress))))); }
-    else bar.removeAttribute('aria-valuenow'); // 不定态进度条按 ARIA 规范不携带 valuenow
-    document.getElementById('pct').textContent = p.pct || (has ? p.progress.toFixed(1) + '%' : (p.spin ? '请稍候…' : ''));
+    document.getElementById('pct').textContent = fmtPct(p, has);
     document.getElementById('size').textContent = p.size || '';
   }
 
@@ -194,38 +223,18 @@
       body.appendChild(det);
     }
     if (!t.done) {
-      // 进行中:进度条 + pct/size(与单视图同一套样式)
-      const bar = document.createElement('div');
-      bar.className = 'bar';
-      bar.setAttribute('role', 'progressbar');
-      bar.setAttribute('aria-valuemin', '0');
-      bar.setAttribute('aria-valuemax', '100');
-      bar.setAttribute('aria-label', t.title || '进度');
-      const fill = document.createElement('div');
-      const has = typeof t.progress === 'number';
-      fill.className = 'fill' + (has ? '' : ' indet');
-      if (has) { fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%'; bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, t.progress))))); }
-      bar.appendChild(fill);
-      body.appendChild(bar);
+      // 进行中:进度条 + pct/size(与单视图同一套共享构件,P1-3)
+      body.appendChild(makeBar(t, t.title || '进度'));
       const meta = document.createElement('div');
       meta.className = 'meta';
       const pct = document.createElement('span');
-      pct.textContent = t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? '请稍候…' : ''));
+      pct.textContent = fmtPct(t, typeof t.progress === 'number');
       const size = document.createElement('span');
       size.textContent = t.size || '';
       meta.append(pct, size);
       body.appendChild(meta);
     } else if (!t.ephemeral && (t.buttons || []).length) {
-      const btns = document.createElement('div');
-      btns.className = 'lbtns';
-      t.buttons.forEach((b) => {
-        const el = document.createElement('button');
-        el.textContent = b.label;
-        el.className = 'btn' + (b.primary ? ' primary' : '');
-        el.addEventListener('click', () => S.action(t.id, b.id));
-        btns.appendChild(el);
-      });
-      body.appendChild(btns);
+      body.appendChild(fillButtons(document.createElement('div'), t, 'lbtns'));
     }
     const x = document.createElement('button');
     x.className = 'lx';
