@@ -74,6 +74,7 @@
       const main = foot.querySelector('.primary') || foot.querySelector('button');
       if (main) main.focus();
     }, 0);
+    D.rendered(); // 渲染完成回报:主进程按真实内容高度微调窗口(估算只做首帧,P1-1)
   }
 
   // 回传「下标 + 按钮 id」:主进程按 id 分发语义(下标会随按钮排列漂移,不可作为契约)

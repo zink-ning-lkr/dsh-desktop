@@ -294,6 +294,7 @@
     if (tasks.length === 1 && !tasks[0].ephemeral) { listMode = false; render(tasks[0]); return; }
     listMode = true;
     renderList(tasks);
+    S.rendered(); // 渲染完成回报:主进程按真实内容高度微调窗口(估算只做首帧,P1-1)
   }
 
   document.getElementById('bgBtn').addEventListener('click', () => S.background());

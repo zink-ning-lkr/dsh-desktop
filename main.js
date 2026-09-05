@@ -686,6 +686,22 @@ ipcMain.on('st:cancel-all', (e) => {
   closeStatus(); // 未完成任务已取消,结果历史随窗一并丢弃(与「全部关闭」语义一致)
 });
 
+// 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
+// 单任务固定档(活动 186 / 结果 250)与结果视图保持旧尺寸不动(UITEST 锁定);孤儿 toast 单行除外
+ipcMain.on('st:rendered', (e) => {
+  if (!trustedEvent(e) || !statusWin || e.sender !== statusWin.webContents) return;
+  const tasks = [...statusTasks.values()];
+  const loneToast = tasks.length === 1 && tasks[0].ephemeral;
+  if (tasks.length <= 1 && !loneToast) return;
+  fitWindowToContent(statusWin,
+    '(()=>{const l=document.querySelector(".tlist");const cs=getComputedStyle(l);const gap=parseFloat(cs.rowGap)||0;'
+    + 'const pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);const seq=[];'
+    + 'for(const k of l.children){if(getComputedStyle(k).display==="contents"){seq.push(...k.children)}else seq.push(k)}'
+    + 'let h=pad;seq.forEach((k,i)=>{h+=k.getBoundingClientRect().height;if(i>0)h+=gap});'
+    + 'return h + document.querySelector(".win-head").getBoundingClientRect().height + 2})()',
+    { min: 100, max: 460 });
+});
+
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
 // 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
 const AUX_IDLE_DESTROY_MS = 60_000;
@@ -741,10 +757,30 @@ function dialogHeightFor(o, width) {
   const msg = dialogTextLines(o.message, cpl) * line;
   const det = Math.min(dialogTextLines(o.detail, cpl) * line, 140); // detail 上限 140px,超出内部滚动
   const h = 30 + msg + det + 74; // 图标/标题区 + 脚区按钮与内边距 + 安全余量
-  // 高度上限按主窗口所在显示器的工作区(而不是主显示器):副屏更矮时对话框不会超高
+  return Math.min(Math.max(200, h), dialogMaxHeight());
+}
+
+// 对话框高度上限按主窗口所在显示器的工作区(而不是主显示器):副屏更矮时对话框不会超高
+function dialogMaxHeight() {
   const d = mainWindow ? screen.getDisplayMatching(mainWindow.getBounds()) : screen.getPrimaryDisplay();
-  const wa = d.workArea;
-  return Math.min(Math.max(200, h), Math.max(240, wa.height - 120));
+  return Math.max(240, d.workArea.height - 120);
+}
+
+// 实测式窗口高度校准(P1-1):估算值(dialogHeightFor / statusHeight)只做首帧,
+// 渲染层渲染完成后回报(dl:rendered / st:rendered),这里按真实内容高度微调一次,
+// 消除字符估算模型与真实渲染的漂移(长 URL/多行 detail/多按钮下的按钮贴边与大留白)。
+// 差值 ≤tolerance 不动(避免可见跳动);渲染层未就绪/表达式异常一律静默跳过
+function fitWindowToContent(win, expr, { min = 0, max = Infinity, tolerance = 8, recenter = false } = {}) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.executeJavaScript(expr).then((h) => {
+    if (!win || win.isDestroyed() || !Number.isFinite(h) || h <= 0) return;
+    const [w] = win.getContentSize();
+    const cur = win.getContentSize()[1];
+    const target = Math.round(Math.max(min, Math.min(max, h)));
+    if (Math.abs(target - cur) <= tolerance) return;
+    win.setContentSize(w, target);
+    if (recenter) centerOn(win, mainWindow);
+  }).catch(() => {});
 }
 
 function flushDialog() {
@@ -809,6 +845,14 @@ ipcMain.on('dl:choose', (e, i, id) => {
   dialogWin?.hide();
   scheduleDialogRecycle(); // 隐藏即开始闲置计时(P0-3)
   if (cb) cb(i, id);
+});
+
+// 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 32/20 + 边框 2)
+ipcMain.on('dl:rendered', (e) => {
+  if (!trustedEvent(e) || !dialogWin || e.sender !== dialogWin.webContents) return;
+  fitWindowToContent(dialogWin,
+    'document.querySelector(".top").getBoundingClientRect().height + document.querySelector(".foot").getBoundingClientRect().height + 54',
+    { min: 200, max: dialogMaxHeight(), recenter: true });
 });
 
 // ---------- 下载加速设置窗(可视化表单:分段数 / 镜像源,改动即时写入 config.json) ----------

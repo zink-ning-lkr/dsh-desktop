@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('__status', {
   close: () => ipcRenderer.send('st:close'),
   cancel: () => ipcRenderer.send('st:cancel'),
   cancelAll: () => ipcRenderer.send('st:cancel-all'), // 列表模式「全部关闭」:取消全部未完成任务再收窗(P0-1)
+  rendered: () => ipcRenderer.send('st:rendered'),    // 渲染完成回报:主进程按真实内容高度微调窗口(P1-1)
   action: (taskId, btnId) => ipcRenderer.send('st:action', { taskId, btnId }),
   dismiss: (taskId) => ipcRenderer.send('st:dismiss', String(taskId)),   // 关闭某个已完成任务
   cancelOne: (taskId) => ipcRenderer.send('st:cancel-one', String(taskId)), // 取消某个进行中任务
