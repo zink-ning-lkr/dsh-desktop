@@ -98,6 +98,8 @@ function runUitest(d) {
     t('cls-exit', diag.classifyError(null, { phase: 'exit', code: 1 }).kind === 'exit');
     t('upd-state', upd.state && upd.state.dshStoppedForInstall === false && upd.state.downloadInProgress === false && upd.state.installEpoch === 0);
     t('upd-face', ['checkForUpdates', 'checkDshUpdate', 'installDshUpdate', 'cancelStatusOp'].every((k) => typeof upd[k] === 'function'));
+    const sc = require('./shortcuts');
+    t('sc-ids', ['open-workspace', 'restart-dsh', 'fullscreen', 'toggle-bar', 'reload', 'devtools'].every((id) => sc.list.some((s) => s.id === id)));
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
@@ -305,6 +307,13 @@ function runUitest(d) {
   uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 32000);
   uiStep(() => { d.abortWelcome(); }, 32200, 'welcome-abort');
   uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 32400, 'welcome-closed-verify');
+  // ⑭ 快捷键速查(P2-2):菜单「键盘快捷键…」→ 速查对话框,内容与菜单 accel 同源(shortcuts.js)
+  uiStep(() => { d.showMenuPopup(); }, 32550, 'sc-menu-open');
+  uiStep(() => d.menuPopupView?.webContents.executeJavaScript('(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("键盘快捷键"));if(!it)return "FAIL no-item";it.parentElement.click();return "ok"})()')
+    .then((v) => d.log(`UITEST sc-click ${v}`)).catch((e) => d.log(`UITEST sc-click ✗ ${e.message}`)), 32750, 'sc-click');
+  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;const det=document.getElementById("detail").textContent;return (t==="键盘快捷键"&&det.includes("Ctrl+O")&&det.includes("F11")&&det.includes("Ctrl+Shift+B"))?"PASS 速查内容同源":"FAIL t="+t+" det="+det.slice(0,40)})()', 'sc-dom'), 33000);
+  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 33150, 'sc-close');
+  uiStep(() => { const ok = d.dialogWin && !d.dialogWin.isVisible(); d.log(`UITEST sc-closed hidden=${d.dialogWin ? !d.dialogWin.isVisible() : 'win-gone'}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`); }, 33350, 'sc-closed-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {

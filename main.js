@@ -81,6 +81,7 @@ const { DEFAULT_SEGMENTS } = require('./downloader');
 // updates(双通道更新)。解构导出保持本文件既有调用点不变
 const core = require('./core');
 const { log, flushLog, logFile, loadConfig, saveConfig, configPath, crashFilePath, redactToken, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = core;
+const shortcuts = require('./shortcuts'); // 快捷键单一数据源(P2-2):菜单文案/accelerator/速查浮层共用
 const dshProc = require('./dsh-process');
 const { findDshBinSafe, findNodeSafe, dshVersion, killTree } = dshProc;
 const updates = require('./updates');
@@ -1199,15 +1200,17 @@ async function showMemoryInfo() {
 }
 
 function menuItems() {
+  // 快捷键文案与 buildMenu 的 accelerator 同源自 shortcuts.js(P2-2),不手写第二份
+  const AC = Object.fromEntries(shortcuts.list.map((s) => [s.id, shortcuts.display(s.menu)]));
   return [
-    { type: 'item', id: 'open-workspace', label: '打开工作目录…', accel: 'Ctrl+O' },
-    { type: 'item', id: 'restart-dsh', label: '重启 dsh 服务', accel: 'Ctrl+Shift+R' },
+    { type: 'item', id: 'open-workspace', label: '打开工作目录…', accel: AC['open-workspace'] },
+    { type: 'item', id: 'restart-dsh', label: '重启 dsh 服务', accel: AC['restart-dsh'] },
     { type: 'item', id: 'open-browser', label: '在浏览器中打开' },
     { type: 'sep' },
-    { type: 'item', id: 'fullscreen', label: '全屏', accel: 'F11' },
-    { type: 'item', id: 'toggle-bar', label: barVisible ? '隐藏标题栏' : '显示标题栏', accel: 'Ctrl+Shift+B' },
-    { type: 'item', id: 'reload', label: '重新加载页面', accel: 'F5' },
-    { type: 'item', id: 'devtools', label: '开发者工具', accel: 'F12' },
+    { type: 'item', id: 'fullscreen', label: '全屏', accel: AC['fullscreen'] },
+    { type: 'item', id: 'toggle-bar', label: barVisible ? '隐藏标题栏' : '显示标题栏', accel: AC['toggle-bar'] },
+    { type: 'item', id: 'reload', label: '重新加载页面', accel: AC['reload'] },
+    { type: 'item', id: 'devtools', label: '开发者工具', accel: AC['devtools'] },
     { type: 'sep' },
     { type: 'item', id: 'dsh-home', label: '打开 dsh 数据目录' },
     { type: 'item', id: 'log', label: '打开日志文件' },
@@ -1215,6 +1218,7 @@ function menuItems() {
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? '检查更新…(便携版请手动下载)' : `检查更新…(当前 v${app.getVersion()})` },
     { type: 'item', id: 'check-dsh-update', label: `检查 dsh 本体更新…(当前 v${dshVersion()})` },
     { type: 'item', id: 'download-accel', label: '下载加速设置…' },
+    { type: 'item', id: 'shortcuts', label: '键盘快捷键…' },
     { type: 'sep' },
     { type: 'item', id: 'auto-open-browser', label: '自动打开浏览器', checked: !!loadConfig().openBrowser },
     { type: 'item', id: 'close-to-tray', label: '关闭时最小化到托盘', checked: loadConfig().closeAction !== 'quit' },
@@ -1225,6 +1229,17 @@ function menuItems() {
     // 提示该快捷键会误导用户;点击本项是真正的 app.quit()
     { type: 'item', id: 'quit', label: '退出' },
   ];
+}
+
+// 快捷键速查浮层(P2-2):数据源与菜单弹层/应用菜单同源(shortcuts.js),不手写第二份
+function showShortcutsDialog() {
+  const lines = shortcuts.list.map((s) => `${s.label} · ${shortcuts.display(s.menu)}`);
+  showDialog({
+    type: 'info', title: '键盘快捷键', width: 420,
+    message: '以下快捷键在任何界面可用:',
+    detail: lines.join('\n'),
+    buttons: [{ label: '好的', primary: true }],
+  });
 }
 
 const MENU_W = 264;
@@ -1324,6 +1339,10 @@ ipcMain.on('m:action', (e, id) => {
     case 'check-dsh-update': updates.checkDshUpdate(true); break;
     case 'download-accel': {
       showAccelSettings(); // 可视化设置窗:分段数 / 镜像源即时保存到 config.json
+      break;
+    }
+    case 'shortcuts': {
+      showShortcutsDialog(); // 快捷键速查浮层(P2-2)
       break;
     }
     case 'auto-open-browser': {
@@ -1760,13 +1779,15 @@ function changeWorkspace() {
 }
 
 // ---------- 菜单 ----------
+// accelerator 与弹层 accel 文案同源自 shortcuts.js(P2-2)
 function buildMenu() {
+  const acc = (id) => shortcuts.list.find((s) => s.id === id)?.menu;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
       label: '文件',
       submenu: [
-        { label: '打开工作目录…', accelerator: 'CmdOrCtrl+O', click: changeWorkspace },
-        { label: '重启 dsh 服务', accelerator: 'CmdOrCtrl+Shift+R', click: () => bootDsh() },
+        { label: '打开工作目录…', accelerator: acc('open-workspace'), click: changeWorkspace },
+        { label: '重启 dsh 服务', accelerator: acc('restart-dsh'), click: () => bootDsh() },
         { type: 'separator' },
         { label: '退出', role: 'quit' },
       ],
@@ -1774,16 +1795,17 @@ function buildMenu() {
     {
       label: '视图',
       submenu: [
-        { label: '全屏', accelerator: 'F11', click: toggleFullscreen },
-        { label: '显示/隐藏标题栏', accelerator: 'CmdOrCtrl+Shift+B', click: () => toggleTitlebar(!barVisible) },
+        { label: '全屏', accelerator: acc('fullscreen'), click: toggleFullscreen },
+        { label: '显示/隐藏标题栏', accelerator: acc('toggle-bar'), click: () => toggleTitlebar(!barVisible) },
         { type: 'separator' },
-        { label: '重新加载页面', accelerator: 'F5', click: () => dshView?.webContents.reload() },
-        { label: '开发者工具', accelerator: 'F12', click: () => dshView?.webContents.toggleDevTools() },
+        { label: '重新加载页面', accelerator: acc('reload'), click: () => dshView?.webContents.reload() },
+        { label: '开发者工具', accelerator: acc('devtools'), click: () => dshView?.webContents.toggleDevTools() },
       ],
     },
     {
       label: '帮助',
       submenu: [
+        { label: '键盘快捷键…', click: showShortcutsDialog },
         { label: '打开 dsh 数据目录 (~/.dsh)', click: () => shell.openPath(path.join(os.homedir(), '.dsh')) },
         { label: '打开日志文件', click: () => shell.showItemInFolder(logFile) },
         { label: '检查 dsh 本体更新', click: () => updates.checkDshUpdate(true) },
