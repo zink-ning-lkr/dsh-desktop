@@ -70,7 +70,7 @@ process.on('uncaughtException', (err) => {
   // app 不可用(未初始化/已损坏)时退硬退出兜底
   try { app.quit(); } catch { try { process.exit(1); } catch {} }
 });
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView, Notification, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeTheme, screen, shell, session, WebContentsView, Notification, clipboard } = require('electron');
 const { exec } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -125,6 +125,24 @@ let quitConfirmShown = false; // 退出确认对话框是否已弹出(防 before
 let forceQuit = false;        // 用户在确认框中确认退出:跳过再次确认
 let quitCleanup = null;       // 退出时的进程树清理 Promise(重入 before-quit 时等待同一同步点)
 let dshWebUrl = null; // 当前 dsh web 服务地址(供"在浏览器中打开"使用)
+let dsh431Healed = false; // 431 自愈只做一次:防止清不掉时的重载风暴
+
+// 清理历史 dsh 会话 Cookie(v0.6.3 修复"桌面端空白而浏览器正常")。
+// 根因:dsh 每个实例使用随机命名的会话 Cookie(dsh-auth-<随机>,30 天有效,Cookie 不分端口),
+// 在 127.0.0.1 域下只增不减;dsh 0.1.2-rc.1 起服务端拒绝过大的请求头(约 16KB,HTTP 431 空响应),
+// 累积越限后壳内加载服务页得到空文档(无任何失败日志),表现为桌面端空白而浏览器正常。
+// 每次加载服务页前清掉服务宿主上的 dsh 命名空间 Cookie(不影响其他本地应用)。
+async function clearDshAuthCookies(serviceUrl) {
+  try {
+    const u = new URL(serviceUrl);
+    const stale = await session.defaultSession.cookies.get({ url: `${u.protocol}//${u.hostname}` });
+    const dshCookies = stale.filter((c) => c.name.startsWith('dsh-auth-'));
+    for (const c of dshCookies) {
+      await session.defaultSession.cookies.remove(`${u.protocol}//${u.hostname}${c.path || '/'}`, c.name);
+    }
+    if (dshCookies.length) log(`已清理历史 dsh 会话 Cookie ${dshCookies.length} 枚(防请求头超限 431)`);
+  } catch (e) { log(`清理 dsh Cookie 失败: ${e.message}`); }
+}
 // 最近一次启动的 stdout 尾/参数/时刻由 dsh-process 的 getBootSnapshot() 提供(错误报告与崩溃诊断用)
 
 // ---------- 窗口:无边框主窗 + 自绘标题栏(上) + dsh 内容(下) ----------
@@ -1502,6 +1520,14 @@ function createWindow() {
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
   dshView.setBackgroundColor(chromeBgColor());
+  // 431 自愈(v0.6.3):万一头仍超限(单会话内多次重启累积等边缘路径),清 Cookie 后自动重载一次
+  dshView.webContents.session.webRequest.onCompleted({ urls: [] }, (d) => {
+    if (d.statusCode !== 431 || d.resourceType !== 'mainFrame' || !dshWebUrl || dsh431Healed) return;
+    try { if (new URL(d.url).origin !== new URL(dshWebUrl).origin) return; } catch { return; }
+    dsh431Healed = true;
+    log('服务端返回 431(请求头超限):已清理历史 Cookie,自动重载服务页');
+    clearDshAuthCookies(dshWebUrl).then(() => dshView?.webContents.reload());
+  });
   dshView.webContents.on('did-finish-load', () => {
     injectThemeObserver(); // 主题变化事件化(P2-5):每次页面加载后重注观察钩子
     syncTitleBarTheme();
@@ -1516,9 +1542,15 @@ function createWindow() {
   dshView.webContents.on('console-message', (e) => {
     if (e.message && e.message.includes('__dsh-theme-changed')) syncTitleBarTheme();
   });
+  // dsh 页面加载失败要有痕迹:静默失败 = 用户面对空白窗无从排查
+  dshView.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    if (code === -3) return; // ERR_ABORTED:重启/再导航取消旧加载,属正常竞态
+    log(`dsh 页面加载失败 ${code}: ${desc} @ ${redactToken(String(url || ''))}`);
+  });
+  dshView.webContents.on('render-process-gone', (_e, detail) => log(`dsh 渲染进程退出: ${JSON.stringify(detail)}`));
   // dsh 页面里的外链(文档/仓库等)交给系统浏览器
   dshView.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:/.test(url)) shell.openExternal(url);
+    if (/^https?:/.test(url)) { log(`页面请求开新窗,转交浏览器: ${redactToken(url)}`); shell.openExternal(url); }
     return { action: 'deny' };
   });
   // 同标签导航防护(will-navigate 只在页面自身发起导航时触发,loadURL/loadFile 不受影响):
@@ -1531,6 +1563,7 @@ function createWindow() {
       } catch { /* URL 解析失败按外链处理 */ }
     }
     e.preventDefault();
+    log(`已拦截异源主框架导航,转交浏览器: ${redactToken(url)}`);
     if (/^https?:/.test(url)) shell.openExternal(url);
   });
   // 子框架(iframe)导航同样只放行同源:被注入/恶意内容嵌入异源 iframe(钓鱼页冒充 dsh 等)时拦截
@@ -1542,6 +1575,7 @@ function createWindow() {
       } catch { /* 解析失败按外链处理 */ }
     }
     e.preventDefault();
+    log(`已拦截异源子框架导航,转交浏览器: ${redactToken(url)}`);
     if (/^https?:/.test(url)) shell.openExternal(url);
   });
   // dsh 页面内元素全屏(HTML5 fullscreen,如视频/演示):收齐标题栏让内容占满,退出时恢复进入前状态。
@@ -1732,7 +1766,9 @@ async function bootDsh() {
     settledUrl = true;
     clearTimeout(slowTimer); // 服务页已接管,慢启动提示不再出现
     setTrayState('ok'); // 托盘转"运行中"(绿点)
-    dshView.webContents.loadURL(url).catch(() => {}); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
+    dsh431Healed = false;
+    await clearDshAuthCookies(url); // 防 431:历史 Cookie 堆积会被服务端拒掉,见函数注释
+    dshView.webContents.loadURL(url).catch((e) => log(`加载服务页失败: ${e.message}`)); // 加载中再次重启,旧导航被取消(ERR_ABORTED),忽略
   } catch (err) {
     clearTimeout(slowTimer); // 失败已转错误报告窗,不再亮加载页操作行
     setTrayState('err'); // 启动失败:托盘转"已停止"(红点)

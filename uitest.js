@@ -197,6 +197,9 @@ function runUitest(d) {
     d.log(`UITEST accel-h=${s?.[1]}(期望 540 宽且高≥260,原 220 会遮按钮) → ${ok ? 'PASS' : 'FAIL'}`);
   }, 14600, 'accel-size-verify');
   uiStep(() => readDom(d.dialogWin, '(()=>{const r=document.querySelector("#foot button").getBoundingClientRect();return r.bottom<=innerHeight+1?`VISIBLE bottom=${Math.round(r.bottom)}/h=${innerHeight}`:`CLIPPED bottom=${Math.round(r.bottom)}/h=${innerHeight}`})()', 'accel-btn'), 14700);
+  // v0.6.3 服务页挂载断言: 若已在 http 服务页, 必须真实挂载(bodyLen>500), 不得是 431/空文档空白
+  // (桌面端空白而浏览器正常的回归锁);若仍在 file:// 启动页(慢启动), 容忍跳过
+  uiStep(() => readDom(d.dshView, '(()=>{const h=location.href;const bl=document.body?document.body.innerHTML.length:0;if(h.startsWith("file:"))return "PASS 尚在启动页(容忍)";return bl>500?"PASS 服务页已挂载 bodyLen="+bl:"FAIL 服务页空白 bodyLen="+bl+" href="+h.slice(0,60)})()', 'svc-mount'), 9500);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 14900, 'accel-close');
   // ⑥ dsh 本体安装(修复点:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
   //    成功路径:假 npm 输出两行后正常退出 0 → 应出现"dsh 更新完成"结果窗
@@ -285,50 +288,67 @@ function runUitest(d) {
   // ⑫ 外观主题(P1-2):菜单项存在 → 点击循环(auto→dark→light→auto) → config/themeSource 映射
   //    → 渲染层 data-theme + 令牌覆写 + 鲸鱼 logo 黑白换版;结束恢复原配置
   const theme0 = d.loadConfig().theme;
-  const clickThemeItem = (win) => win?.webContents.executeJavaScript(
-    '(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("外观:"));if(!it)return "FAIL no-item";const label=it.textContent.trim();it.parentElement.click();return label})()'
-  ).catch((e) => 'ERR ' + e.message);
+  // v0.6.3 轮询化:真实 dsh SPA 首载与菜单弹层首载会争抢资源,固定间隙的点击/断言可能落空——
+  // 全部改为轮询等待(每 350ms 一次,最多 10 次),落空重试而非失败
+  const pollFor = async (fn, times = 10, gap = 350) => {
+    for (let i = 0; i < times; i++) {
+      const v = await fn();
+      if (v) return v;
+      await new Promise((r) => setTimeout(r, gap));
+    }
+    return null;
+  };
+  const clickThemeItem = (win) => pollFor(() => win?.webContents.executeJavaScript(
+    '(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("外观:"));if(!it)return null;const label=it.textContent.trim();it.parentElement.click();return label})()'
+  ).catch(() => null));
+  const domPoll = (win, expr) => pollFor(() => win?.webContents.executeJavaScript(expr)
+    .then((v) => (String(v).startsWith('PASS') ? v : null)).catch(() => null));
   uiStep(() => { d.showMenuPopup(); }, 28200, 'theme-menu-open');
-  uiStep(() => clickThemeItem(d.menuPopupView), 28500, 'theme-click-1');
-  uiStep(() => { const cfg = d.loadConfig().theme; const src = d.getThemeSource(); const ok = cfg === 'dark' && src === 'dark'; d.log(`UITEST theme-1 auto→dark cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`); }, 28800, 'theme-1-verify');
-  uiStep(() => { d.showMenuPopup(); }, 29100, 'theme-menu-open2');
+  uiStep(async () => {
+    const label = await clickThemeItem(d.menuPopupView);
+    if (!label) { d.log('UITEST theme-1 FAIL no-item'); return; }
+    const ok = await pollFor(() => d.loadConfig().theme === 'dark' && d.getThemeSource() === 'dark');
+    d.log(`UITEST theme-1 auto→dark clicked="${label}" → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 28400, 'theme-1');
+  uiStep(() => { d.showMenuPopup(); }, 29600, 'theme-menu-open2');
   // P2-5:主题采样事件化——dsh 页面应已注入 MutationObserver 钩子(did-finish-load/did-navigate 重注)
-  uiStep(() => readDom(d.dshView, 'window.__dshThemeHook === true ? "PASS theme-hook已注入" : "FAIL hook=" + window.__dshThemeHook', 'theme-hook'), 29250);
-  uiStep(() => clickThemeItem(d.menuPopupView), 29400, 'theme-click-2');
-  uiStep(() => {
-    const cfg = d.loadConfig().theme; const src = d.getThemeSource();
-    const ok = cfg === 'light' && src === 'light';
-    d.log(`UITEST theme-2 dark→light cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`);
+  uiStep(async () => {
+    const hook = await domPoll(d.dshView, 'window.__dshThemeHook === true ? "PASS" : "FAIL"');
+    d.log(`UITEST theme-hook ${hook || 'FAIL 超时'}`);
+    const label = await clickThemeItem(d.menuPopupView);
+    if (!label) { d.log('UITEST theme-2 FAIL no-item'); return; }
+    const ok = await pollFor(() => d.loadConfig().theme === 'light' && d.getThemeSource() === 'light');
+    d.log(`UITEST theme-2 dark→light clicked="${label}" → ${ok ? 'PASS' : 'FAIL'}`);
     // 已开窗的渲染器应实时换肤(reportWin 自 11.8s 起一直开着,未重建)
-    readDom(d.reportWin,
-      `(()=>{const attr=document.documentElement.getAttribute("data-theme");const bg0=getComputedStyle(document.documentElement).getPropertyValue("--c-bg0").trim();const logo=document.querySelector(".logo").src;return (attr==="light"&&bg0==="#ffffff"&&logo.includes("whale-black"))?"PASS attr="+attr+" bg0="+bg0:"FAIL attr="+attr+" bg0="+bg0+" logo="+logo})()`,
-      'theme-light-dom');
-  }, 29700, 'theme-2-verify');
-  uiStep(() => { d.showMenuPopup(); }, 30100, 'theme-menu-open3');
-  uiStep(() => clickThemeItem(d.menuPopupView), 30400, 'theme-click-3');
-  uiStep(() => {
-    const cfg = d.loadConfig().theme; const src = d.getThemeSource();
-    const ok = cfg === 'auto' && src === 'system';
-    d.log(`UITEST theme-3 light→auto cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`);
+    const dom = await domPoll(d.reportWin,
+      `(()=>{const attr=document.documentElement.getAttribute("data-theme");const bg0=getComputedStyle(document.documentElement).getPropertyValue("--c-bg0").trim();const logo=document.querySelector(".logo").src;return (attr==="light"&&bg0==="#ffffff"&&logo.includes("whale-black"))?"PASS attr="+attr+" bg0="+bg0:"FAIL attr="+attr+" bg0="+bg0+" logo="+logo})()`);
+    d.log(`UITEST dom theme-light-dom ${dom || 'FAIL 超时'}`);
+  }, 29800, 'theme-2');
+  uiStep(() => { d.showMenuPopup(); }, 31200, 'theme-menu-open3');
+  uiStep(async () => {
+    const label = await clickThemeItem(d.menuPopupView);
+    if (!label) { d.log('UITEST theme-3 FAIL no-item'); return; }
+    const ok = await pollFor(() => d.loadConfig().theme === 'auto' && d.getThemeSource() === 'system');
+    d.log(`UITEST theme-3 light→auto clicked="${label}" → ${ok ? 'PASS' : 'FAIL'}`);
     // 回到 auto:渲染层 data-theme 应与系统 prefers-color-scheme 自洽(测试机系统主题未知,断言一致性而非具体值)
-    readDom(d.reportWin,
-      `(()=>{const attr=document.documentElement.getAttribute("data-theme")||"";const want=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"";return (attr===want)?"PASS attr="+attr:"FAIL attr="+attr+" want="+want})()`,
-      'theme-auto-dom');
-  }, 30700, 'theme-3-verify');
-  uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 31100, 'theme-report-close');
-  uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 31350, 'theme-report-close-verify');
+    const dom = await domPoll(d.reportWin,
+      `(()=>{const attr=document.documentElement.getAttribute("data-theme")||"";const want=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"";return (attr===want)?"PASS attr="+attr:"FAIL attr="+attr+" want="+want})()`);
+    d.log(`UITEST dom theme-auto-dom ${dom || 'FAIL 超时'}`);
+  }, 31400, 'theme-3');
+  uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 32700, 'theme-report-close');
+  uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 32950, 'theme-report-close-verify');
   // ⑬ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
-  uiStep(() => { d.showWelcome(); }, 31400, 'welcome-open');
-  uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 32000);
-  uiStep(() => { d.abortWelcome(); }, 32200, 'welcome-abort');
-  uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 32400, 'welcome-closed-verify');
+  uiStep(() => { d.showWelcome(); }, 33100, 'welcome-open');
+  uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 33700);
+  uiStep(() => { d.abortWelcome(); }, 33900, 'welcome-abort');
+  uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 34100, 'welcome-closed-verify');
   // ⑭ 快捷键速查(P2-2):菜单「键盘快捷键…」→ 速查对话框,内容与菜单 accel 同源(shortcuts.js)
-  uiStep(() => { d.showMenuPopup(); }, 32550, 'sc-menu-open');
+  uiStep(() => { d.showMenuPopup(); }, 34250, 'sc-menu-open');
   uiStep(() => d.menuPopupView?.webContents.executeJavaScript('(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("键盘快捷键"));if(!it)return "FAIL no-item";it.parentElement.click();return "ok"})()')
-    .then((v) => d.log(`UITEST sc-click ${v}`)).catch((e) => d.log(`UITEST sc-click ✗ ${e.message}`)), 32750, 'sc-click');
-  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;const det=document.getElementById("detail").textContent;return (t==="键盘快捷键"&&det.includes("Ctrl+O")&&det.includes("F11")&&det.includes("Ctrl+Shift+B"))?"PASS 速查内容同源":"FAIL t="+t+" det="+det.slice(0,40)})()', 'sc-dom'), 33000);
-  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 33150, 'sc-close');
-  uiStep(() => { const ok = d.dialogWin && !d.dialogWin.isVisible(); d.log(`UITEST sc-closed hidden=${d.dialogWin ? !d.dialogWin.isVisible() : 'win-gone'}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`); }, 33350, 'sc-closed-verify');
+    .then((v) => d.log(`UITEST sc-click ${v}`)).catch((e) => d.log(`UITEST sc-click ✗ ${e.message}`)), 34450, 'sc-click');
+  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;const det=document.getElementById("detail").textContent;return (t==="键盘快捷键"&&det.includes("Ctrl+O")&&det.includes("F11")&&det.includes("Ctrl+Shift+B"))?"PASS 速查内容同源":"FAIL t="+t+" det="+det.slice(0,40)})()', 'sc-dom'), 34700);
+  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 34850, 'sc-close');
+  uiStep(() => { const ok = d.dialogWin && !d.dialogWin.isVisible(); d.log(`UITEST sc-closed hidden=${d.dialogWin ? !d.dialogWin.isVisible() : 'win-gone'}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`); }, 35050, 'sc-closed-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
@@ -414,7 +434,7 @@ function runUitest(d) {
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 33600);
+  }, 35600);
 }
 
 module.exports = { runSmokeDemo, runUitest };
