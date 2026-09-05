@@ -152,6 +152,8 @@ function runUitest(d) {
   uiStep(() => d.log(`UITEST bar-expanded h=${d.currentBarH}(期望 ${d.TITLEBAR_H},PASS=${d.currentBarH === d.TITLEBAR_H}) viewH=${d.titlebarView?.getBounds().height}(期望 ${d.TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
   // ③ 对话框复用(第二次调用必须仍能显示)
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
+  // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
+  uiStep(() => readDom(d.dialogWin, '(()=>{const ae=document.activeElement;return (ae&&ae.classList.contains("primary")&&ae.closest("#foot"))?"PASS focus=主按钮":"FAIL ae="+(ae?ae.className:"none")})()', 'd1-focus'), 10500);
   uiStep(() => d.showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(复用)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
   uiStep(() => readDom(d.dialogWin, 'document.getElementById("title").textContent', 'd2'), 11200);
   // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
@@ -222,6 +224,8 @@ function runUitest(d) {
   // ⑧ a11y(P1-3):菜单角色标注(menu/menuitem/menuitemcheckbox+aria-checked)、
   //    键盘导航(aria-activedescendant 跟随)与 typeahead(前缀匹配跳转),Escape 关闭
   uiStep(() => { d.showMenuPopup(); }, 26300, 'a11y-menu-open');
+  // P0-7:菜单焦点落在 role=menu 容器(panel)上,aria-activedescendant 才对读屏器生效
+  uiStep(() => readDom(d.menuPopupView, '(()=>{const ae=document.activeElement;return (ae&&ae.id==="panel")?"PASS focus=panel":"FAIL ae="+(ae?(ae.id||ae.tagName):"none")})()', 'a11y-menu-focus'), 26500);
   uiStep(() => readDom(d.menuPopupView, '(()=>{const p=document.getElementById("panel");const items=p.querySelectorAll("[role=menuitem],[role=menuitemcheckbox]").length;const chk=p.querySelectorAll("[role=menuitemcheckbox][aria-checked=true]").length;const sep=p.querySelectorAll("[role=separator]").length;return (p.getAttribute("role")==="menu"&&items>=10&&chk>=1&&sep>=1)?"PASS items="+items+" chk="+chk+" sep="+sep:"FAIL role="+p.getAttribute("role")+" items="+items+" chk="+chk+" sep="+sep})()', 'a11y-roles'), 26700);
   uiStep(() => readDom(d.menuPopupView, '(()=>{document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));const ad=document.getElementById("panel").getAttribute("aria-activedescendant");const sel=document.querySelector(".item.sel");return (ad&&sel&&sel.id===ad)?"PASS activedescendant="+ad:"FAIL ad="+ad+" sel="+(sel&&sel.id)})()', 'a11y-arrownav'), 27000);
   uiStep(() => readDom(d.menuPopupView, '(()=>{const before=document.querySelector(".item.sel");document.dispatchEvent(new KeyboardEvent("keydown",{key:"重"}));const after=document.querySelector(".item.sel");return (after&&after!==before&&after.textContent.includes("重"))?"PASS → "+after.textContent.trim().slice(0,10):"FAIL before="+(before&&before.textContent.trim().slice(0,10))+" after="+(after&&after.textContent.trim().slice(0,10))})()', 'a11y-typeahead'), 27300);

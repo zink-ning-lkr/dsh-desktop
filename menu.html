@@ -178,6 +178,9 @@
     panel.style.top = margin + 'px';
     render(items);
     select(-1);
+    // 焦点必须落在 role=menu 容器(panel, tabindex=-1):aria-activedescendant 仅在焦点
+    // 位于携带该属性的元素上时才被读屏器播报(WAI-ARIA APG menu 模式;P0-7)
+    panel.focus();
   });
 </script>
 </body>
