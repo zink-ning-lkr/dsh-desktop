@@ -553,7 +553,9 @@ function closeStatus() {
   refreshTray(); // 状态窗关闭,tooltip 去掉"下载中"段
 }
 
-// 轻量确认反馈三合一(P1-1):accel 保存 / report 导出复制等瞬时确认统一进任务中心活动流。
+// 无就地 UI 的瞬时确认(P0-3 收窄):仅服务"反馈无处安放"的调用方(如菜单换肤确认)。
+// accel 保存 / report 导出复制等有可见窗口的操作,一律由该窗口就地反馈(.inline-feedback),
+// 不再跨窗进任务中心——状态窗未开时这里是空操作,跨窗路径会造成"有时零处/有时两处"的不确定反馈。
 // 窗口未开时不强拉窗口(不打扰),只在已有窗口内追加;4s 自动消退,不留历史
 let toastTimer = null;
 function notifyToast(text) {
@@ -881,8 +883,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     cfg.downloadSegments = clamped;
     if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 分段数 → ${clamped}`);
-    notifyToast(`加速设置已保存:并发 ${clamped} 段`); // 瞬时确认进任务中心活动流(P1-1)
-    return { ok: true, value: clamped };
+    return { ok: true, value: clamped }; // 就地反馈由 accel 窗 .inline-feedback 呈现,不再跨窗重复提示(P0-3)
   }
   if (field === 'mirror') {
     const raw = String(value || '').trim();
@@ -896,8 +897,7 @@ ipcMain.handle('acc:set', (e, payload) => {
     else delete cfg.downloadMirror;
     if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
     log(`下载加速设置: 镜像源 ${raw ? '→ ' + raw : '已清除'}`);
-    notifyToast(raw ? '镜像源已保存' : '已恢复官方下载源');
-    return { ok: true, value: raw };
+    return { ok: true, value: raw }; // 同上:accel 窗自带就地反馈(P0-3)
   }
   return { ok: false, error: '未知设置项' };
 });
@@ -1006,8 +1006,7 @@ ipcMain.on('rp:export', (e) => {
   try {
     fs.writeFileSync(save, reportText, 'utf8');
     reportWin.webContents.send('rp:exported', save);
-    notifyToast('错误报告已导出');
-    shell.showItemInFolder(save);
+    shell.showItemInFolder(save); // 就地反馈由 report 窗 .inline-feedback 呈现,不再跨窗重复提示(P0-3)
   } catch (e2) {
     log(`报告导出失败: ${e2.message}`);
   }
@@ -1015,8 +1014,7 @@ ipcMain.on('rp:export', (e) => {
 ipcMain.on('rp:copy', (e) => {
   if (!trustedEvent(e)) return;
   clipboard.writeText(reportText);
-  reportWin?.webContents.send('rp:copied');
-  notifyToast('错误报告已复制到剪贴板');
+  reportWin?.webContents.send('rp:copied'); // 同上:report 窗自带就地反馈(P0-3)
 });
 ipcMain.on('rp:open-log', (e) => {
   if (!trustedEvent(e)) return;

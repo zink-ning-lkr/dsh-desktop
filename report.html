@@ -47,8 +47,7 @@
   #actions { display: flex; flex: none; align-items: center; gap: 8px; }
   .foot .spacer { flex: 1; }
   .foot .note { font-size: 11px; color: var(--c-fg2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
-  .flash { opacity: 0; transition: opacity .25s; font-size: 11.5px; color: var(--c-ok); }
-  .flash.on { opacity: 1; }
+  /* 就地反馈走 ui.css 公共 .inline-feedback(与 accel 窗同一套,样式/配色单一来源) */
 </style>
 </head>
 <body>
@@ -71,7 +70,7 @@
     </div>
   </div>
   <div class="foot">
-    <span class="flash" id="flash"></span>
+    <span class="inline-feedback" id="flash"></span>
     <span class="spacer"></span>
     <span class="note" id="reportPath"></span>
     <button id="copyBtn" class="btn">复制报告</button>

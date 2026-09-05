@@ -116,6 +116,15 @@
 .btn.danger-ghost { background: transparent; border-color: #f8514955; color: var(--c-err); }
 .btn.danger-ghost:hover { background: rgba(248, 81, 73, .12); border-color: var(--c-err); }
 
+/* ---- 公共:就地瞬时反馈(accel 保存 / report 复制导出;取代各页私有的 .toast/.flash) ----
+   用法:<span class="inline-feedback"> + JS 切换 .on 显示、.ok/.bad 定色(默认随 --c-ok) */
+.inline-feedback {
+  flex: none; font-size: 12px; font-weight: 600; opacity: 0;
+  transition: opacity .2s; white-space: nowrap; color: var(--c-ok);
+}
+.inline-feedback.on { opacity: 1; }
+.inline-feedback.bad { color: var(--c-err); }
+
 /* ---- 公共:类型圆标(status 结果视图与 dialog 原本逐字符重复 2 份) ----
    用法:class="big info|success|warning|error"(与图标同元素携带类型) */
 .big {
