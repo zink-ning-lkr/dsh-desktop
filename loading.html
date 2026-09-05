@@ -80,22 +80,30 @@
 <body>
   <img class="logo" src="assets/whale-white.png" alt="" data-logo>
   <div class="ring" aria-hidden="true"></div>
-  <p class="stage" id="stage" role="status" aria-live="polite">正在启动…</p>
+  <p class="stage" id="stage" role="status" aria-live="polite"></p>
   <div class="dots" id="dots" aria-hidden="true"></div>
-  <p class="hint" id="hint">正在启动 dsh…(首次启动可能需要安装依赖,耗时较长)</p>
+  <p class="hint" id="hint"></p>
   <div class="slow" id="slow" role="group" aria-label="启动较慢时的自助操作">
-    <p class="slow-tip">启动耗时比平时长(可能是首次安装依赖或网络较慢)</p>
+    <p class="slow-tip" id="slowTip"></p>
     <div class="slow-btns">
-      <button class="btn" id="btnLog" type="button">查看日志</button>
-      <button class="btn primary" id="btnRetry" type="button">重试</button>
-      <button class="btn danger-ghost" id="btnQuit" type="button">取消并退出</button>
+      <button class="btn" id="btnLog" type="button"></button>
+      <button class="btn primary" id="btnRetry" type="button"></button>
+      <button class="btn danger-ghost" id="btnQuit" type="button"></button>
     </div>
   </div>
   <div class="logtail" id="logtail"></div>
 <script>
+  // 文案表(X-2 第二批):阶段名与主进程 boot 域同源,UITEST 慢启动用例依赖 3 个自助按钮
+  const T = (k, p) => window.__i18n.t(k, p);
+  document.getElementById('stage').textContent = T('boot.initial');
+  document.getElementById('hint').textContent = T('boot.hint');
+  document.getElementById('slowTip').textContent = T('boot.slowTip');
+  document.getElementById('btnLog').textContent = T('boot.viewLog');
+  document.getElementById('btnRetry').textContent = T('action.retry');
+  document.getElementById('btnQuit').textContent = T('boot.quitBtn');
   const stage = document.getElementById('stage');
   // 四个启动阶段,与主进程 setStage(i) 对应:0 定位 dsh → 1 启动服务 → 2 等待就绪 → 3 加载页面
-  const STAGES = ['定位 dsh 本体…', '启动 dsh web 服务…', '等待服务就绪…', '加载页面…'];
+  const STAGES = [T('boot.locate'), T('boot.start'), T('boot.waitReady'), T('boot.loadPage')];
   for (let i = 0; i < STAGES.length; i++) {
     const d = document.createElement('i');
     document.getElementById('dots').appendChild(d);

@@ -52,18 +52,18 @@
 <div class="win">
   <div class="win-head">
     <img class="logo" src="assets/whale-white.png" alt="" data-logo>
-    <span class="t" id="headTitle">DSH 错误报告 — 启动诊断</span>
-    <button class="win-close" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <span class="t" id="headTitle"></span>
+    <button class="win-close" id="xBtn" title="" aria-label=""><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="body">
     <div class="cls">
-      <span class="badge" id="badge">启动失败</span>
-      <span class="name" id="name"></span>
+    <span class="badge" id="badge"></span>
+    <span class="name" id="name"></span>
     </div>
     <div class="cause" id="cause"></div>
     <div class="advice" id="advice" role="list" aria-label="处理建议"></div>
     <div class="log-wrap">
-      <span class="sec-label">关键日志预览(完整内容见「日志文件」)</span>
+      <span class="sec-label" id="logLabel"></span>
       <div class="log" id="log" role="log" aria-label="关键日志预览"></div>
     </div>
   </div>
@@ -72,22 +72,33 @@
     <div id="actions"></div>
     <span class="spacer"></span>
     <span class="note" id="reportPath"></span>
-    <button id="logBtn" class="btn">日志文件</button>
-    <button id="copyBtn" class="btn">复制报告</button>
-    <button id="exportBtn" class="btn">导出报告</button>
+    <button id="logBtn" class="btn"></button>
+    <button id="copyBtn" class="btn"></button>
+    <button id="exportBtn" class="btn"></button>
   </div>
 </div>
 <script>
   const R = window.__report;
+  // 文案表(X-2 第二批):渲染层 t(),静态文案 JS 填充
+  const T = (k, p) => window.__i18n.t(k, p);
   let payload = null;
+  document.getElementById('logLabel').textContent = T('report.logLabel');
+  document.getElementById('copyBtn').textContent = T('report.copy');
+  document.getElementById('exportBtn').textContent = T('report.export');
+  document.getElementById('logBtn').textContent = T('report.logFile');
+  {
+    const x = document.getElementById('xBtn');
+    x.title = T('common.close');
+    x.setAttribute('aria-label', T('common.close'));
+  }
 
   function render(p) {
     payload = p;
-    document.title = p.name || 'DSH 错误报告';
+    document.title = p.name || T('report.winTitle');
     if (p.mica) document.querySelector('.win')?.classList.add('mica'); // Win11 系统材质透出(P2-3)
     // 可见头部文案跟随场景:进程退出时不应再显示「启动诊断」(原为静态文本)
     const headEl = document.getElementById('headTitle');
-    if (headEl) headEl.textContent = p.phase === 'exit' ? 'DSH 错误报告 — 进程退出' : 'DSH 错误报告 — 启动诊断';
+    if (headEl) headEl.textContent = p.phase === 'exit' ? T('report.headExit') : T('report.headBoot');
     const badge = p.badge || (p.phase === 'exit' ? '进程退出' : '启动失败');
     document.getElementById('badge').textContent = badge;
     document.getElementById('name').textContent = p.name || '';
@@ -102,7 +113,7 @@
       advice.appendChild(row);
     });
     const logEl = document.getElementById('log');
-    logEl.textContent = (p.logPreview || '(暂无日志)').trim() || '(暂无日志)';
+    logEl.textContent = (p.logPreview || T('report.noLog')).trim() || T('report.noLog');
     logEl.scrollTop = 0; // 复用窗口时回到顶部,避免新内容被旧滚动位置裁掉
     const np = document.getElementById('reportPath');
     if (p.reportPath) { np.textContent = p.reportPath; np.title = p.reportPath; } // 直接在底部显示完整保存路径(悬停/可选中复制)
@@ -136,8 +147,8 @@
   document.getElementById('copyBtn').addEventListener('click', () => R.copy());
   document.getElementById('logBtn').addEventListener('click', () => R.openLog());
   R.onShow(render);
-  R.onCopied(() => flash('已复制到剪贴板'));
-  R.onExported(() => flash('报告已导出'));
+  R.onCopied(() => flash(T('report.copied')));
+  R.onExported(() => flash(T('report.exportedFlash')));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') R.action('_close'); });
 </script>
 </body>

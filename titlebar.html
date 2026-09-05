@@ -62,7 +62,7 @@
 </style>
 </head>
 <body>
-  <button id="menuBtn" title="菜单" aria-label="菜单" aria-haspopup="menu" aria-expanded="false">
+  <button id="menuBtn" title="" aria-label="" aria-haspopup="menu" aria-expanded="false">
     <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
       <line x1="2" y1="3.5" x2="12" y2="3.5"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="2" y1="10.5" x2="12" y2="10.5"/>
     </svg>
@@ -73,22 +73,36 @@
   </div>
   <div class="spacer"></div>
   <div class="cap">
-    <button id="collapseBtn" title="隐藏标题栏" aria-label="隐藏标题栏">
+    <button id="collapseBtn" title="" aria-label="">
       <svg viewBox="0 0 11 11"><path d="M1.5 7.5 L5.5 3.5 L9.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
     </button>
-    <button id="minBtn" title="最小化" aria-label="最小化">
+    <button id="minBtn" title="" aria-label="">
       <svg viewBox="0 0 11 11"><line x1="1" y1="9.5" x2="10" y2="9.5" stroke="currentColor" stroke-width="1"/></svg>
     </button>
-    <button id="maxBtn" title="最大化" aria-label="最大化">
+    <button id="maxBtn" title="" aria-label="">
       <svg id="icoMax" viewBox="0 0 11 11"><rect x="1" y="1" width="9" height="9" fill="none" stroke="currentColor"/></svg>
       <svg id="icoRestore" viewBox="0 0 11 11" style="display:none"><rect x="0.5" y="2.5" width="8" height="8" fill="none" stroke="currentColor"/><path d="M2.5 2.5 V0.5 H10.5 V8.5 H8.5" fill="none" stroke="currentColor"/></svg>
     </button>
-    <button id="closeBtn" title="关闭" aria-label="关闭">
+    <button id="closeBtn" title="" aria-label="">
       <svg viewBox="0 0 11 11"><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.1"/></svg>
     </button>
   </div>
 <script>
   const t = window.__titlebar;
+  // 静态文案收编(X-2 第二批):preload 已同步拉取文案表,直接填充
+  {
+    const T = (k) => window.__i18n.t(k);
+    const setTip = (id, k) => {
+      const el = document.getElementById(id);
+      el.title = T(k);
+      el.setAttribute('aria-label', T(k));
+    };
+    setTip('menuBtn', 'titlebar.menu');
+    setTip('collapseBtn', 'menu.hideBar');
+    setTip('minBtn', 'titlebar.minimize');
+    setTip('maxBtn', 'titlebar.maximize');
+    setTip('closeBtn', 'common.close');
+  }
   // 鲸鱼 logo 黑白版:标题栏底色跟 dsh 页面采样色(而非主题),logo 也随之切换,
   // 否则浅色页面背景上白鲸不可见。采样到达前(加载页阶段)底色是令牌色,跟随 data-theme。
   const logo = document.querySelector('.logo');
@@ -119,8 +133,8 @@
   t.onMaximized((max) => {
     document.getElementById('icoMax').style.display = max ? 'none' : '';
     document.getElementById('icoRestore').style.display = max ? '' : 'none';
-    document.getElementById('maxBtn').title = max ? '还原' : '最大化';
-    document.getElementById('maxBtn').setAttribute('aria-label', max ? '还原' : '最大化');
+    document.getElementById('maxBtn').title = max ? window.__i18n.t('titlebar.restore') : window.__i18n.t('titlebar.maximize');
+    document.getElementById('maxBtn').setAttribute('aria-label', max ? window.__i18n.t('titlebar.restore') : window.__i18n.t('titlebar.maximize'));
   });
   t.onWorkspace((ws) => { document.getElementById('workspace').textContent = ws ? `— ${ws}` : ''; });
   // 关闭按钮语义随设置联动:「最小化到托盘」提示用户窗口并未退出(否则点 ✕ 后窗口消失易误以为退出了)

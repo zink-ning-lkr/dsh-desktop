@@ -5,7 +5,7 @@
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
-<title>欢迎使用 DSH Desktop</title>
+<title></title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
 <style>
@@ -41,24 +41,32 @@
   </div>
   <div class="hero">
     <img src="assets/whale-white.png" alt="DSH" data-logo>
-    <h1>欢迎使用 DSH Desktop</h1>
-    <p class="sub">以桌面应用的方式运行 <b>dsh 本体</b>:窗口加载 dsh web 服务,<br>
-      <b>会话、文件、设置、插件</b>与终端里的 dsh 完全共享。</p>
+    <h1 id="h1"></h1>
+    <p class="sub" id="sub"></p>
   </div>
   <div class="act">
-    <button class="btn primary" id="wlChoose" type="button">选择工作目录</button>
-    <p class="hint">工作目录决定文件与会话列表的归属;之后可在菜单「打开工作目录…」随时更改。</p>
+    <button class="btn primary" id="wlChoose" type="button"></button>
+    <p class="hint" id="wlHint"></p>
   </div>
   <div class="foot">
     <span class="tray-note">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M1.5 14.5h13"/></svg>
-      点窗口的「关闭」默认收进系统托盘,dsh 会在后台继续运行,点击托盘鲸鱼图标即可恢复。
+      <span id="trayNoteText"></span>
     </span>
-    <button class="btn" id="wlQuit" type="button">退出</button>
+    <button class="btn" id="wlQuit" type="button"></button>
   </div>
 </div>
 <script>
   const W = window.__welcome;
+  // 文案表(X-2 第二批);sub 为仓库内受控文案(仅含 <b>/<br>),用 innerHTML
+  const T = (k, p) => window.__i18n.t(k, p);
+  document.title = T('welcome.title');
+  document.getElementById('h1').textContent = T('welcome.heading');
+  document.getElementById('sub').innerHTML = T('welcome.subHtml');
+  document.getElementById('wlChoose').textContent = T('welcome.choose');
+  document.getElementById('wlHint').textContent = T('welcome.hint');
+  document.getElementById('trayNoteText').textContent = T('welcome.trayNote');
+  document.getElementById('wlQuit').textContent = T('welcome.quit');
   const chooseBtn = document.getElementById('wlChoose');
   chooseBtn.focus(); // 首触点:Enter 直达「选择工作目录」
   chooseBtn.addEventListener('click', () => W.choose());

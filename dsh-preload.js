@@ -9,4 +9,14 @@ if (location.protocol === 'file:') {
     // 加载页慢启动自助动作:view-log / retry / quit(见 main.js boot:action)
     action: (id) => ipcRenderer.send('boot:action', String(id)),
   });
+  // 文案表同步拉取(渲染层 i18n,X-2 第二批):仅本地 loading 页可用,与 dshBoot 同受 file:// 门槛
+  let i18nTable = {};
+  try { i18nTable = ipcRenderer.sendSync('i18n:table') || {}; } catch { /* 主进程未就绪:回退 key */ }
+  contextBridge.exposeInMainWorld('__i18n', {
+    t: (key, params) => {
+      let s = i18nTable[key] || key;
+      if (params) for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
+      return s;
+    },
+  });
 }

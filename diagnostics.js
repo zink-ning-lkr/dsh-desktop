@@ -5,6 +5,7 @@
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
+const { t } = require('./i18n'); // 诊断分类文案收编(X-2 第二批)
 
 // ---------- 小工具 ----------
 
@@ -55,7 +56,7 @@ function collectDiagnostics(ctx = {}) {
 
   // 运行时与环境
   out.runtime = {
-    appVersion: withApp(() => app.getVersion()) || '未知',
+    appVersion: withApp(() => app.getVersion()) || t('diag.unknown'),
     electron: process.versions.electron || '',
     chrome: process.versions.chrome || '',
     node: process.versions.node || '',
@@ -88,7 +89,7 @@ function collectDiagnostics(ctx = {}) {
     out.dsh = {
       bin: ctx.dshBin,
       packagePath: pkgPath,
-      version: (pkg && pkg.version) || '未知',
+      version: (pkg && pkg.version) || t('diag.unknown'),
       main: (pkg && pkg.main) || null,
       exists: fs.existsSync(ctx.dshBin),
       modulesOk: safe(() => {
@@ -133,23 +134,19 @@ function classifyError(err, ctx = {}) {
   const mk = (kind, title, cause, suggestions) => ({ kind, title, cause, suggestions });
 
   if (phase === 'exit') {
-    return mk('exit', `dsh web 进程意外退出 (code=${ctx.code})`,
-      'dsh web 服务进程在运行期间退出,服务已不可用。',
-      ['点击「重启 dsh」恢复服务。',
-        '若反复退出,请查看下方日志尾部,关注报错前最后几行。',
-        '可导出错误报告,连同日志文件一起反馈问题。']);
+    return mk('exit', t('diag.exitTitle', { code: ctx.code }),
+      t('diag.exitCause'),
+      [t('diag.exitSug1'), t('diag.exitSug2'), t('diag.exitSug3')]);
   }
   if (/找不到 dsh/.test(msg)) {
-    return mk('missing-dsh', '未找到 dsh 本体',
-      '桌面端需要全局安装的 dsh 包才能启动,当前未定位到。',
-      ['执行 npm install -g @deepseek-ai/dsh 安装后重试。',
-        '安装后需重启 DSH Desktop。']);
+    return mk('missing-dsh', t('diag.missingDshTitle'),
+      t('diag.missingDshCause'),
+      [t('diag.missingDshSug1'), t('diag.missingDshSug2')]);
   }
   if (/ledger|already owned by process/i.test(msg)) {
-    return mk('already-running', '检测到另一个 dsh 实例正在运行',
-      'dsh 的任务板单实例锁已被其他进程持有,当前启动被拒绝。',
-      ['退出其他正在运行的 dsh / DSH Desktop 窗口后再启动。',
-        '若确认没有其他实例,可能是上次异常退出残留,重启电脑后重试。']);
+    return mk('already-running', t('diag.alreadyRunningTitle'),
+      t('diag.alreadyRunningCause'),
+      [t('diag.alreadyRunningSug1'), t('diag.alreadyRunningSug2')]);
   }
   // dsh 升级后最常见的启动失败:第三方插件与新版不兼容(如 0.1.2-alpha.2 移除了
   // @deepseek-ai/dsh-settings 的 settingsNamespace 导出),插件树加载失败,报错形如
@@ -157,52 +154,40 @@ function classifyError(err, ctx = {}) {
   // does not provide an export named 'settingsNamespace'"。必须排在「启动后即退出」之前,
   // 否则用户只会看到泛泛的退出提示,无从知道是哪个插件出了问题
   if (/plugin tree failed to load|failed to apply loader entry|failed to import loader entry|does not provide an export named|The requested module .* does not provide/i.test(msg)) {
-    return mk('plugin-incompat', 'dsh 第三方插件与当前版本不兼容',
-      'dsh 升级后,旧版第三方插件不再兼容,插件树加载失败导致 dsh web 启动即退出。',
-      ['先定位下方报错中的插件名(形如 dsh-better-sidebar / @xxx/dsh-xxx):它通常装在 ~/.dsh/profiles/web 下。',
-        '临时禁用:编辑 ~/.dsh/profiles/web/cordis.patch.yml,给该插件加 disabled: true。',
-        '或更新到兼容版本:dsh plugin --profile web add <插件名>@latest',
-        '或移除该插件:dsh plugin --profile web remove <插件名>',
-        '若为官方内置插件报错,可先回退 dsh:npm install -g @deepseek-ai/dsh@0.1.1-rc.2,等官方修复后再升级。']);
+    return mk('plugin-incompat', t('diag.pluginIncompatTitle'),
+      t('diag.pluginIncompatCause'),
+      [t('diag.pluginIncompatSug1'), t('diag.pluginIncompatSug2'), t('diag.pluginIncompatSug3'),
+        t('diag.pluginIncompatSug4'), t('diag.pluginIncompatSug5')]);
   }
   if (/EPERM|EACCES|EINVAL/.test(msg)) {
-    return mk('permission', '权限或占用问题',
-      msg, [
-        '以管理员身份重试,或检查端口是否被其他程序占用。',
-        '杀毒软件/系统策略可能拦截了 node 进程,请在拦截列表放行。']);
+    return mk('permission', t('diag.permissionTitle'),
+      msg, [t('diag.permissionSug1'), t('diag.permissionSug2')]);
   }
   if (/ENOENT|cannot find module|not found/i.test(msg)) {
-    return mk('missing-file', 'dsh 依赖缺失或损坏',
-      msg, [
-        '检查全局 dsh 安装是否完整:npm ls -g @deepseek-ai/dsh',
-        '可尝试重装:npm install -g @deepseek-ai/dsh --force']);
+    return mk('missing-file', t('diag.missingFileTitle'),
+      msg, [t('diag.missingFileSug1'), t('diag.missingFileSug2')]);
   }
   if (/输出服务地址超时/.test(msg)) {
-    return mk('boot-timeout', 'dsh 启动超时(90 秒无服务地址)',
-      'dsh web 未在规定时间内输出服务地址。首次启动需要联网安装依赖,可能耗时较长。',
-      ['确认网络可用后重试(首次启动可能要等 1-2 分钟)。',
-        '检查下方启动输出,看卡在哪一步。',
-        '可尝试在终端手动运行 dsh web 观察输出。']);
+    return mk('boot-timeout', t('diag.bootTimeoutTitle'),
+      t('diag.bootTimeoutCause'),
+      [t('diag.bootTimeoutSug1'), t('diag.bootTimeoutSug2'), t('diag.bootTimeoutSug3')]);
   }
   if (/未就绪/.test(msg)) {
-    return mk('http-timeout', 'dsh 服务未就绪(60 秒内 HTTP 不可达)',
-      '进程已启动但服务端口始终无响应。',
-      ['检查防火墙/代理是否拦截了 127.0.0.1 回环地址。',
-        '在终端手动运行 dsh web 验证端口是否可访问。']);
+    return mk('http-timeout', t('diag.httpTimeoutTitle'),
+      t('diag.httpTimeoutCause'),
+      [t('diag.httpTimeoutSug1'), t('diag.httpTimeoutSug2')]);
   }
   if (/启动后即退出/.test(msg)) {
-    return mk('early-exit', 'dsh web 启动后立即退出',
+    return mk('early-exit', t('diag.earlyExitTitle'),
       msg.slice(0, 500),
-      ['查看下方启动输出尾部与完整日志,定位具体报错。',
-        '常见原因:端口被占、依赖缺失、Node 版本不兼容。']);
+      [t('diag.earlyExitSug1'), t('diag.earlyExitSug2')]);
   }
   if (/端口|EADDRINUSE/.test(msg)) {
-    return mk('port-busy', '端口被占用', msg, ['更换端口或结束占用该端口的进程后重试。']);
+    return mk('port-busy', t('diag.portBusyTitle'), msg, [t('diag.portBusySug1')]);
   }
-  return mk('generic', 'dsh 启动失败',
-    msg.slice(0, 600) || '未知错误',
-    ['查看下方启动输出与完整日志,定位具体报错。',
-      '可导出错误报告,连同日志文件一起反馈问题。']);
+  return mk('generic', t('diag.genericTitle'),
+    msg.slice(0, 600) || t('diag.genericCauseFallback'),
+    [t('diag.genericSug1'), t('diag.genericSug2')]);
 }
 
 // ---------- 报告生成 ----------

@@ -1004,29 +1004,29 @@ ipcMain.handle('acc:set', (e, payload) => {
   const value = payload && payload.value;
   if (field === 'segments') {
     const v = Math.round(Number(value));
-    if (!Number.isFinite(v)) return { ok: false, error: '分段数必须是整数(2-16)' };
+    if (!Number.isFinite(v)) return { ok: false, error: t('accel.errNotInt') };
     const clamped = Math.max(ACCEL_SEGMENTS_MIN, Math.min(ACCEL_SEGMENTS_MAX, v));
     const cfg = loadConfig();
     cfg.downloadSegments = clamped;
-    if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
+    if (!saveConfig(cfg)) return { ok: false, error: t('accel.errSaveFail') };
     log(`下载加速设置: 分段数 → ${clamped}`);
     return { ok: true, value: clamped }; // 就地反馈由 accel 窗 .inline-feedback 呈现,不再跨窗重复提示(P0-3)
   }
   if (field === 'mirror') {
     const raw = String(value || '').trim();
     if (raw) {
-      if (!/^https?:\/\//i.test(raw)) return { ok: false, error: '镜像地址必须以 http:// 或 https:// 开头' };
+      if (!/^https?:\/\//i.test(raw)) return { ok: false, error: t('accel.errProtocol') };
       // host 段非空且不含空白(仅协议前缀如 "https://" 或含空格的串,下载时才失败,这里提前拦)
-      if (!/^https?:\/\/[^\s/]+(\/|$)/i.test(raw)) return { ok: false, error: '镜像地址格式无效(需包含主机名,且不能含空格)' };
+      if (!/^https?:\/\/[^\s/]+(\/|$)/i.test(raw)) return { ok: false, error: t('accel.errFormat') };
     }
     const cfg = loadConfig();
     if (raw) cfg.downloadMirror = raw;
     else delete cfg.downloadMirror;
-    if (!saveConfig(cfg)) return { ok: false, error: '保存失败:config.json 写入被拒绝,请稍后重试' };
+    if (!saveConfig(cfg)) return { ok: false, error: t('accel.errSaveFail') };
     log(`下载加速设置: 镜像源 ${raw ? '→ ' + raw : '已清除'}`);
     return { ok: true, value: raw }; // 同上:accel 窗自带就地反馈(P0-3)
   }
-  return { ok: false, error: '未知设置项' };
+  return { ok: false, error: t('accel.errUnknownField') };
 });
 
 // ---------- 错误报告窗(启动失败 / dsh 意外退出,一键导出) ----------

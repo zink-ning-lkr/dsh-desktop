@@ -62,62 +62,86 @@
 <div class="win">
   <div class="win-head">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-    <span class="t">下载加速设置</span>
-    <button class="win-close" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <span class="t" id="headTitle"></span>
+    <button class="win-close" id="xBtn" title="" aria-label=""><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
 
   <div class="content">
     <!-- ① 多线程分段下载(桌面端更新) -->
     <div class="sec">
-      <div class="sec-t">多线程分段下载<span class="tag">桌面端更新</span></div>
+      <div class="sec-t"><span id="segTitle"></span><span class="tag" id="tagDesktop"></span></div>
       <div class="seg-row">
-        <input type="range" id="seg" min="2" max="16" step="1" aria-label="并发分段数">
-        <span class="seg-n">并发 <b id="segN">6</b> 段</span>
+        <input type="range" id="seg" min="2" max="16" step="1">
+        <span class="seg-n"><span id="segPre"></span> <b id="segN">6</b> <span id="segSuf"></span></span>
       </div>
-      <div class="hint">
-        更新安装包将分成多段同时下载并校验 sha512。段数越多越快,但并发过高可能被 CDN 限流;
-        文件过小时会自动退化为单段下载。保存后对<strong>下一次更新下载</strong>生效(进行中的下载不受影响)。
-      </div>
-      <div class="dl-note" id="dlNote" style="display:none">当前有更新下载进行中,新设置将在下次下载时生效。</div>
+      <div class="hint" id="segHint"></div>
+      <div class="dl-note" id="dlNote" style="display:none"></div>
     </div>
 
     <!-- ② 镜像源(可选,桌面端更新) -->
     <div class="sec">
-      <div class="sec-t">镜像源<span class="tag">可选</span></div>
+      <div class="sec-t"><span id="mirrorTitle"></span><span class="tag" id="tagOptional"></span></div>
       <div class="row">
-        <input type="text" id="mirror" spellcheck="false" placeholder="https://你的镜像根目录/ (留空 = 官方源)" aria-label="镜像源地址(留空恢复官方源)">
+        <input type="text" id="mirror" spellcheck="false">
       </div>
       <div class="row">
-        <button class="btn primary" id="mirrorSave">保存镜像</button>
-        <button class="btn danger-ghost" id="mirrorClear">清除</button>
+        <button class="btn primary" id="mirrorSave"></button>
+        <button class="btn danger-ghost" id="mirrorClear"></button>
         <span class="err" id="mirrorErr" aria-live="polite"></span>
       </div>
-      <div class="hint">
-        镜像目录内放置与 GitHub Release 资产同名的安装包即可
-        (参考 GitHub 官方镜像/自建仓库的目录结构;版本检查与完整性校验仍走 GitHub 官方)。
-        镜像失效或拉取失败时,下载会自动<strong>回退官方源</strong>,不影响更新。
-      </div>
+      <div class="hint" id="mirrorHint"></div>
     </div>
 
     <!-- ③ dsh 本体更新加速(npm) -->
     <div class="sec">
-      <div class="sec-t">dsh 本体更新<span class="tag">npm</span></div>
-      <div class="hint">本体经 npm 安装,速度受默认源(registry.npmjs.org)影响。网络慢时可切换到国内镜像:</div>
-      <div class="cmd" id="npmCmd">npm config set registry https://registry.npmmirror.com</div>
+      <div class="sec-t"><span id="npmTitle"></span><span class="tag" id="tagNpm"></span></div>
+      <div class="hint" id="npmHint"></div>
+      <div class="cmd" id="npmCmd"></div>
       <div class="row">
-        <button class="btn" id="npmCopy">复制命令</button>
-        <span class="hint">复制后在终端执行,然后重新「检查 dsh 本体更新」。</span>
+        <button class="btn" id="npmCopy"></button>
+        <span class="hint" id="npmAfter"></span>
       </div>
     </div>
   </div>
 
   <div class="foot">
-    <span class="note">改动即时保存到 <code id="cfgPath">config.json</code></span>
+    <span class="note"><span id="saveNote"></span><code id="cfgPath">config.json</code></span>
     <span class="inline-feedback" id="toast"></span>
   </div>
 </div>
 <script>
   const A = window.__accel;
+  // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <strong> 标签),用 innerHTML
+  const T = (k, p) => window.__i18n.t(k, p);
+  {
+    const set = (id, k) => { const el = document.getElementById(id); if (el) el.textContent = T(k); };
+    set('headTitle', 'accel.title');
+    set('segTitle', 'accel.segTitle');
+    set('tagDesktop', 'accel.tagDesktop');
+    set('segPre', 'accel.segPre');
+    set('segSuf', 'accel.segSuf');
+    set('dlNote', 'accel.dlNote');
+    set('mirrorTitle', 'accel.mirrorTitle');
+    set('tagOptional', 'accel.tagOptional');
+    set('mirrorSave', 'accel.save');
+    set('mirrorClear', 'accel.clear');
+    set('npmTitle', 'accel.npmTitle');
+    set('tagNpm', 'accel.tagNpm');
+    set('npmHint', 'accel.npmHint');
+    set('npmCmd', 'accel.npmCmd');
+    set('npmCopy', 'accel.copyCmd');
+    set('npmAfter', 'accel.npmAfter');
+    set('saveNote', 'accel.saveNote');
+    document.getElementById('segHint').innerHTML = T('accel.segHint');
+    document.getElementById('mirrorHint').innerHTML = T('accel.mirrorHint');
+    document.getElementById('seg').setAttribute('aria-label', T('accel.segAria'));
+    const mirrorEl = document.getElementById('mirror');
+    mirrorEl.placeholder = T('accel.mirrorPlaceholder');
+    mirrorEl.setAttribute('aria-label', T('accel.mirrorAria'));
+    const xEl = document.getElementById('xBtn');
+    xEl.title = T('common.close');
+    xEl.setAttribute('aria-label', T('common.close'));
+  }
   let cur = null;
   let toastTimer = null;
 
@@ -147,11 +171,14 @@
   }
 
   // 滑杆:拖动实时预览数值,松手保存;读屏经 aria-valuetext 播报「N 段」(值本身只是裸数字)
-  function setSegText(n) { segN.textContent = n; seg.setAttribute('aria-valuetext', n + ' 段'); }
+  function setSegText(n) {
+    segN.textContent = n;
+    seg.setAttribute('aria-valuetext', T('accel.segAriaVal', { n }));
+  }
   seg.addEventListener('input', () => setSegText(seg.value));
   seg.addEventListener('change', async () => {
     const r = await A.set('segments', seg.value);
-    if (r.ok) { setSegText(r.value); toast('✓ 已保存:并发 ' + r.value + ' 段', true); }
+    if (r.ok) { setSegText(r.value); toast(T('accel.toastSeg', { n: r.value }), true); }
     else { seg.value = cur ? cur.segments : 6; setSegText(seg.value); toast(r.error, false); }
   });
 
@@ -161,7 +188,7 @@
     if (r.ok) {
       mirror.value = r.value;
       mirrorErr.textContent = '';
-      toast(r.value ? '✓ 镜像源已保存' : '✓ 已恢复官方源', true);
+      toast(r.value ? T('accel.toastMirrorSaved') : T('accel.toastReset'), true);
     } else {
       // 错误只在字段级就地呈现(ACC-2,配合 aria-live 播报);底部 toast 只报成功/状态
       mirrorErr.textContent = r.error;
@@ -170,14 +197,14 @@
   document.getElementById('mirrorSave').addEventListener('click', saveMirror);
   document.getElementById('mirrorClear').addEventListener('click', async () => {
     const r = await A.set('mirror', '');
-    if (r.ok) { mirror.value = ''; mirrorErr.textContent = ''; toast('✓ 已恢复官方源', true); }
+    if (r.ok) { mirror.value = ''; mirrorErr.textContent = ''; toast(T('accel.toastReset'), true); }
     else mirrorErr.textContent = r.error; // 清除失败(写入被拒)同样就地呈现,不再静默
   });
   mirror.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveMirror(); });
 
   document.getElementById('npmCopy').addEventListener('click', () => {
     A.copy(document.getElementById('npmCmd').textContent);
-    toast('✓ 命令已复制', true);
+    toast(T('accel.toastCopied'), true);
   });
 
   // 关闭护栏(ACC-3):分段数即时保存,镜像却需显式保存——直接关窗会静默丢弃已输入的
