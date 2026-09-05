@@ -229,6 +229,14 @@ function runUitest(d) {
     const ok = !d.statusWin && d.updatesState.manualCheckDropped && d.updatesState.dshManualCheckDropped;
     d.log(`UITEST cancel-all win=${!!d.statusWin}(期望 false) desktopDrop=${d.updatesState.manualCheckDropped} dshDrop=${d.updatesState.dshManualCheckDropped}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`);
   }, 26250, 'cancel-all-verify');
+  // ⑪''' Esc 语义梯度(P1-4):活动任务存在时 Esc = 挂后台(安全离开);仅剩结果时 Esc = 关窗
+  uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 26400, 'esc-active-prep');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 26550, 'esc-active');
+  uiStep(() => { const w = d.statusWin; const ok = !!w && w.isMinimized(); d.log(`UITEST esc-active minimized=${!!(w && w.isMinimized())}(期望 true,Esc=后台) → ${ok ? 'PASS' : 'FAIL'}`); }, 26700, 'esc-active-verify');
+  uiStep(() => { d.statusWin?.show(); }, 26750, 'esc-restore');
+  uiStep(() => { d.showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'ok', label: '好的' }], __origin: 'desktop' }, () => {}); }, 26800, 'esc-result-prep');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 26950, 'esc-result');
+  uiStep(() => { const ok = !d.statusWin; d.log(`UITEST esc-result win=${!!d.statusWin}(期望 false,Esc=关窗) → ${ok ? 'PASS' : 'FAIL'}`); }, 27100, 'esc-result-verify');
   // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
   //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
   uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')

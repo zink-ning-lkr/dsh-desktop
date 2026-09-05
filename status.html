@@ -295,8 +295,14 @@
     if (listMode) { S.cancelAll(); return; }
     (cur && cur.mode === 'result' ? S.close() : S.cancel());
   });
+  // Esc 语义梯度(P1-4):存在进行中任务时 Esc = 挂后台(安全离开,不打断任务);
+  // 仅剩结果/历史时 Esc = 关窗。✕ 按钮保持「显式取消」语义——破坏性操作必须是看着 ✕ 的主动行为
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') document.getElementById('xBtn').click();
+    if (e.key !== 'Escape') return;
+    const hasActive = listMode
+      ? [...document.querySelectorAll('#tlist .trow:not(.done)')].length > 0
+      : !!(cur && cur.mode !== 'result');
+    if (hasActive) S.background(); else document.getElementById('xBtn').click();
   });
   S.onTasks(renderTasks);
 </script>
