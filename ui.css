@@ -40,6 +40,7 @@
   --c-danger-bg: #da363433;
   --c-reveal-bg: rgba(13, 17, 23, .78);
   --c-reveal-bg-hover: rgba(38, 44, 56, .95);
+  --c-close-hover: #c42b1c; /* 窗口关闭按钮悬停红:Windows 标题栏规范色,深浅主题同值 */
   color-scheme: dark;
 }
 
@@ -115,6 +116,26 @@
 /* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充 */
 .btn.danger-ghost { background: transparent; border-color: #f8514955; color: var(--c-err); }
 .btn.danger-ghost:hover { background: rgba(248, 81, 73, .12); border-color: var(--c-err); }
+
+/* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
+   头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
+   关闭按钮悬停统一红底(原 report 红、status/accel 灰,同一应用两种"关闭"语义不一致) */
+.win-head {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: var(--head-pad, 14px 16px 10px);
+  -webkit-app-region: drag;
+}
+.win-head .ico { width: 20px; height: 20px; flex: none; color: var(--c-brand-hi); display: flex; align-items: center; justify-content: center; }
+.win-head .ico svg { width: 20px; height: 20px; }
+.win-head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-close {
+  -webkit-app-region: no-drag; width: 28px; height: 24px; flex: none;
+  border: none; border-radius: var(--radius-s); background: transparent; color: var(--c-fg2);
+  cursor: default; display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-mid), color var(--dur-mid);
+}
+.win-close:hover { background: var(--c-close-hover); color: #fff; }
+.win-close svg { width: 12px; height: 12px; }
 
 /* ---- 公共:就地瞬时反馈(accel 保存 / report 复制导出;取代各页私有的 .toast/.flash) ----
    用法:<span class="inline-feedback"> + JS 切换 .on 显示、.ok/.bad 定色(默认随 --c-ok) */

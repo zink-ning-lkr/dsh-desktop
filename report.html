@@ -10,17 +10,8 @@
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  .win { --win-radius: 12px; } /* 背景/阴影用 --c-win-bg/--c-win-shadow 语义默认值(随主题切换) */
-  .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; }
-  .head .logo { width: 18px; height: 18px; flex: none; }
-  .head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .head .x {
-    -webkit-app-region: no-drag; width: 28px; height: 24px; border: none; border-radius: var(--radius-s);
-    background: transparent; color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
-    transition: background var(--dur-mid), color var(--dur-mid);
-  }
-  .head .x:hover { background: rgba(194, 43, 28, .8); color: #fff; }
-  .head .x svg { width: 12px; height: 12px; }
+  /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close;圆角归一到公共 10px(原 12px 与其余窗口不一) */
+  .win-head .logo { width: 18px; height: 18px; flex: none; }
   .body { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0; min-height: 0; }
   .cls { display: flex; align-items: center; gap: 10px; }
   .badge {
@@ -52,10 +43,10 @@
 </head>
 <body>
 <div class="win">
-  <div class="head">
+  <div class="win-head">
     <img class="logo" src="assets/whale-white.png" alt="" data-logo>
     <span class="t" id="headTitle">DSH 错误报告 — 启动诊断</span>
-    <button class="x" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="win-close" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="body">
     <div class="cls">

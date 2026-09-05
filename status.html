@@ -11,14 +11,8 @@
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  .head {
-    display: flex; align-items: center; gap: 10px; padding: 12px 14px 0;
-    -webkit-app-region: drag;
-  }
-  .head .ico { width: 20px; height: 20px; flex: none; color: var(--c-brand-hi); }
-  .head .ico svg { width: 20px; height: 20px; }
-  .head .t { flex: 1; font-size: 14px; color: var(--c-fg0); font-weight: 600; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }
+  /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close;仅覆写状态窗自己的内边距 */
+  .win-head { --head-pad: 12px 14px 0; }
   .hmbtn {
     -webkit-app-region: no-drag; border: none; border-radius: var(--radius-s); background: transparent;
     color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
@@ -27,8 +21,6 @@
   .hmbtn:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
   #bgBtn { width: 60px; height: 24px; font-size: 12px; gap: 4px; }
   #bgBtn svg { width: 12px; height: 12px; }
-  #xBtn { width: 26px; height: 24px; }
-  #xBtn svg { width: 12px; height: 12px; }
   .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; }
   .detail { font-size: 12px; color: var(--c-fg2); line-height: 1.5; white-space: pre-wrap; word-break: break-all;
     max-height: 60px; min-height: 0; overflow-y: auto; user-select: text; }
@@ -100,13 +92,13 @@
 </head>
 <body>
 <div class="win">
-  <div class="head" id="head">
+  <div class="win-head" id="head">
     <span class="ico" id="ico" aria-hidden="true"></span>
     <span class="t" id="title" aria-live="polite">…</span>
     <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知" aria-label="挂到后台,完成时通知">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
     </button>
-    <button class="hmbtn" id="xBtn" title="取消并关闭" aria-label="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="win-close" id="xBtn" title="取消并关闭" aria-label="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="activity" id="activity">
     <div class="detail" id="detail"></div>

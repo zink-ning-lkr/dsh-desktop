@@ -10,18 +10,10 @@
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  /* 背景/阴影直接用 --c-win-bg/--c-win-shadow 语义默认值(随主题切换) */
-  .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; -webkit-app-region: drag; flex: none; }
-  .head .ico { width: 18px; height: 18px; flex: none; color: var(--c-brand); display: flex; align-items: center; justify-content: center; }
-  .head .ico svg { width: 17px; height: 17px; }
-  .head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .head .x {
-    -webkit-app-region: no-drag; width: 28px; height: 24px; border: none; border-radius: var(--radius-s);
-    background: transparent; color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
-    transition: background var(--dur-mid), color var(--dur-mid);
-  }
-  .head .x:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
-  .head .x svg { width: 12px; height: 12px; }
+  /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close(✕ 悬停统一规范红);
+     仅覆写本页图标尺寸与品牌色 */
+  .win-head .ico { width: 18px; height: 18px; color: var(--c-brand); }
+  .win-head .ico svg { width: 17px; height: 17px; }
   .content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 14px; }
   .sec { display: flex; flex-direction: column; gap: 9px; }
   .sec-t { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--c-fg0); }
@@ -66,10 +58,10 @@
 </head>
 <body>
 <div class="win">
-  <div class="head">
+  <div class="win-head">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     <span class="t">下载加速设置</span>
-    <button class="x" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="win-close" id="xBtn" title="关闭" aria-label="关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
 
   <div class="content">
