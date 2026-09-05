@@ -118,6 +118,8 @@
   const S = window.__status;
   // 图标走 ui-icons.js 共享层(与 dialog 结果图标同源,P1-2):activity=进行中五态,result=结果四态
   const { activity: ACT, result: RES } = window.UI_ICONS;
+  // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key
+  const T = (k, p) => window.__i18n.t(k, p);
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;
   let histOpen = false;
@@ -125,7 +127,7 @@
   /* -------- 共享语义构件(P1-3):进度条/进度文案/结果按钮只此一份实现,
      单任务视图与列表行分别组合;DOM 形态各自保持像素契约(UITEST 锁定 186/250) -------- */
   function fmtPct(t, has) {
-    return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? '请稍候…' : ''));
+    return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? T('status.wait') : ''));
   }
   function makeBar(t, ariaLabel) {
     const bar = document.createElement('div');
@@ -133,7 +135,7 @@
     bar.setAttribute('role', 'progressbar');
     bar.setAttribute('aria-valuemin', '0');
     bar.setAttribute('aria-valuemax', '100');
-    bar.setAttribute('aria-label', ariaLabel || '进度');
+    bar.setAttribute('aria-label', ariaLabel || T('status.progress'));
     const fill = document.createElement('div');
     const has = typeof t.progress === 'number';
     fill.className = 'fill' + (has ? '' : ' indet');
@@ -171,8 +173,8 @@
     document.getElementById('bgBtn').style.display = isRes ? 'none' : '';
     document.getElementById('ico').innerHTML = isRes ? (RES[p.type || 'info'] || RES.info) : (ACT[p.mode] || ACT.check);
     document.getElementById('title').textContent = p.title || '';
-    document.getElementById('xBtn').title = isRes ? '关闭' : '取消并关闭';
-    document.getElementById('xBtn').setAttribute('aria-label', isRes ? '关闭' : '取消并关闭');
+    document.getElementById('xBtn').title = isRes ? T('status.close') : T('status.cancelClose');
+    document.getElementById('xBtn').setAttribute('aria-label', isRes ? T('status.close') : T('status.cancelClose'));
     if (isRes) {
       const type = p.type || 'info';
       document.getElementById('result').className = 'result';
@@ -194,7 +196,7 @@
     document.getElementById('detail').textContent = p.detail || '';
     const barWrap = document.getElementById('bar');
     barWrap.innerHTML = '';
-    barWrap.appendChild(makeBar(p, p.title || '进度'));
+    barWrap.appendChild(makeBar(p, p.title || T('status.progress')));
     const has = typeof p.progress === 'number';
     document.getElementById('pct').textContent = fmtPct(p, has);
     document.getElementById('size').textContent = p.size || '';
@@ -224,7 +226,7 @@
     }
     if (!t.done) {
       // 进行中:进度条 + pct/size(与单视图同一套共享构件,P1-3)
-      body.appendChild(makeBar(t, t.title || '进度'));
+      body.appendChild(makeBar(t, t.title || T('status.progress')));
       const meta = document.createElement('div');
       meta.className = 'meta';
       const pct = document.createElement('span');
@@ -238,8 +240,8 @@
     }
     const x = document.createElement('button');
     x.className = 'lx';
-    x.title = t.done ? '关闭此条' : '取消此项';
-    x.setAttribute('aria-label', (t.done ? '关闭此条:' : '取消此项:') + (t.title || ''));
+    x.title = t.done ? T('status.closeRow') : T('status.cancelRow');
+    x.setAttribute('aria-label', (t.done ? T('status.closeRow') : T('status.cancelRow')) + (t.title || ''));
     x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
     x.addEventListener('click', () => (t.done ? S.dismiss(t.id) : S.cancelOne(t.id)));
     row.append(ico, body, x);
@@ -257,10 +259,10 @@
     list.style.display = 'flex';
     list.innerHTML = '';
     document.getElementById('ico').innerHTML = ACT.check;
-    document.getElementById('title').textContent = act.length ? `任务中心(${act.length} 项进行中)` : '任务中心';
+    document.getElementById('title').textContent = act.length ? T('status.titleActive', { n: act.length }) : T('status.title');
     document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
-    document.getElementById('xBtn').title = '全部关闭';
-    document.getElementById('xBtn').setAttribute('aria-label', '全部关闭');
+    document.getElementById('xBtn').title = T('status.closeAll');
+    document.getElementById('xBtn').setAttribute('aria-label', T('status.closeAll'));
     // 进行中任务置顶;短暂提示紧随其后;完成项有进行中任务时折叠进历史
     act.forEach((t) => list.appendChild(taskRow(t)));
     eph.forEach((t) => list.appendChild(taskRow(t)));
@@ -270,7 +272,7 @@
       h.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
       h.setAttribute('aria-controls', 'histWrap');
       // 折叠三角用 SVG(原文本 ▶ 字形随字体渲染漂移):aria-expanded 语义不变
-      h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>已完成 ' + done.length + ' 项</span>';
+      h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>' + T('status.done', { n: done.length }) + '</span>';
       h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); h.setAttribute('aria-expanded', histOpen ? 'true' : 'false'); toggleHist(); });
       list.appendChild(h);
       const wrap = document.createElement('div');

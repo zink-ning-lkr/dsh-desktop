@@ -82,7 +82,8 @@ const { DEFAULT_SEGMENTS } = require('./downloader');
 const core = require('./core');
 const { log, flushLog, logFile, loadConfig, saveConfig, configPath, crashFilePath, redactToken, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = core;
 const shortcuts = require('./shortcuts'); // 快捷键单一数据源(P2-2):菜单文案/accelerator/速查浮层共用
-const { t } = require('./i18n'); // 文案集中(P2-6 结构先行):主进程自绘文案渐进收编,渲染层后续接入
+const i18n = require('./i18n'); // 文案集中(P2-6 结构先行):主进程自绘文案渐进收编,渲染层后续接入
+const { t } = i18n;
 const dshProc = require('./dsh-process');
 const { findDshBinSafe, findNodeSafe, dshVersion, killTree } = dshProc;
 const updates = require('./updates');
@@ -662,6 +663,11 @@ function trustedEvent(e) {
     return new URL(frame.url).protocol === 'file:';
   } catch { return false; }
 }
+
+// 文案表下发(v0.6.0 渲染层 i18n):sandbox 渲染层读不了 fs,preload 经 sendSync 拉取一次。
+// 不走 trustedEvent:preload 阶段 senderFrame 可能尚未指向 file: 页;本通道只回只读静态文案,
+// 无敏感信息与副作用,任意调用方拉取无安全影响
+ipcMain.on('i18n:table', (e) => { e.returnValue = i18n.snapshot(); });
 
 ipcMain.on('st:bg', (e) => {
   if (!trustedEvent(e)) return;
@@ -1676,8 +1682,8 @@ async function bootDsh() {
   const cwd = loadConfig().workspace;
   titlebarView?.webContents.send('tb:workspace', cwd);
   try {
-    stage(0, '定位 dsh 本体…'); // 加载页阶段 0(findDshBin 定位可能耗时,点亮对应阶段)
-    stage(1, '启动 dsh web 服务…');
+    stage(0, t('boot.locate')); // 加载页阶段 0(findDshBin 定位可能耗时,点亮对应阶段)
+    stage(1, t('boot.start'));
     const { child, url } = await dshProc.startDsh(cwd, {
       onOut: (line) => {
         if (seq !== bootSeq || settledUrl || !dshView || loadingFlush) return;
@@ -1706,11 +1712,11 @@ async function bootDsh() {
     });
     log(`服务地址: ${redactToken(url)},等待 HTTP 就绪…`);
     dshWebUrl = url;
-    stage(2, '等待服务就绪…');
+    stage(2, t('boot.waitReady'));
     const ready = await dshProc.waitServerReady(url, () => seq !== bootSeq || quitting);
     if (!ready || quitting || seq !== bootSeq || !dshView) return;
     log(`加载 ${redactToken(url)}`);
-    stage(3, '加载页面…');
+    stage(3, t('boot.loadPage'));
     settledUrl = true;
     clearTimeout(slowTimer); // 服务页已接管,慢启动提示不再出现
     setTrayState('ok'); // 托盘转"运行中"(绿点)

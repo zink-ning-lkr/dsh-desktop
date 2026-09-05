@@ -1,7 +1,7 @@
 // i18n.js —— 文案集中与术语统一(P2-6 结构先行):主进程共享 t(key, params)。
 // 文案表 i18n/zh-CN.json 启动后首次调用时同步加载并缓存;表缺失或键不存在时
 // 回退 key 本身,保证功能不受文案表影响。渲染层暂未接入(渐进收编:先收编主进程
-// 自绘文案,渲染层后续经 preload 暴露 t(key))。
+// 自绘文案;渲染层经 preload 同步拉取 snapshot() 后本地 t(),status 页已接入(v0.6.0))。
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,4 +33,9 @@ function t(key, params) {
   return s;
 }
 
-module.exports = { t };
+// 平面快照 {key: 文案}:渲染层 sandbox preload 读不了 fs,由主进程经 IPC 下发一次(v0.6.0)
+function snapshot() {
+  return Object.fromEntries(table());
+}
+
+module.exports = { t, snapshot };

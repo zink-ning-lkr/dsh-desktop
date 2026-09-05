@@ -1,5 +1,5 @@
 {
-  "$comment": "dsh-desktop 文案与术语表(P2-6 结构先行)。键名按 域.条目 组织,{x} 为占位符;t() 按点号路径取值,缺失回退 key。terms 域为术语表(统一用词,不直接作 key)。渲染层暂未接入,后续经 preload 暴露 t(key) 渐进收编。",
+  "$comment": "dsh-desktop 文案与术语表(P2-6 结构先行)。键名按 域.条目 组织,{x} 为占位符;t() 按点号路径取值,缺失回退 key。terms 域为术语表(统一用词,不直接作 key)。渲染层经 preload 同步拉取快照后本地 t()(v0.6.0 起,status 页与 boot 阶段已接入,渐进收编)。",
   "terms": {
     "dshBin": "dsh 本体",
     "dshWeb": "dsh web 服务",
@@ -13,5 +13,23 @@
   },
   "common": {
     "welcome": "欢迎使用 {app}"
+  },
+  "boot": {
+    "locate": "定位 dsh 本体…",
+    "start": "启动 dsh web 服务…",
+    "waitReady": "等待服务就绪…",
+    "loadPage": "加载页面…"
+  },
+  "status": {
+    "title": "任务中心",
+    "titleActive": "任务中心({n} 项进行中)",
+    "wait": "请稍候…",
+    "cancelClose": "取消并关闭",
+    "close": "关闭",
+    "closeAll": "全部关闭",
+    "closeRow": "关闭此条:",
+    "cancelRow": "取消此项:",
+    "done": "已完成 {n} 项",
+    "progress": "进度"
   }
 }
