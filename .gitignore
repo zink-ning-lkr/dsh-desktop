@@ -12,3 +12,6 @@ tools/.icon-tmp.html
 Thumbs.db
 .workbuddy/
 .dsh-meow/
+
+# 本地留存的方案文档(不入库)
+UI_OPTIMIZATION_PLAN_V2.md
