@@ -1127,40 +1127,28 @@ function fmtMB(mb) {
 }
 let cachedTotalMemMB = null; // 壳 + dsh 本体进程树 总内存缓存(后台 10s 刷新)
 
-// 枚举 dsh 本体进程树(web 主进程 + 插件子进程如 mcp-proxy)的 WorkingSetSize 之和。
-// 异步 exec(固定命令串,无注入面)+ try/catch:枚举失败返回 0,降级为只显示壳,不阻塞也不抛错。
+// 枚举 dsh 本体进程树(web 主进程 + 插件子进程如 mcp-proxy)的内存(WorkingSet64 字节)之和。
+// P2-4 轻量化:从根 PID 定向逐层取子进程(按 ParentProcessId 的 WMI 查询),不再全系统枚举 +
+// ConvertTo-Json 全量回传(旧实现每轮数百 ms CPU 尖峰);单次 PowerShell 调用,脚本经
+// -EncodedCommand 传递(规避 cmd.exe 引号转义),进程数封顶 64 防异常树膨胀。
+// 异步 exec(脚本为固定模板,仅替换根 PID 数字,无注入面)+ 失败返回 0:降级为只显示壳,不阻塞不抛错。
 function dshTreeMemMB() {
   return new Promise((resolve) => {
     const root = dshChild && dshChild.pid;
     if (!root) return resolve(0);
-    const cmd = 'powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize | ConvertTo-Json -Compress"';
-    exec(cmd, { windowsHide: true, timeout: 8000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    const script = [
+      '$ids = New-Object System.Collections.ArrayList',
+      `[void]$ids.Add(${root})`,
+      'for ($i = 0; $i -lt $ids.Count -and $ids.Count -le 64; $i++) {',
+      '  Get-CimInstance -Query ("SELECT ProcessId FROM Win32_Process WHERE ParentProcessId=" + $ids[$i]) | ForEach-Object { [void]$ids.Add($_.ProcessId) }',
+      '}',
+      '(Get-Process -Id $ids -ErrorAction SilentlyContinue | Measure-Object WorkingSet64 -Sum).Sum',
+    ].join('; ');
+    const enc = Buffer.from(script, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${enc}`, { windowsHide: true, timeout: 8000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
       if (err) return resolve(0);
-      try {
-        let rows = JSON.parse(stdout);
-        if (!Array.isArray(rows)) rows = [rows];
-        const children = new Map();
-        const mem = new Map();
-        for (const r of rows) {
-          if (!r || r.ProcessId == null) continue;
-          let set = children.get(r.ParentProcessId);
-          if (!set) { set = new Set(); children.set(r.ParentProcessId, set); }
-          set.add(r.ProcessId);
-          mem.set(r.ProcessId, r.WorkingSetSize || 0);
-        }
-        let total = 0;
-        const seen = new Set();
-        const stack = [root];
-        while (stack.length) {
-          const p = stack.pop();
-          if (seen.has(p)) continue;
-          seen.add(p);
-          total += mem.get(p) || 0;
-          const cs = children.get(p);
-          if (cs) for (const c of cs) stack.push(c);
-        }
-        resolve(total);
-      } catch { resolve(0); }
+      const n = Number(String(stdout).trim());
+      resolve(Number.isFinite(n) && n > 0 ? n : 0);
     });
   });
 }
@@ -1858,9 +1846,9 @@ if (!gotLock) {
     createWindow();
     createTray();
     bootDsh();
-    // 内存仪表:首次刷新 + 每 10s 后台刷新(壳 + dsh 本体进程树),菜单 label 读缓存零阻塞
+    // 内存仪表:首次刷新 + 每 30s 后台刷新(壳 + dsh 本体进程树,P2-4 由 10s 放宽),菜单 label 读缓存零阻塞
     refreshTotalMemory();
-    setInterval(refreshTotalMemory, 10_000);
+    setInterval(refreshTotalMemory, 30_000);
 
     // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
     setTimeout(() => { if (app.isPackaged) updates.checkForUpdates(false); }, 6_000);
