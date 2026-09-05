@@ -313,19 +313,32 @@ function trayStatusText() {
   const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
   let dl = '';
   for (const t of statusTasks.values()) { // 任一进行中下载任务(任务中心模型,P1-1)
-    if (!t.done && t.mode === 'download' && t.pct) { dl = ` · 下载中 ${t.pct}`; break; }
+    if (!t.done && t.mode === 'download' && t.pct) {
+      // 进度取整到整数百分点:tooltip 按 1% 粒度变化,配合 refreshTray 同值短路,
+      // 下载期间不再以 ~150ms 一次的频率重设托盘(0.1% 级的字符串抖动穿透不了缓存)
+      const n = parseFloat(t.pct);
+      dl = ` · 下载中 ${Number.isFinite(n) ? Math.round(n) : t.pct}%`;
+      break;
+    }
   }
   const ws = loadConfig().workspace || '';
   return `DSH Desktop — ${st}${dl}${ws ? ` · ${ws}` : ''}`;
 }
 
+// 同值短路缓存:进度帧(pushTasks)每 150ms 到达一次,tooltip/图标仅在内容真变时才触碰系统 API——
+// 否则整个下载期间托盘图标与 tooltip 以 ~7 次/秒被全量重设(无谓系统调用 + 潜在图标闪烁)
+let trayLastTip = null;
+let trayLastIcon = null;
 function refreshTray() {
   if (!tray) return;
-  tray.setToolTip(trayStatusText());
+  const tip = trayStatusText();
+  if (tip !== trayLastTip) { trayLastTip = tip; tray.setToolTip(tip); }
   // 角标图标为构建期预生成资产;缺失(旧包升级)时回退基础图标,不阻断状态文字
-  const badge = trayState === 'ok' ? 'icon-ok.ico' : trayState === 'boot' ? 'icon-warn.ico' : 'icon-err.ico';
-  const p = path.join(__dirname, 'assets', badge);
-  tray.setImage(fs.existsSync(p) ? p : path.join(__dirname, 'assets', 'icon.ico'));
+  const p = path.join(__dirname, 'assets', trayState === 'ok' ? 'icon-ok.ico' : trayState === 'boot' ? 'icon-warn.ico' : 'icon-err.ico');
+  if (p !== trayLastIcon) {
+    trayLastIcon = p;
+    tray.setImage(fs.existsSync(p) ? p : path.join(__dirname, 'assets', 'icon.ico'));
+  }
 }
 
 function setTrayState(s) {
@@ -400,6 +413,7 @@ function showTrayMenu() {
 function createTray() {
   if (tray) return;
   tray = new Tray(path.join(__dirname, 'assets', 'icon.ico'));
+  trayLastTip = trayLastIcon = null; // 新实例无任何已设状态:缓存失效,首次 refreshTray 必须全量落地
   refreshTray(); // 动态 tooltip + 状态角标(初始为启动中)
   tray.on('click', () => showMainWindow());
   tray.on('right-click', () => showTrayMenu());

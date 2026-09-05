@@ -137,7 +137,8 @@ function runUitest(d) {
   uiStep(() => d.updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 7400, 'dl-progress');
   uiStep(() => {
     const t = d.trayStatusText();
-    d.log(`UITEST tray-dl tip 含"下载中 42.0%" → ${t.includes('下载中 42.0%') ? 'PASS' : 'FAIL'} ("${t}")`);
+    // 进度按 1% 粒度入 tooltip(P0-4 去抖):42.0% 显示为整数 42%
+    d.log(`UITEST tray-dl tip 含"下载中 42%" → ${t.includes('下载中 42%') ? 'PASS' : 'FAIL'} ("${t}")`);
   }, 7500, 'tray-dl');
   uiStep(() => d.showStatusResult({ type: 'success', title: '更新就绪(下载完成)', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'install', label: '立即重启安装', primary: true }] }, () => d.log('UITEST install-click ✓')), 7800, 'dl-result');
   uiStep(() => {
