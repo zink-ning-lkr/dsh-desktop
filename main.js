@@ -82,6 +82,7 @@ const { DEFAULT_SEGMENTS } = require('./downloader');
 const core = require('./core');
 const { log, flushLog, logFile, loadConfig, saveConfig, configPath, crashFilePath, redactToken, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = core;
 const shortcuts = require('./shortcuts'); // 快捷键单一数据源(P2-2):菜单文案/accelerator/速查浮层共用
+const { t } = require('./i18n'); // 文案集中(P2-6 结构先行):主进程自绘文案渐进收编,渲染层后续接入
 const dshProc = require('./dsh-process');
 const { findDshBinSafe, findNodeSafe, dshVersion, killTree } = dshProc;
 const updates = require('./updates');
@@ -317,7 +318,7 @@ let trayState = 'boot';  // 应用启动即进入 boot,bootDsh 成功加载服�
 let trayStartedAt = 0;   // 最近一次进入 ok 的时间戳(菜单运行时长)
 
 function trayStatusText() {
-  const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
+  const st = trayState === 'ok' ? t('tray.running') : trayState === 'boot' ? t('tray.booting') : t('tray.stopped');
   let dl = '';
   for (const t of statusTasks.values()) { // 任一进行中下载任务(任务中心模型,P1-1)
     if (!t.done && t.mode === 'download' && t.pct) {
@@ -356,7 +357,7 @@ function setTrayState(s) {
 }
 
 function trayMenuStatusLabel() {
-  const st = trayState === 'ok' ? '运行中' : trayState === 'boot' ? '启动中…' : '已停止';
+  const st = trayState === 'ok' ? t('tray.running') : trayState === 'boot' ? t('tray.booting') : t('tray.stopped');
   let up = '';
   if (trayState === 'ok' && trayStartedAt) {
     const m = Math.floor((Date.now() - trayStartedAt) / 60000);

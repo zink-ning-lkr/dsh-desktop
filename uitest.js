@@ -100,6 +100,10 @@ function runUitest(d) {
     t('upd-face', ['checkForUpdates', 'checkDshUpdate', 'installDshUpdate', 'cancelStatusOp'].every((k) => typeof upd[k] === 'function'));
     const sc = require('./shortcuts');
     t('sc-ids', ['open-workspace', 'restart-dsh', 'fullscreen', 'toggle-bar', 'reload', 'devtools'].every((id) => sc.list.some((s) => s.id === id)));
+    const i18n = require('./i18n');
+    t('i18n-t', i18n.t('tray.running') === '运行中');
+    t('i18n-params', i18n.t('common.welcome', { app: 'DSH' }) === '欢迎使用 DSH');
+    t('i18n-miss', i18n.t('nope.missing') === 'nope.missing');
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)

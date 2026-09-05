@@ -1,0 +1,17 @@
+{
+  "$comment": "dsh-desktop 文案与术语表(P2-6 结构先行)。键名按 域.条目 组织,{x} 为占位符;t() 按点号路径取值,缺失回退 key。terms 域为术语表(统一用词,不直接作 key)。渲染层暂未接入,后续经 preload 暴露 t(key) 渐进收编。",
+  "terms": {
+    "dshBin": "dsh 本体",
+    "dshWeb": "dsh web 服务",
+    "shell": "桌面壳",
+    "workspace": "工作目录"
+  },
+  "tray": {
+    "running": "运行中",
+    "booting": "启动中…",
+    "stopped": "已停止"
+  },
+  "common": {
+    "welcome": "欢迎使用 {app}"
+  }
+}
