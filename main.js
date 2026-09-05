@@ -1406,6 +1406,25 @@ async function syncTitleBarTheme() {
   } catch { /* 页面未就绪等,忽略 */ } finally { titlebarThemeInFlight = false; }
 }
 
+// 主题采样事件化(P2-5):向 dsh 页面注入一次性 MutationObserver,观察 html/body 的 style/class
+// 变化(覆盖页面自身的白天/夜间切换),变化去抖 150ms 后经 console 消息通知主进程采样一次;
+// 替代旧常驻 3s 轮询。executeJavaScript 与 devtools 同权,不受页面 CSP 限制;
+// 幂等(同页只注一次),导航后由 did-finish-load/did-navigate 重新注入。
+const THEME_HOOK_JS = `(() => {
+  if (window.__dshThemeHook) return 'hooked';
+  let t = 0;
+  const ping = () => { clearTimeout(t); t = setTimeout(() => { console.debug('__dsh-theme-changed'); }, 150); };
+  const obs = new MutationObserver(ping);
+  const opt = { attributes: true, attributeFilter: ['style', 'class'] };
+  obs.observe(document.documentElement, opt);
+  if (document.body) obs.observe(document.body, opt);
+  window.__dshThemeHook = true;
+  return 'hooked';
+})()`;
+function injectThemeObserver() {
+  dshView?.webContents.executeJavaScript(THEME_HOOK_JS).catch(() => { /* 页面未就绪等,忽略 */ });
+}
+
 // 窗口画布/标题栏 surface 底色随主题刷新:浅色下启动首帧与未绘制边缘不露深色。
 // 两个触发源共用:菜单「外观」切换(cycle-theme)与系统主题变化(auto 模式下 OS 换深浅色,
 // 渲染层经 matchMedia 即时换肤,但画布底色必须在这里同步,否则未绘制边缘露出相反底色, P0-5);
@@ -1455,19 +1474,19 @@ function createWindow() {
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
   dshView.setBackgroundColor(chromeBgColor());
   dshView.webContents.on('did-finish-load', () => {
+    injectThemeObserver(); // 主题变化事件化(P2-5):每次页面加载后重注观察钩子
     syncTitleBarTheme();
     forceViewRelayout(); // 页面加载完成后再确认一次 surface 尺寸(首帧可能仍按旧 viewport 绘制)
     dshView?.webContents.focus();
   });
-  // 页面导航/SPA 路由变化后重新采样标题栏主题(整页跳转与前端路由都覆盖)
-  dshView.webContents.on('did-navigate', () => syncTitleBarTheme());
-  dshView.webContents.on('did-navigate-in-page', () => syncTitleBarTheme());
-  // 周期采样兜底动态主题切换(如 dsh 页面内白天/夜间切换):窗口可见时每 3s 采样一次,
-  // 同色短路(见 syncTitleBarTheme)保证无变化时零开销;托盘隐藏/退出时暂停
-  setInterval(() => {
-    if (!mainWindow || !mainWindow.isVisible() || quitting) return;
-    syncTitleBarTheme();
-  }, 3000);
+  // 页面导航/SPA 路由变化后重注钩子并重新采样标题栏主题(整页跳转与前端路由都覆盖)
+  dshView.webContents.on('did-navigate', () => { injectThemeObserver(); syncTitleBarTheme(); });
+  dshView.webContents.on('did-navigate-in-page', () => { injectThemeObserver(); syncTitleBarTheme(); });
+  // 页面主题钩子(P2-5):dsh 页面 html/body 的 style/class 变化 → 去抖通知 → 采样一次,
+  // 覆盖页面内白天/夜间切换;同色短路保证无变化时零开销
+  dshView.webContents.on('console-message', (e) => {
+    if (e.message && e.message.includes('__dsh-theme-changed')) syncTitleBarTheme();
+  });
   // dsh 页面里的外链(文档/仓库等)交给系统浏览器
   dshView.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);

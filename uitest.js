@@ -279,6 +279,8 @@ function runUitest(d) {
   uiStep(() => clickThemeItem(d.menuPopupView), 28500, 'theme-click-1');
   uiStep(() => { const cfg = d.loadConfig().theme; const src = d.getThemeSource(); const ok = cfg === 'dark' && src === 'dark'; d.log(`UITEST theme-1 auto→dark cfg=${cfg} src=${src} → ${ok ? 'PASS' : 'FAIL'}`); }, 28800, 'theme-1-verify');
   uiStep(() => { d.showMenuPopup(); }, 29100, 'theme-menu-open2');
+  // P2-5:主题采样事件化——dsh 页面应已注入 MutationObserver 钩子(did-finish-load/did-navigate 重注)
+  uiStep(() => readDom(d.dshView, 'window.__dshThemeHook === true ? "PASS theme-hook已注入" : "FAIL hook=" + window.__dshThemeHook', 'theme-hook'), 29250);
   uiStep(() => clickThemeItem(d.menuPopupView), 29400, 'theme-click-2');
   uiStep(() => {
     const cfg = d.loadConfig().theme; const src = d.getThemeSource();
