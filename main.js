@@ -718,8 +718,10 @@ ipcMain.on('st:rendered', (e) => {
 // 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
 const AUX_IDLE_DESTROY_MS = 60_000;
 let dialogWin = null;
-let dialogQueued = null;
-let dialogCb = null;
+const dialogQueue = []; // 待展示对话框队列(P2-1 队列化):替代旧单槽 dialogQueued——
+                        // 旧实现在屏时再次调用会静默替换内容并丢弃前一个回调(点了没反应类缺陷源)
+let dialogBusy = false; // 有对话框在屏(等待用户回程)
+let dialogCb = null;    // 当前在屏对话框的回程回调(与队列元素一一对应)
 let dialogIdleTimer = null; // 对话框隐藏后的空闲回收定时器
 
 function scheduleDialogRecycle() {
@@ -796,14 +798,15 @@ function fitWindowToContent(win, expr, { min = 0, max = Infinity, tolerance = 8,
 }
 
 function flushDialog() {
-  if (!dialogQueued || !dialogWin) return;
+  if (!dialogWin || dialogBusy || !dialogQueue.length) return;
   cancelDialogRecycle();
-  const o = dialogQueued;
-  dialogQueued = null;
-  const w = o.width || 460;
-  dialogWin.setContentSize(w, dialogHeightFor(o, w));
-  dialogWin.setTitle(o.title || 'DSH');
-  dialogWin.webContents.send('dl:show', o);
+  const { opts, cb } = dialogQueue.shift();
+  dialogBusy = true;
+  dialogCb = cb;
+  const w = opts.width || 460;
+  dialogWin.setContentSize(w, dialogHeightFor(opts, w));
+  dialogWin.setTitle(opts.title || 'DSH');
+  dialogWin.webContents.send('dl:show', opts);
   centerOn(dialogWin, mainWindow);
   dialogWin.show();
   dialogWin.focus();
@@ -811,13 +814,13 @@ function flushDialog() {
 
 // opts: { type:'info'|'success'|'warning'|'error', title, message, detail, width, cancel, buttons:[{label,primary,id}] }
 function showDialog(opts, cb) {
-  // 退出确认未决期间,其他对话框不得覆盖(单槽 dialogCb 会被顶掉,确认回调静默丢失)
+  // 退出确认未决期间,其他对话框不入队(确认回调必须保序,退出行优先)
   if (quitConfirmShown && opts.title !== '退出确认') {
     log(`退出确认未决,忽略对话框: ${opts.title || ''}`);
     return;
   }
   cancelDialogRecycle(); // 正在使用:取消闲置回收
-  dialogCb = cb || null;
+  dialogQueue.push({ opts, cb: cb || null });
   if (!dialogWin) {
     dialogWin = new BrowserWindow({
       width: 460, height: 220, useContentSize: true,
@@ -832,31 +835,27 @@ function showDialog(opts, cb) {
     dialogWin.on('closed', () => {
       dialogWin = null;
       dialogCb = null;
+      dialogBusy = false;
+      if (dialogQueue.length) log(`对话框窗口销毁,丢弃队列中 ${dialogQueue.length} 个未展示对话框`);
+      dialogQueue.length = 0;
       cancelDialogRecycle();
       // 退出确认框被直接关掉(Alt+F4/父窗连带销毁等):按「取消」语义复位
       resetQuitConfirm();
     });
-    dialogQueued = opts;
     return;
   }
-  if (dialogQueued) { dialogQueued = opts; return; } // 仍在加载:更新排队载荷
-  // 已就绪:直接展示(修复第二次调用不显示)
-  const w = opts.width || 460;
-  dialogWin.setContentSize(w, dialogHeightFor(opts, w));
-  dialogWin.setTitle(opts.title || 'DSH');
-  dialogWin.webContents.send('dl:show', opts);
-  centerOn(dialogWin, mainWindow);
-  dialogWin.show();
-  dialogWin.focus();
+  flushDialog(); // 空闲:接续展示;忙:入队等待当前对话框回程(P2-1,不再顶掉)
 }
 
 ipcMain.on('dl:choose', (e, i, id) => {
   if (!trustedEvent(e)) return;
   const cb = dialogCb;
   dialogCb = null;
+  dialogBusy = false;
   dialogWin?.hide();
-  scheduleDialogRecycle(); // 隐藏即开始闲置计时(P0-3)
   if (cb) cb(i, id);
+  flushDialog(); // 队列还有下一个:同一窗口接续展示(P2-1)
+  if (!dialogBusy) scheduleDialogRecycle(); // 没有后续:隐藏即开始闲置计时(P0-3)
 });
 
 // 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 32/20 + 边框 2)

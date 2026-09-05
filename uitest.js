@@ -152,12 +152,15 @@ function runUitest(d) {
   uiStep(() => d.log(`UITEST bar-collapsed h=${d.currentBarH}(期望 0) → ${d.currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
   uiStep(() => d.toggleTitlebar(true), 9200, 'bar-expand');
   uiStep(() => d.log(`UITEST bar-expanded h=${d.currentBarH}(期望 ${d.TITLEBAR_H},PASS=${d.currentBarH === d.TITLEBAR_H}) viewH=${d.titlebarView?.getBounds().height}(期望 ${d.TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
-  // ③ 对话框复用(第二次调用必须仍能显示)
+  // ③ 对话框队列化(P2-1):D1 在屏期间调 D2 → D2 入队不顶掉;D1 回程后接续展示 D2
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
   // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
   uiStep(() => readDom(d.dialogWin, '(()=>{const ae=document.activeElement;return (ae&&ae.classList.contains("primary")&&ae.closest("#foot"))?"PASS focus=主按钮":"FAIL ae="+(ae?ae.className:"none")})()', 'd1-focus'), 10500);
-  uiStep(() => d.showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(复用)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
-  uiStep(() => readDom(d.dialogWin, 'document.getElementById("title").textContent', 'd2'), 11200);
+  uiStep(() => d.showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(排队)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
+  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;return t==="D1"?"PASS D2已入队不顶掉在屏D1":"FAIL 在屏="+t})()', 'd2-queued'), 11100);
+  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11250, 'd1-choose');
+  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;return t==="D2"?"PASS 接续展示D2":"FAIL 在屏="+t})()', 'd2-next'), 11550);
+  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11700, 'd2-choose');
   // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
   uiStep(() => d.showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
   uiStep(() => readDom(d.reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
