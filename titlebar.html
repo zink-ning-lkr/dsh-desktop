@@ -62,7 +62,7 @@
 </style>
 </head>
 <body>
-  <button id="menuBtn" title="菜单" aria-label="菜单" aria-haspopup="menu">
+  <button id="menuBtn" title="菜单" aria-label="菜单" aria-haspopup="menu" aria-expanded="false">
     <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
       <line x1="2" y1="3.5" x2="12" y2="3.5"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="2" y1="10.5" x2="12" y2="10.5"/>
     </svg>
@@ -111,7 +111,10 @@
   });
   t.onMenuState((open) => {
     const el = document.getElementById('menuBtn');
-    if (el) el.classList.toggle('active', !!open);
+    if (el) {
+      el.classList.toggle('active', !!open);
+      el.setAttribute('aria-expanded', String(!!open)); // haspopup 配套:读屏播报展开/折叠(MENU-2)
+    }
   });
   t.onMaximized((max) => {
     document.getElementById('icoMax').style.display = max ? 'none' : '';

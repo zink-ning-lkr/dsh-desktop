@@ -849,10 +849,14 @@ function flushDialog() {
   dialogWin.focus();
 }
 
-// opts: { type:'info'|'success'|'warning'|'error', title, message, detail, width, cancel, buttons:[{label,primary,id}] }
+// opts: { type:'info'|'success'|'warning'|'error', title, message, detail, width, cancel, critical,
+//         buttons:[{label,primary,id,style}] }
+// critical(当前仅退出确认):退出确认未决期间的其他对话框不入队,保证退出行优先;
+// 该类对话框被直接关掉(Alt+F4/父窗连带销毁等)= 显式取消语义,由 closed/did-fail-load 走复位
 function showDialog(opts, cb) {
-  // 退出确认未决期间,其他对话框不入队(确认回调必须保序,退出行优先)
-  if (quitConfirmShown && opts.title !== '退出确认') {
+  // 退出确认未决期间,其他对话框不入队(确认回调必须保序,退出行优先)。
+  // 互斥判据用 critical 标志而非标题文案(DLG-5):标题改动不再静默破坏护栏
+  if (quitConfirmShown && !opts.critical) {
     log(`退出确认未决,忽略对话框: ${opts.title || ''}`);
     return;
   }
@@ -2005,11 +2009,13 @@ if (!gotLock) {
         log('npm 安装进行中收到退出请求,弹确认');
         showMainWindow(); // 收托盘时确认框需要可见窗口
         showDialog({
-          type: 'warning', title: '退出确认',
+          type: 'warning', title: '退出确认', critical: true,
           message: 'dsh 本体的 npm 安装仍在进行,现在退出会中断安装。',
           detail: '强制中断可能导致全局 dsh 包损坏。建议等待安装完成(可在状态窗查看进度)。',
-          cancel: 1, // Esc/键盘取消语义显式指向「取消」按钮,不依赖按钮排列
-          buttons: [{ id: 'quit', label: '仍然退出', style: 'danger' }, { id: 'cancel', label: '取消', primary: true }],
+          // 位次契约(DLG-2):主操作/默认焦点居左,取消与关闭类居右,破坏性操作用 danger 且不作默认——
+          // Enter/Esc 均落到「取消」,与 dialog.html 的 primary/cancel 回落逻辑配合
+          cancel: 0,
+          buttons: [{ id: 'cancel', label: '取消', primary: true }, { id: 'quit', label: '仍然退出', style: 'danger' }],
         }, (_i, id) => {
           if (id === 'quit') { forceQuit = true; quitConfirmShown = false; app.quit(); }
           else resetQuitConfirm();

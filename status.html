@@ -98,8 +98,8 @@
   <div class="win-head" id="head">
     <span class="ico" id="ico" aria-hidden="true"></span>
     <span class="t" id="title" aria-live="polite">…</span>
-    <button class="hmbtn" id="bgBtn" title="挂到后台,完成时通知" aria-label="挂到后台,完成时通知">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg>后台
+    <button class="hmbtn" id="bgBtn" title="最小化到任务栏,完成时通知" aria-label="最小化到任务栏,完成时通知">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg><span id="bgLabel"></span>
     </button>
     <button class="win-close" id="xBtn" title="取消并关闭" aria-label="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
@@ -123,6 +123,14 @@
   const { activity: ACT, result: RES } = window.UI_ICONS;
   // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key
   const T = (k, p) => window.__i18n.t(k, p);
+  // 「后台」按钮文案/提示入表(ST-3):tooltip 精确到行为(最小化到任务栏,非"dsh 转后台")
+  {
+    const bg = document.getElementById('bgBtn');
+    const tip = T('status.backgroundTip');
+    bg.title = tip;
+    bg.setAttribute('aria-label', tip);
+    document.getElementById('bgLabel').textContent = T('status.background');
+  }
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;
   let histOpen = false;
@@ -196,7 +204,7 @@
       big.innerHTML = RES[type] || RES.info;
       document.getElementById('rtitle').textContent = p.title || '';
       document.getElementById('rdetail').textContent = p.detail || '';
-      fillButtons(document.getElementById('btns'), p, 'btns');
+      fillButtons(document.getElementById('btns'), p, 'btns btn-row');
       // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮
       window.setTimeout(() => {
         const btns = document.getElementById('btns');

@@ -163,14 +163,15 @@
       mirrorErr.textContent = '';
       toast(r.value ? '✓ 镜像源已保存' : '✓ 已恢复官方源', true);
     } else {
+      // 错误只在字段级就地呈现(ACC-2,配合 aria-live 播报);底部 toast 只报成功/状态
       mirrorErr.textContent = r.error;
-      toast(r.error, false);
     }
   }
   document.getElementById('mirrorSave').addEventListener('click', saveMirror);
   document.getElementById('mirrorClear').addEventListener('click', async () => {
     const r = await A.set('mirror', '');
     if (r.ok) { mirror.value = ''; mirrorErr.textContent = ''; toast('✓ 已恢复官方源', true); }
+    else mirrorErr.textContent = r.error; // 清除失败(写入被拒)同样就地呈现,不再静默
   });
   mirror.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveMirror(); });
 
@@ -179,8 +180,20 @@
     toast('✓ 命令已复制', true);
   });
 
-  document.getElementById('xBtn').addEventListener('click', () => A.close());
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') A.close(); });
+  // 关闭护栏(ACC-3):分段数即时保存,镜像却需显式保存——直接关窗会静默丢弃已输入的
+  // 合法地址(60s 回收后下次打开按 config 回填)。关闭前有未保存变更时:合法则自动落盘后关闭,
+  // 校验失败则留在窗口聚焦输入框修正(或清空后关闭),与「改动即时保存」的窗内承诺一致
+  async function closeGuarded() {
+    const saved = cur ? String(cur.downloadMirror || '') : '';
+    const typed = mirror.value.trim();
+    if (typed !== saved) {
+      const r = await A.set('mirror', typed);
+      if (!r.ok) { mirrorErr.textContent = r.error; mirror.focus(); return; }
+    }
+    A.close();
+  }
+  document.getElementById('xBtn').addEventListener('click', closeGuarded);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuarded(); });
 
   A.onShow(apply);
   A.get().then((p) => { if (p) { apply(p); segN.textContent = p.segments; } }).catch(() => {}); // 异常时不改表单,保持默认值

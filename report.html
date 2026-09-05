@@ -39,7 +39,9 @@
   .foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
   /* 动作按钮(重试/退出等)必须是独立的 flex 行且不可压缩:
      此前 #actions 是块级容器,报告路径占据空间后其内部 inline 按钮会换行堆叠成竖排,
-     与「进程退出」场景的横排布局不一致(几何实测 y=514 与 y=549 两行) */
+     与「进程退出」场景的横排布局不一致(几何实测 y=514 与 y=549 两行)。
+     位次(RPT-1):动作组居左(主操作/默认焦点位),取证工具组靠右——动线「先修复、后取证」;
+     导出报告是取证动作不是流程终点,不占用 success 强调色(全窗仅一个 primary) */
   #actions { display: flex; flex: none; align-items: center; gap: 8px; }
   .foot .spacer { flex: 1; }
   .foot .note { font-size: 11px; color: var(--c-fg2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
@@ -67,12 +69,12 @@
   </div>
   <div class="foot">
     <span class="inline-feedback" id="flash"></span>
+    <div id="actions"></div>
     <span class="spacer"></span>
     <span class="note" id="reportPath"></span>
-    <button id="copyBtn" class="btn">复制报告</button>
-    <button id="exportBtn" class="btn success">导出报告</button>
     <button id="logBtn" class="btn">日志文件</button>
-    <div id="actions"></div>
+    <button id="copyBtn" class="btn">复制报告</button>
+    <button id="exportBtn" class="btn">导出报告</button>
   </div>
 </div>
 <script>

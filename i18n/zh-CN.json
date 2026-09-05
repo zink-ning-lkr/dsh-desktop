@@ -30,7 +30,9 @@
     "closeRow": "关闭此条:",
     "cancelRow": "取消此项:",
     "done": "已完成 {n} 项",
-    "progress": "进度"
+    "progress": "进度",
+    "background": "后台",
+    "backgroundTip": "最小化到任务栏,完成时通知"
   },
   "menu": {
     "file": "文件",

@@ -122,6 +122,9 @@
 /* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充;color-mix 派生使浅色主题自动成立 */
 .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--c-err) 33%, transparent); color: var(--c-err); }
 .btn.danger-ghost:hover { background: color-mix(in srgb, var(--c-err) 12%, transparent); border-color: var(--c-err); }
+/* 按钮行(对话框脚区/状态窗结果按钮):同排按钮等宽,文案长短不牵动宽度(X-1);
+   列表行内小按钮(.lbtns)不参与——行内密度优先 */
+.btn-row .btn { min-width: 88px; }
 
 /* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
    头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
