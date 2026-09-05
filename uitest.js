@@ -135,6 +135,8 @@ function runUitest(d) {
   // 下载 → 进度 → 结果
   uiStep(() => d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }), 7000, 'dl-show');
   uiStep(() => d.updateStatus({ mode: 'download', progress: 42, pct: '42.0%', size: '38 / 89 MB · 4.2 MB/s' }), 7400, 'dl-progress');
+  // P1-5:任务栏进度镜像主窗——下载中镜像值应 ≈0.42(Windows 无 getProgressBar,读主进程记录值)
+  uiStep(() => { const p = d.mainWindowProgress; d.log(`UITEST dl-mirror main=${p}(期望 ≈0.42) → ${p != null && Math.abs(p - 0.42) < 0.02 ? 'PASS' : 'FAIL'}`); }, 7550, 'dl-mirror');
   uiStep(() => {
     const t = d.trayStatusText();
     // 进度按 1% 粒度入 tooltip(P0-4 去抖):42.0% 显示为整数 42%
@@ -237,6 +239,14 @@ function runUitest(d) {
   uiStep(() => { d.showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'ok', label: '好的' }], __origin: 'desktop' }, () => {}); }, 26800, 'esc-result-prep');
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 26950, 'esc-result');
   uiStep(() => { const ok = !d.statusWin; d.log(`UITEST esc-result win=${!!d.statusWin}(期望 false,Esc=关窗) → ${ok ? 'PASS' : 'FAIL'}`); }, 27100, 'esc-result-verify');
+  // ⑪'''' 被动结果不丢弃(P1-5):nonIntrusive 结果撞上进行中流程且状态窗已开 → 入列不抢焦点,
+  //      行内按钮回调仍然可达(旧实现直接丢弃,只能靠日志追踪)
+  let niActionFired = false;
+  uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 27200, 'ni-prep');
+  uiStep(() => d.showStatusResult({ type: 'info', title: '被动结果', detail: '测试入列', buttons: [{ id: 'ni-ok', label: '知道了', primary: true }], __origin: 'dsh' }, () => { niActionFired = true; }, true), 27350, 'ni-result');
+  uiStep(() => readDom(d.statusWin, '(()=>{const l=document.getElementById("tlist");const rows=[...l.querySelectorAll(".trow")];const doneRow=rows.find(r=>r.classList.contains("done"));const t=doneRow&&doneRow.querySelector(".ltitle").textContent;return (l.style.display!=="none"&&rows.length===2&&t==="被动结果")?"PASS 被动结果入列":"FAIL rows="+rows.length+" done="+(t||"none")+" shown="+l.style.display})()', 'ni-enqueue'), 27650);
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector("#tlist .trow.done .lbtns button").click()').catch(() => {}); }, 27800, 'ni-click');
+  uiStep(() => { d.log(`UITEST ni-action fired=${niActionFired}(期望 true) → ${niActionFired ? 'PASS' : 'FAIL'}`); }, 27950, 'ni-action-verify');
   // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
   //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
   uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')

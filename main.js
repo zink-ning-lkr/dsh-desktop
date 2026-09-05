@@ -435,15 +435,20 @@ const statusActions = new Map(); // 任务 id → 结果按钮回调(按任务�
 
 function taskIdOf(p) { return (p && p.__origin) || 'default'; }
 
-// 下载时把进度同步到任务栏按钮(窗口挂后台也能看到),其余状态清除进度
+// 下载时把进度同步到任务栏(窗口挂后台也能看到),其余状态清除进度;
+// 同时镜像到主窗任务栏图标——状态窗挂后台期间,用户盯着的主窗也能看到下载进度(P1-5)。
+// mainWindowProgress 记录镜像值(UITEST 断言用;Windows 无 getProgressBar API)
+let mainWindowProgress = -1;
 function applyStatusProgress() {
-  if (!statusWin) return;
   try {
     let pct = null;
     for (const t of statusTasks.values()) {
       if (!t.done && t.mode === 'download' && typeof t.progress === 'number') { pct = t.progress; break; }
     }
-    statusWin.setProgressBar(pct === null ? -1 : Math.max(0, Math.min(1, pct / 100)));
+    const v = pct === null ? -1 : Math.max(0, Math.min(1, pct / 100));
+    if (statusWin) statusWin.setProgressBar(v);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(v);
+    mainWindowProgress = v;
   } catch { /* 窗口已销毁等 */ }
 }
 
@@ -564,6 +569,7 @@ function closeStatus() {
   statusTasks.clear();
   statusActions.clear();
   statusPayload = null; // 清残留:否则 result 残留会让后续 nonIntrusive 结果被永久跳过
+  try { mainWindow?.setProgressBar(-1); } catch { /* 已销毁 */ } // 清主窗任务栏进度镜像
   refreshTray(); // 状态窗关闭,tooltip 去掉"下载中"段
 }
 
@@ -612,16 +618,22 @@ function statusNotify(title, body) {
 // 结果视图:type=info/success/warning/error;回程按钮走 onAction(id)。
 // P1-1 起结果为任务槽中的一条完成项:不再顶掉进行中的另一更新流(otherFlowActive 互斥链已删);
 // 有其他进行中任务时结果不抢焦点(参照 VS Code 通知:出现但不打断),用户从列表处置。
-// nonIntrusive=true 用于被动路径(自动检查的通知点击等):任一更新流程进行中时仍跳过弹窗,避免打扰——
-// 用户仍可从菜单重查
+// nonIntrusive=true 用于被动路径(自动检查的通知点击等):撞上更新流程进行中时——
+// 状态窗已开 → 结果入列不抢焦点(不再静默丢弃,P1-5);窗口未开 → 维持跳过(不为被动结果拉窗打扰)
 function showStatusResult(p, onAction, nonIntrusive) {
+  const id = taskIdOf(p);
+  const asResult = () => {
+    if (onAction) statusActions.set(id, onAction); else statusActions.delete(id);
+    statusTasks.set(id, { ...statusTasks.get(id), ...p, id, mode: 'result', done: true, ephemeral: false, ts: Date.now() });
+  };
   if (nonIntrusive && (updates.state.downloadInProgress || updates.state.dshInstallChild || updates.state.dshStoppedForInstall || [...statusTasks.values()].some((t) => !t.done))) {
-    log(`跳过被动结果弹窗(更新流程进行中): ${p.title}`);
+    if (!statusWin) { log(`跳过被动结果(无状态窗,更新流程进行中): ${p.title}`); return; }
+    asResult();
+    pushTasks({ focus: false });
+    log(`被动结果已入列(不抢焦点): ${p.title}`);
     return;
   }
-  const id = taskIdOf(p);
-  if (onAction) statusActions.set(id, onAction); else statusActions.delete(id);
-  statusTasks.set(id, { ...statusTasks.get(id), ...p, id, mode: 'result', done: true, ephemeral: false, ts: Date.now() });
+  asResult();
   if (!ensureStatusWindow()) { statusQueued = true; }
   else {
     // 有其他进行中任务:结果只入列表不抢焦点;否则正常聚焦
@@ -1810,6 +1822,7 @@ if (!gotLock) {
         get trayState() { return trayState; },
         trayStatusText,
         updatesState: updates.state, // 双通道共享状态对象(稳定引用):断言取消旗标/安装子进程等
+        get mainWindowProgress() { return mainWindowProgress; }, // 主窗任务栏进度镜像值(P1-5)
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         notifyToast,
         getThemeSource: () => nativeTheme.themeSource,
