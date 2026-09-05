@@ -31,5 +31,43 @@
     "cancelRow": "取消此项:",
     "done": "已完成 {n} 项",
     "progress": "进度"
+  },
+  "menu": {
+    "file": "文件",
+    "view": "视图",
+    "help": "帮助",
+    "openWorkspace": "打开工作目录…",
+    "restartDsh": "重启 dsh 服务",
+    "openBrowser": "在浏览器中打开",
+    "fullscreen": "全屏",
+    "toggleBar": "显示/隐藏标题栏",
+    "hideBar": "隐藏标题栏",
+    "showBar": "显示标题栏",
+    "reload": "重新加载页面",
+    "devtools": "开发者工具",
+    "dshHome": "打开 dsh 数据目录",
+    "dshHomeData": "打开 dsh 数据目录 (~/.dsh)",
+    "openLog": "打开日志文件",
+    "memoryInfo": "内存占用 {n}…",
+    "checkUpdate": "检查更新…",
+    "checkUpdatePortable": "检查更新…(便携版请手动下载)",
+    "checkUpdateCurrent": "检查更新…(当前 v{v})",
+    "checkDshUpdate": "检查 dsh 本体更新…(当前 v{v})",
+    "checkDshUpdatePlain": "检查 dsh 本体更新",
+    "downloadAccel": "下载加速设置…",
+    "shortcuts": "键盘快捷键…",
+    "autoOpenBrowser": "自动打开浏览器",
+    "closeToTray": "关闭时最小化到托盘",
+    "appearance": "外观:{mode}",
+    "appearanceAuto": "跟随系统",
+    "appearanceDark": "深色",
+    "appearanceLight": "浅色",
+    "quit": "退出",
+    "showMain": "显示 DSH"
+  },
+  "action": {
+    "restartDsh": "重启 dsh",
+    "retry": "重试",
+    "quit": "退出"
   }
 }
