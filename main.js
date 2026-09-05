@@ -1698,20 +1698,54 @@ async function bootDsh() {
 }
 
 // ---------- 工作目录(决定文件归属与会话列表,与本体共享的关键) ----------
-function ensureWorkspace() {
-  const cfg = loadConfig();
-  if (cfg.workspace && fs.existsSync(cfg.workspace)) return cfg.workspace;
-  const pick = dialog.showOpenDialogSync({
-    title: '选择 dsh 的工作目录(文件与会话都归属于它)',
-    properties: ['openDirectory'],
-    defaultLocation: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
+// 首启欢迎页(P1-6):无有效工作目录时不直接弹裸系统目录对话框,先亮品牌引导——
+// 一句话说明与本体共享、「选择工作目录」主按钮(内嵌原生选择器)、「关闭=收托盘」事前告知
+// (原首收托盘的事后通知内容前移到第一触点);取消=退出语义保留为「退出」按钮与 Alt+F4。
+// 返回 Promise<string|null>:选定并保存的工作目录,或 null(用户退出)
+let welcomeWin = null;
+let welcomeResolve = null;
+function showWelcome() {
+  return new Promise((resolve) => {
+    welcomeResolve = resolve;
+    const finish = (ws) => {
+      ipcMain.removeListener('wl:choose', onChoose);
+      ipcMain.removeListener('wl:quit', onQuit);
+      const r = welcomeResolve;
+      welcomeResolve = null;
+      try { welcomeWin?.destroy(); } catch { /* 已销毁 */ }
+      welcomeWin = null;
+      r?.(ws);
+    };
+    const onChoose = (e) => {
+      if (!trustedEvent(e) || !welcomeWin) return;
+      const pick = dialog.showOpenDialogSync(welcomeWin, {
+        title: '选择 dsh 的工作目录(文件与会话都归属于它)',
+        properties: ['openDirectory'],
+        defaultLocation: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
+      });
+      if (pick && pick[0]) {
+        saveConfig({ ...loadConfig(), workspace: pick[0] });
+        finish(pick[0]);
+      }
+    };
+    const onQuit = (e) => { if (trustedEvent(e)) finish(null); };
+    ipcMain.on('wl:choose', onChoose);
+    ipcMain.on('wl:quit', onQuit);
+    welcomeWin = new BrowserWindow({
+      width: 480, height: 560, useContentSize: true,
+      frame: false, resizable: false, show: false,
+      backgroundColor: chromeBgColor(),
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'welcome-preload.js') },
+    });
+    welcomeWin.setMenuBarVisibility(false);
+    welcomeWin.center(); // 主窗尚未创建:屏幕居中
+    welcomeWin.loadFile(path.join(__dirname, 'welcome.html')).catch(() => {});
+    welcomeWin.webContents.once('did-finish-load', () => welcomeWin?.show());
+    // Alt+F4 等直接关闭 = 退出(与旧 ensureWorkspace 的取消语义一致)
+    welcomeWin.on('closed', () => { welcomeWin = null; finish(null); });
   });
-  if (pick && pick[0]) {
-    saveConfig({ ...cfg, workspace: pick[0] });
-    return pick[0];
-  }
-  return null; // 用户取消,直接退出
 }
+
 function changeWorkspace() {
   const cfg = loadConfig();
   // 托盘态触发时主窗口是隐藏的:原生父窗口对话框不会正常显示,先恢复主窗口
@@ -1768,12 +1802,23 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     log(`应用就绪 userData=${app.getPath('userData')}`);
-    const ws = ensureWorkspace();
-    if (!ws) {
-      log('未选择工作目录,退出');
-      app.quit();
-      return;
+    const cfg = loadConfig();
+    if (cfg.workspace && fs.existsSync(cfg.workspace)) {
+      startMain(cfg.workspace);
+    } else {
+      // 首启/工作目录失效(P1-6):欢迎页替代裸系统目录对话框,选定后再拉起主流程
+      showWelcome().then((ws) => {
+        if (!ws) {
+          log('未选择工作目录,退出');
+          app.quit();
+          return;
+        }
+        startMain(ws);
+      });
     }
+  });
+
+  function startMain(ws) {
     log(`工作目录: ${ws}`);
     // 更新模块注入编排能力:状态窗/对话框/通知/重启 dsh 均在 main.js,
     // updates.js 只依赖此注入面,不反向 require main.js
@@ -1823,6 +1868,13 @@ if (!gotLock) {
         trayStatusText,
         updatesState: updates.state, // 双通道共享状态对象(稳定引用):断言取消旗标/安装子进程等
         get mainWindowProgress() { return mainWindowProgress; }, // 主窗任务栏进度镜像值(P1-5)
+        get welcomeWin() { return welcomeWin; }, // 首启欢迎页(P1-6):UITEST 做页面级冒烟
+        showWelcome,
+        abortWelcome: () => {
+          // 测试收尾:吞掉 resolve(否则 null 会触发 whenReady 的退出分支),仅销毁窗口
+          welcomeResolve = null;
+          try { welcomeWin?.destroy(); } catch { /* 已销毁 */ }
+        },
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         notifyToast,
         getThemeSource: () => nativeTheme.themeSource,
@@ -1834,8 +1886,7 @@ if (!gotLock) {
       if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO) require('./uitest').runSmokeDemo(uitestDeps);
       if (process.env.DSH_DESKTOP_UITEST) require('./uitest').runUitest(uitestDeps);
     }
-
-  });
+  }
 
   app.on('window-all-closed', () => app.quit());
 

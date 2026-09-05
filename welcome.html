@@ -1,0 +1,70 @@
+<!-- 首启欢迎页(P1-6):第一触点品牌引导——说明与 dsh 本体共享、选择工作目录、
+     「关闭=收托盘」行为事前告知(替代原裸系统目录对话框;取消=退出语义保留) -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>欢迎使用 DSH Desktop</title>
+<link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
+    font: var(--font-ui); }
+  .win { display: flex; flex-direction: column; }
+  .head { display: flex; align-items: center; gap: 10px; flex: none; padding: 12px 16px;
+    -webkit-app-region: drag; }
+  .head img { width: 18px; height: 18px; flex: none; }
+  .head .t { flex: 1; font-size: 13px; font-weight: 600; color: var(--c-fg0); }
+  .hero { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; padding: 8px 40px; text-align: center; }
+  .hero img { width: 72px; height: 72px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--c-brand) 30%, transparent)); }
+  .hero h1 { margin: 0; font-size: 19px; font-weight: 600; color: var(--c-fg0); }
+  .hero .sub { font-size: 13px; color: var(--c-fg1); line-height: 1.6; }
+  .hero .sub b { color: var(--c-fg0); font-weight: 600; }
+  .act { flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 6px 40px 18px; }
+  #wlChoose { width: 100%; padding: 10px 16px; font-size: 13px; }
+  .hint { font-size: 11.5px; color: var(--c-fg2); line-height: 1.55; }
+  .foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px 14px;
+    border-top: 1px solid var(--c-bg2); }
+  .foot .tray-note { flex: 1; min-width: 0; font-size: 11px; color: var(--c-fg2); line-height: 1.5;
+    display: flex; align-items: center; gap: 6px; }
+  .foot .tray-note svg { width: 13px; height: 13px; flex: none; color: var(--c-brand-hi); }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="head">
+    <img src="assets/whale-white.png" alt="" data-logo>
+    <span class="t">DSH Desktop</span>
+  </div>
+  <div class="hero">
+    <img src="assets/whale-white.png" alt="DSH" data-logo>
+    <h1>欢迎使用 DSH Desktop</h1>
+    <p class="sub">以桌面应用的方式运行 <b>dsh 本体</b>:窗口加载 dsh web 服务,<br>
+      <b>会话、文件、设置、插件</b>与终端里的 dsh 完全共享。</p>
+  </div>
+  <div class="act">
+    <button class="btn primary" id="wlChoose" type="button">选择工作目录</button>
+    <p class="hint">工作目录决定文件与会话列表的归属;之后可在菜单「打开工作目录…」随时更改。</p>
+  </div>
+  <div class="foot">
+    <span class="tray-note">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M1.5 14.5h13"/></svg>
+      点窗口的「关闭」默认收进系统托盘,dsh 会在后台继续运行,点击托盘鲸鱼图标即可恢复。
+    </span>
+    <button class="btn" id="wlQuit" type="button">退出</button>
+  </div>
+</div>
+<script>
+  const W = window.__welcome;
+  const chooseBtn = document.getElementById('wlChoose');
+  chooseBtn.focus(); // 首触点:Enter 直达「选择工作目录」
+  chooseBtn.addEventListener('click', () => W.choose());
+  document.getElementById('wlQuit').addEventListener('click', () => W.quit());
+  // Esc = 退出(与 Alt+F4/取消语义一致);Enter 在焦点按钮上直接激活
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') W.quit(); });
+</script>
+</body>
+</html>

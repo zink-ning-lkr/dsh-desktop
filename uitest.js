@@ -297,6 +297,11 @@ function runUitest(d) {
   }, 30700, 'theme-3-verify');
   uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 31100, 'theme-report-close');
   uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 31350, 'theme-report-close-verify');
+  // ⑬ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
+  uiStep(() => { d.showWelcome(); }, 31400, 'welcome-open');
+  uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 32000);
+  uiStep(() => { d.abortWelcome(); }, 32200, 'welcome-abort');
+  uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 32400, 'welcome-closed-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {

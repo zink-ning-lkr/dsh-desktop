@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "productName": "DSH Desktop",
-  "version": "0.5.45",
+  "version": "0.5.46",
   "description": "DeepSeek Harness (dsh) 的桌面壳:后台启动 dsh web,窗口加载其 UI,数据与本体完全共享",
   "main": "main.js",
   "author": "zink-ning-lkr",
@@ -65,6 +65,8 @@
       "dialog-preload.js",
       "accel.html",
       "accel-preload.js",
+      "welcome.html",
+      "welcome-preload.js",
       "report.html",
       "report-preload.js",
       "assets/**"
