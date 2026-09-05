@@ -188,6 +188,8 @@
     document.title = p.title || 'DSH';
     const isRes = p.mode === 'result';
     document.getElementById('activity').style.display = isRes ? 'none' : 'flex';
+    // 活动态向读屏声明区域忙(ST-2):高频进度帧不逐条播报,由结果视图 alertdialog 在完成瞬间播报
+    document.getElementById('activity').setAttribute('aria-busy', isRes ? 'false' : 'true');
     document.getElementById('result').style.display = isRes ? 'flex' : 'none';
     document.getElementById('tlist').style.display = 'none';
     document.getElementById('bgBtn').style.display = isRes ? 'none' : '';
@@ -274,6 +276,7 @@
     const done = tasks.filter((t) => t.done && !t.ephemeral);
     const eph = tasks.filter((t) => t.done && t.ephemeral);
     document.getElementById('activity').style.display = 'none';
+    document.getElementById('activity').setAttribute('aria-busy', 'false');
     document.getElementById('result').style.display = 'none';
     const list = document.getElementById('tlist');
     list.style.display = 'flex';

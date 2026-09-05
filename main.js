@@ -1157,6 +1157,7 @@ ipcMain.on('rp:action', (e, id) => {
   closeReportWindow();
   if (id === 'quit') app.quit();
   else if (id === 'retry' || id === 'restart') bootDsh();
+  else log(`报告窗未知动作: ${String(id)}`); // 契约外 id 留痕:表现为"点了没反应+窗关"的问题可查(RPT-4)
 });
 
 // ---------- 自绘菜单弹层(替代原生 Menu.popup,风格与应用统一) ----------

@@ -78,6 +78,12 @@
       const main = foot.querySelector('.primary') || foot.querySelector('button');
       if (main) main.focus();
     }, 0);
+    // 队列换页(DLG-4):窗口复用(hide/show)时 .win 入场动画只在页面首次加载跑过一次,
+    // 重触发一次让接续展示的对话框有入场反馈;prefers-reduced-motion 下 ui.css 已全局禁用动画
+    const win = document.querySelector('.win');
+    win.style.animation = 'none';
+    void win.offsetWidth; // 强制回流后清空,动画从头播放
+    win.style.animation = '';
     D.rendered(); // 渲染完成回报:主进程按真实内容高度微调窗口(估算只做首帧,P1-1)
   }
 

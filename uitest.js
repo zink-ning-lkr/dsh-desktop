@@ -340,6 +340,9 @@ function runUitest(d) {
   // ⑬ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
   uiStep(() => { d.showWelcome(); }, 33100, 'welcome-open');
   uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 33700);
+  // WEL-2 验证项:欢迎页首帧焦点应落在「选择工作目录」(脚本解析期 focus() 在 show() 前执行,
+  // 隐藏窗口期可能不生效);若此断言持续 FAIL,需在主进程 show() 后补发聚焦
+  uiStep(() => readDom(d.welcomeWin, '(()=>{const ae=document.activeElement;return (ae&&ae.id==="wlChoose")?"PASS focus=选择按钮":"FAIL ae="+((ae&&ae.id)||ae.tagName)})()', 'welcome-focus'), 33800);
   uiStep(() => { d.abortWelcome(); }, 33900, 'welcome-abort');
   uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 34100, 'welcome-closed-verify');
   // ⑭ 快捷键速查(P2-2):菜单「键盘快捷键…」→ 速查对话框,内容与菜单 accel 同源(shortcuts.js)
