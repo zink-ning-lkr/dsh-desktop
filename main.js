@@ -1378,7 +1378,7 @@ async function syncTitleBarTheme() {
   if (titlebarThemeInFlight) return;
   const wc = dshView?.webContents;
   if (!wc || !titlebarView) return;
-  // 仅采样 dsh 页面本体:loadFile 的本地页(loading.html 固定深色)不采样,避免无意义覆盖
+  // 仅采样 dsh 页面本体:loadFile 的本地页(loading.html 等走主题令牌自绘,不需要跟随)不采样,避免无意义覆盖
   const cur = wc.getURL();
   if (!cur || cur.startsWith('file:')) return;
   titlebarThemeInFlight = true;

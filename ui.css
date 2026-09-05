@@ -16,9 +16,15 @@
   --c-placeholder: #484f58; /* 输入框占位符(浅色主题下换浅灰) */
   --c-brand: #4d6bfe;
   --c-brand-hi: #79b8ff;
+  --c-brand-deep: #3b5bdb; /* 品牌渐变下端(primary 按钮底) */
   --c-ok: #3fb950;
+  --c-ok-strong: #2ea043; /* success 渐变上端 */
+  --c-ok-deep: #238636;   /* success 渐变下端 */
   --c-warn: #d29922;
   --c-err: #f85149;
+  --c-err-strong: #da3633; /* danger 渐变上端 */
+  --c-err-deep: #b62324;   /* danger 渐变下端 */
+  --c-progress-accent: #8b5cf6; /* 进度条渐变副色(品牌紫) */
   /* 尺寸/动效 */
   --radius-s: 6px;
   --radius-m: 7px;
@@ -107,15 +113,15 @@
 }
 .btn:hover { background: var(--c-border); border-color: var(--c-border-hover); }
 .btn:active { transform: scale(.97); }
-.btn.primary { background: linear-gradient(180deg, var(--c-brand), #3b5bdb); border-color: transparent; color: #fff; }
+.btn.primary { background: linear-gradient(180deg, var(--c-brand), var(--c-brand-deep)); border-color: transparent; color: #fff; }
 .btn.primary:hover { filter: brightness(1.12); }
-.btn.success { background: linear-gradient(180deg, #2ea043, #238636); border-color: transparent; color: #fff; }
+.btn.success { background: linear-gradient(180deg, var(--c-ok-strong), var(--c-ok-deep)); border-color: transparent; color: #fff; }
 .btn.success:hover { filter: brightness(1.12); }
-.btn.danger { background: linear-gradient(180deg, #da3633, #b62324); border-color: transparent; color: #fff; }
+.btn.danger { background: linear-gradient(180deg, var(--c-err-strong), var(--c-err-deep)); border-color: transparent; color: #fff; }
 .btn.danger:hover { filter: brightness(1.12); }
-/* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充 */
-.btn.danger-ghost { background: transparent; border-color: #f8514955; color: var(--c-err); }
-.btn.danger-ghost:hover { background: rgba(248, 81, 73, .12); border-color: var(--c-err); }
+/* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充;color-mix 派生使浅色主题自动成立 */
+.btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--c-err) 33%, transparent); color: var(--c-err); }
+.btn.danger-ghost:hover { background: color-mix(in srgb, var(--c-err) 12%, transparent); border-color: var(--c-err); }
 
 /* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
    头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
@@ -153,10 +159,11 @@
   display: flex; align-items: center; justify-content: center;
 }
 .big svg { width: 21px; height: 21px; }
-.big.info { background: rgba(121, 184, 255, .12); color: var(--c-brand-hi); }
-.big.success { background: rgba(63, 185, 80, .14); color: var(--c-ok); animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
-.big.warning { background: rgba(210, 153, 34, .14); color: var(--c-warn); }
-.big.error { background: rgba(248, 81, 73, .14); color: var(--c-err); animation: shake .34s ease; }
+/* 彩底走 color-mix 派生:浅色主题下自动跟随对应令牌(深色值与原 rgba 逐位一致) */
+.big.info { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); color: var(--c-brand-hi); }
+.big.success { background: color-mix(in srgb, var(--c-ok) 14%, transparent); color: var(--c-ok); animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
+.big.warning { background: color-mix(in srgb, var(--c-warn) 14%, transparent); color: var(--c-warn); }
+.big.error { background: color-mix(in srgb, var(--c-err) 14%, transparent); color: var(--c-err); animation: shake .34s ease; }
 @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 

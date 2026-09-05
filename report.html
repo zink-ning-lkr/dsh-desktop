@@ -16,7 +16,7 @@
   .cls { display: flex; align-items: center; gap: 10px; }
   .badge {
     flex: none; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
-    background: rgba(248, 81, 73, .15); color: var(--c-err); border: 1px solid rgba(248, 81, 73, .35);
+    background: color-mix(in srgb, var(--c-err) 15%, transparent); color: var(--c-err); border: 1px solid color-mix(in srgb, var(--c-err) 35%, transparent);
   }
   .cls .name { font-size: 14px; font-weight: 600; color: var(--c-fg0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cause { font-size: 12.5px; color: var(--c-fg1); line-height: 1.55; background: var(--c-bg1); border: 1px solid var(--c-bg2);

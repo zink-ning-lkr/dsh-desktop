@@ -24,12 +24,12 @@
   }
   .logo {
     width: 56px; height: 56px;
-    filter: drop-shadow(0 0 14px rgba(77, 107, 254, .35));
+    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--c-brand) 35%, transparent));
     animation: breathe 2.6s ease-in-out infinite;
   }
   @keyframes breathe {
-    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(77, 107, 254, .28)); }
-    50% { transform: scale(1.05); filter: drop-shadow(0 0 20px rgba(77, 107, 254, .5)); }
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c-brand) 28%, transparent)); }
+    50% { transform: scale(1.05); filter: drop-shadow(0 0 20px color-mix(in srgb, var(--c-brand) 50%, transparent)); }
   }
   .ring {
     position: relative; width: 40px; height: 40px;
@@ -39,11 +39,11 @@
     border: 3px solid transparent;
   }
   .ring::before {
-    border-top-color: var(--c-brand); border-right-color: rgba(77, 107, 254, .35);
+    border-top-color: var(--c-brand); border-right-color: color-mix(in srgb, var(--c-brand) 35%, transparent);
     animation: spin .85s linear infinite;
   }
   .ring::after {
-    inset: -9px; border: 1.5px solid rgba(77, 107, 254, .16);
+    inset: -9px; border: 1.5px solid color-mix(in srgb, var(--c-brand) 16%, transparent);
     animation: spin 2.4s linear infinite reverse;
     opacity: .6;
   }

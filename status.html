@@ -28,7 +28,7 @@
   .bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
   .fill {
     height: 100%; width: 0%; border-radius: 3px; position: relative;
-    background: linear-gradient(90deg, var(--c-brand), #8b5cf6);
+    background: linear-gradient(90deg, var(--c-brand), var(--c-progress-accent));
     transition: width .18s ease-out;
   }
   .fill::after {
@@ -40,7 +40,7 @@
   .fill.indet {
     width: 100%; transition: none;
     background-size: 200% 100%;
-    background-image: linear-gradient(90deg, var(--c-bg2) 0%, var(--c-brand) 35%, #8b5cf6 50%, var(--c-brand) 65%, var(--c-bg2) 100%);
+    background-image: linear-gradient(90deg, var(--c-bg2) 0%, var(--c-brand) 35%, var(--c-progress-accent) 50%, var(--c-brand) 65%, var(--c-bg2) 100%);
     animation: indet 1.3s linear infinite;
   }
   .fill.indet::after { display: none; }
