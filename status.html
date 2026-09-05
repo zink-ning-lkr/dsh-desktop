@@ -88,6 +88,8 @@
   .hist .tri { width: 8px; height: 8px; flex: none; transition: transform var(--dur-mid); }
   .hist.open .tri { transform: rotate(90deg); }
   .trow.ephemeral { opacity: .8; border-style: dashed; }
+  /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
+  .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
   @media (prefers-reduced-motion: reduce) { .fill.indet, .fill::after { animation: none; } }
 </style>
 </head>
@@ -116,6 +118,7 @@
 </div>
 <script>
   const S = window.__status;
+  if (S.env && S.env.acrylic) document.querySelector('.win')?.classList.add('acrylic'); // Win11 材质透出(v0.6.1)
   // 图标走 ui-icons.js 共享层(与 dialog 结果图标同源,P1-2):activity=进行中五态,result=结果四态
   const { activity: ACT, result: RES } = window.UI_ICONS;
   // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key

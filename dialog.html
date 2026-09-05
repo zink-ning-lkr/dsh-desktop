@@ -22,6 +22,8 @@
   .detail { font-size: 12px; color: var(--c-fg2); line-height: 1.5; white-space: pre-wrap; word-break: break-all;
     max-height: 140px; min-height: 0; overflow-y: auto; user-select: text; -webkit-app-region: no-drag; }
   .foot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 4px 20px 16px; }
+  /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
+  .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
 </style>
 </head>
 <body>
@@ -47,6 +49,7 @@
   function render(p) {
     payload = p;
     document.title = p.title || 'DSH';
+    if (p.acrylic) document.querySelector('.win')?.classList.add('acrylic'); // Win11 材质透出(v0.6.1)
     const type = p.type || 'info';
     // 类型配色走 ui.css 公共 .big.<type>(与状态窗结果视图同一套)
     const big = document.getElementById('big');

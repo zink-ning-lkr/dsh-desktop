@@ -166,6 +166,8 @@ function runUitest(d) {
   uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;return t==="D1"?"PASS D2已入队不顶掉在屏D1":"FAIL 在屏="+t})()', 'd2-queued'), 11100);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11250, 'd1-choose');
   uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;return t==="D2"?"PASS 接续展示D2":"FAIL 在屏="+t})()', 'd2-next'), 11550);
+  // v0.6.1 Acrylic 铺开:dialog 的 .win.acrylic 类必须与 Win11 判定一致
+  uiStep(() => { const want = d.isWin11(); readDom(d.dialogWin, `(()=>{const m=document.querySelector(".win").classList.contains("acrylic");return (m===${want})?"PASS acrylic="+m:"FAIL acrylic="+m+" want=${want}"})()`, 'dialog-acrylic'); }, 11620);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11700, 'd2-choose');
   // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
   uiStep(() => d.showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
@@ -219,6 +221,8 @@ function runUitest(d) {
   uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); d.notifyToast('加速设置已保存:并发 6 段'); }, 23600, 'tc-install');
   uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const eph=rows.filter(r=>r.classList.contains("ephemeral")).length;const t=document.getElementById("title").textContent;return (rows.length===3&&act===2&&eph===1&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" eph="+eph+" t="+t})()', 'tc-list'), 23950);
   uiStep(() => { const h = d.statusWin?.getContentSize()[1] || 0; d.log(`UITEST tc-h=${h}(期望 >186 列表加高) → ${h > 186 ? 'PASS' : 'FAIL'}`); }, 24000, 'tc-h');
+  // v0.6.1 Acrylic 铺开:status 窗的 .win.acrylic 类必须与 Win11 判定一致
+  uiStep(() => { const want = d.isWin11(); readDom(d.statusWin, `(()=>{const m=document.querySelector(".win").classList.contains("acrylic");return (m===${want})?"PASS acrylic="+m:"FAIL acrylic="+m+" want=${want}"})()`, 'status-acrylic'); }, 24100);
   // P1-1 实测式高度校准:渲染回报后窗口高度应与真实内容高度贴合(差 ≤14px,含主进程 8px 容差)
   uiStep(() => readDom(d.statusWin, '(()=>{const l=document.querySelector(".tlist");const cs=getComputedStyle(l);const gap=parseFloat(cs.rowGap)||0;const pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);const seq=[];for(const k of l.children){if(getComputedStyle(k).display==="contents"){seq.push(...k.children)}else seq.push(k)}let h=pad;seq.forEach((k,i)=>{h+=k.getBoundingClientRect().height;if(i>0)h+=gap});const natural=h+document.querySelector(".win-head").getBoundingClientRect().height+2;const diff=Math.abs(innerHeight-natural);return (diff<=14)?"PASS 实测贴合 natural="+Math.round(natural)+" win="+innerHeight:"FAIL diff="+Math.round(diff)+" natural="+Math.round(natural)+" win="+innerHeight})()', 'tc-fit'), 24150);
   // 行级取消 dsh 任务:desktop 下载任务必须不受影响(旧单槽模型无法表达,互斥链已删)
@@ -371,6 +375,8 @@ function runUitest(d) {
       const s2 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "https://m.example.com/dir/")');
       const cfg2 = d.loadConfig().downloadMirror;
       const bad = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "not-a-url")');
+      const aCls = await d.accelWin.webContents.executeJavaScript('document.querySelector(".win").classList.contains("mica")');
+      d.log(`UITEST accel-mica cls=${aCls} want=${d.isWin11()} → ${aCls === d.isWin11() ? 'PASS' : 'FAIL'}`);
       const s3 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "")');
       const cfg3 = d.loadConfig().downloadMirror; // delete 后应为 undefined
       const ok = before.segments === 6 && before.downloadMirror === '' && uiSeg === '6'

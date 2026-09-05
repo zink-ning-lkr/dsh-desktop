@@ -510,6 +510,8 @@ function ensureStatusWindow() {
   statusWin = new BrowserWindow({
     width: 410, height: 186, useContentSize: true,
     frame: false, resizable: false, skipTaskbar: false, show: false,
+    // Win11 Acrylic 轻量层(P2-3 铺开,v0.6.1):系统材质透出,渲染层经 st:env 加半透明底;Win10 回落实色
+    backgroundMaterial: isWin11() ? 'acrylic' : undefined,
     webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'status-preload.js') },
   });
   statusWin.setMenuBarVisibility(false);
@@ -669,6 +671,9 @@ function trustedEvent(e) {
 // 无敏感信息与副作用,任意调用方拉取无安全影响
 ipcMain.on('i18n:table', (e) => { e.returnValue = i18n.snapshot(); });
 
+// 窗口环境标志(v0.6.1):Win11 Acrylic 材质透出,渲染层据此加 .win.acrylic(只读静态,同 i18n:table 不设信任门槛)
+ipcMain.on('st:env', (e) => { e.returnValue = { acrylic: isWin11() }; });
+
 ipcMain.on('st:bg', (e) => {
   if (!trustedEvent(e)) return;
   if (statusWin && !statusWin.isMinimized()) statusWin.minimize();
@@ -820,7 +825,7 @@ function flushDialog() {
   const w = opts.width || 460;
   dialogWin.setContentSize(w, dialogHeightFor(opts, w));
   dialogWin.setTitle(opts.title || 'DSH');
-  dialogWin.webContents.send('dl:show', opts);
+  dialogWin.webContents.send('dl:show', { ...opts, acrylic: isWin11() }); // 渲染层据此让 Acrylic 透出(v0.6.1)
   centerOn(dialogWin, mainWindow);
   dialogWin.show();
   dialogWin.focus();
@@ -839,6 +844,8 @@ function showDialog(opts, cb) {
     dialogWin = new BrowserWindow({
       width: 460, height: 220, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
+      // Win11 Acrylic 轻量层(P2-3 铺开,v0.6.1):同 status 窗
+      backgroundMaterial: isWin11() ? 'acrylic' : undefined,
       webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'dialog-preload.js') },
     });
     dialogWin.setMenuBarVisibility(false);
@@ -913,6 +920,7 @@ function accelSettingsFromConfig() {
     cfgPath: configPath(), // 底部提示"改动保存到哪"
     // 有更新下载进行中:accel 窗显示提示条(新设置只对下次下载生效)
     downloadActive: !!(updates.state.downloadInProgress || (statusPayload && statusPayload.mode === 'download')),
+    mica: isWin11(), // 渲染层据此让 Mica 透出(v0.6.1)
   };
 }
 
@@ -932,6 +940,8 @@ function showAccelSettings() {
     accelWin = new BrowserWindow({
       width: 520, height: 556, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
+      // Win11 Mica(P2-3 铺开,v0.6.1):与 reportWin 同档系统材质
+      backgroundMaterial: isWin11() ? 'mica' : undefined,
       webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'accel-preload.js') },
     });
     accelWin.setMenuBarVisibility(false);

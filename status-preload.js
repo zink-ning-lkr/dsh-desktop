@@ -5,8 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 let i18nTable = {};
 try { i18nTable = ipcRenderer.sendSync('i18n:table') || {}; } catch { /* 主进程未就绪:回退 key */ }
+// 窗口环境标志(v0.6.1):Win11 Acrylic 材质透出
+let envData = { acrylic: false };
+try { envData = ipcRenderer.sendSync('st:env') || envData; } catch { /* 回落不透出 */ }
 
 contextBridge.exposeInMainWorld('__status', {
+  env: envData, // { acrylic: boolean }
   onTasks: (cb) => ipcRenderer.on('st:tasks', (_e, v) => cb(v)),
   background: () => ipcRenderer.send('st:bg'),
   close: () => ipcRenderer.send('st:close'),
