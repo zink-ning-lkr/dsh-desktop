@@ -300,7 +300,7 @@ function toggleFullscreen() {
 
 // 标题栏「关闭」按钮 tooltip 随设置联动(收托盘 vs 直接退出),避免「关闭=消失」的误解
 function sendCloseTip() {
-  titlebarView?.webContents.send('tb:close-tip', loadConfig().closeAction !== 'quit' ? '关闭(最小化到托盘)' : '关闭(直接退出)');
+  titlebarView?.webContents.send('tb:close-tip', loadConfig().closeAction !== 'quit' ? t('tip.closeTray') : t('tip.closeQuit'));
 }
 
 // 恢复上次关闭时的窗口位置/大小/最大化状态(显示器变更后旧坐标可能失效,校验与任一工作区有交集才恢复)
@@ -344,7 +344,7 @@ function trayStatusText() {
       // 进度取整到整数百分点:tooltip 按 1% 粒度变化,配合 refreshTray 同值短路,
       // 下载期间不再以 ~150ms 一次的频率重设托盘(0.1% 级的字符串抖动穿透不了缓存)
       const n = parseFloat(t.pct);
-      dl = ` · 下载中 ${Number.isFinite(n) ? Math.round(n) : t.pct}%`;
+      dl = i18n.t('tray.downloadingPct', { n: Number.isFinite(n) ? Math.round(n) : t.pct }); // 循环变量 t 遮蔽文案函数,此处走 i18n.t
       break;
     }
   }
@@ -380,7 +380,7 @@ function trayMenuStatusLabel() {
   let up = '';
   if (trayState === 'ok' && trayStartedAt) {
     const m = Math.floor((Date.now() - trayStartedAt) / 60000);
-    up = m < 1 ? ' · 刚刚启动' : m < 60 ? ` · ${m} 分钟` : ` · ${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+    up = m < 1 ? t('tray.upJustNow') : m < 60 ? t('tray.upMin', { n: m }) : t('tray.upHourMin', { h: Math.floor(m / 60), m: m % 60 });
   }
   const v = dshProc.dshVersion() || '';
   return `dsh${v ? ` v${v}` : ''} · ${st}${up}`;
@@ -501,7 +501,7 @@ function statusHeight() {
 function statusWinTitle(tasks) {
   if (tasks.length === 1) return tasks[0].title || 'DSH';
   const act = tasks.filter((t) => !t.done).length;
-  return act ? `任务中心(${act} 项进行中)` : '任务中心';
+  return act ? i18n.t('status.titleActive', { n: act }) : i18n.t('status.title'); // 过滤参数 t 遮蔽文案函数,此处走 i18n.t
 }
 
 // 推送整帧任务数组给渲染器(渲染器单任务时退化为旧单视图,多任务渲染列表)
@@ -622,7 +622,7 @@ function notifyToast(text) {
 // 更新流程占用时的菜单反馈:有状态窗则回到进度窗;否则弹提示(用户点了菜单不能静默无响应)
 function noticeFlowBusy(message, statusFallback) {
   if (statusWin) { showStatus(statusPayload || statusFallback); return; }
-  showDialog({ type: 'info', title: '暂时无法开始', message, buttons: [{ label: '好的', primary: true }] });
+  showDialog({ type: 'info', title: t('dlg.busyTitle'), message, buttons: [{ label: t('dlg.ok'), primary: true }] });
 }
 
 // ---------- 桌面通知引用保持 ----------
@@ -1040,7 +1040,7 @@ function flushReport() {
   if (!reportQueued || !reportWin) return;
   const o = reportQueued;
   reportQueued = null;
-  reportWin.setTitle(o.name || 'DSH 错误报告');
+  reportWin.setTitle(o.name || t('report.winTitle'));
   reportWin.webContents.send('rp:show', o);
   centerOn(reportWin, mainWindow);
   reportWin.show();
@@ -1089,7 +1089,7 @@ function showReport(opts) {
   const logPreview = redactToken(String(ctx.buf || '').slice(-3000)) || diagnostics.tailFile(logFile, 60) || '';
   const payload = {
     phase: opts.phase,
-    badge: opts.phase === 'exit' ? '进程退出' : '启动失败',
+    badge: opts.phase === 'exit' ? t('report.badgeExit') : t('report.badgeBoot'),
     name: rep.cls.title,
     cause: rep.cls.cause,
     suggestions: rep.cls.suggestions || [],
@@ -1117,7 +1117,7 @@ function showReport(opts) {
   }
   if (reportQueued) { reportQueued = payload; return; } // 仍在加载:更新排队载荷
   // 已就绪:直接展示
-  reportWin.setTitle(payload.name || 'DSH 错误报告');
+  reportWin.setTitle(payload.name || t('report.winTitle'));
   reportWin.webContents.send('rp:show', payload);
   centerOn(reportWin, mainWindow);
   reportWin.show();
@@ -1129,9 +1129,9 @@ ipcMain.on('rp:export', (e) => {
   if (!reportWin) return;
   const def = reportPath || path.join(app.getPath('userData'), 'dsh-error-report.txt');
   const save = dialog.showSaveDialogSync(reportWin, {
-    title: '导出错误报告',
+    title: t('report.exportDlgTitle'),
     defaultPath: def,
-    filters: [{ name: '文本报告', extensions: ['txt'] }],
+    filters: [{ name: t('report.exportFilter'), extensions: ['txt'] }],
   });
   if (!save) return;
   try {
@@ -1216,24 +1216,24 @@ async function showMemoryInfo() {
   const total = shell + tree;
   // 状态评价:总内存(壳 + dsh 本体)分三档,映射对话框图标颜色;实测基线约 1.4GB
   const level = total <= 1500
-    ? { type: 'info', word: '正常' }
-    : total <= 2200 ? { type: 'warning', word: '偏高' } : { type: 'error', word: '很高' };
-  const advice = level.word === '正常'
-    ? '运行正常,无需关注。'
-    : level.word === '偏高'
-      ? '内存偏高:可关闭闲置的辅助窗口,或稍后重启应用释放。'
-      : '内存占用很高:建议重启应用,或检查 dsh 页面是否有异常任务。';
+    ? { type: 'info', key: 'dlg.memLevelOk' }
+    : total <= 2200 ? { type: 'warning', key: 'dlg.memLevelHigh' } : { type: 'error', key: 'dlg.memLevelVeryHigh' };
+  const advice = level.key === 'dlg.memLevelOk'
+    ? t('dlg.memAdviceOk')
+    : level.key === 'dlg.memLevelHigh'
+      ? t('dlg.memAdviceHigh')
+      : t('dlg.memAdviceVeryHigh');
   const detail = [
-    `· 桌面壳(界面与内容页面): ${fmtMB(shell)}`,
-    `· dsh 本体(服务与插件): ${fmtMB(tree)}`,
+    t('dlg.memShell', { size: fmtMB(shell) }),
+    t('dlg.memDsh', { size: fmtMB(tree) }),
   ];
-  if (!dshChild) detail.push('(提示:当前未运行 dsh 服务进程)');
-  detail.push('', `建议:${advice}`);
+  if (!dshChild) detail.push(t('dlg.memNoDsh'));
+  detail.push('', t('dlg.memAdvicePrefix', { advice }));
   showDialog({
-    type: level.type, title: '内存占用', width: 440,
-    message: `当前共占用 ${fmtMB(total)}（${level.word}）`,
+    type: level.type, title: t('dlg.memoryTitle'), width: 440,
+    message: t('dlg.memoryMsg', { size: fmtMB(total), level: t(level.key) }),
     detail: detail.join('\n'),
-    buttons: [{ label: '好的', primary: true }],
+    buttons: [{ label: t('dlg.ok'), primary: true }],
   });
 }
 
@@ -1275,10 +1275,10 @@ function menuItems() {
 function showShortcutsDialog() {
   const lines = shortcuts.list.map((s) => `${s.label} · ${shortcuts.display(s.menu)}`);
   showDialog({
-    type: 'info', title: '键盘快捷键', width: 420,
-    message: '以下快捷键在任何界面可用:',
+    type: 'info', title: t('dlg.shortcutsTitle'), width: 420,
+    message: t('dlg.shortcutsMsg'),
     detail: lines.join('\n'),
-    buttons: [{ label: '好的', primary: true }],
+    buttons: [{ label: t('dlg.ok'), primary: true }],
   });
 }
 
@@ -1634,8 +1634,8 @@ function createWindow() {
       if (!cfg.trayHintShown) {
         saveConfig({ ...cfg, trayHintShown: true });
         const n = new Notification({
-          title: 'DSH 仍在后台运行',
-          body: '窗口已最小化到托盘,点击托盘鲸鱼图标可恢复窗口。',
+          title: t('tray.hintTitle'),
+          body: t('tray.hintBody'),
           icon: path.join(__dirname, 'assets', 'icon.ico'),
         });
         trackNotification(n); // 保持引用:GC 会导致点击回调失效
@@ -1814,8 +1814,8 @@ function showWelcome() {
     const onChoose = (e) => {
       if (!trustedEvent(e) || !welcomeWin) return;
       const pick = dialog.showOpenDialogSync(welcomeWin, {
-        title: '选择 dsh 的工作目录(文件与会话都归属于它)',
-        buttonLabel: '使用此目录',
+        title: t('welcome.pickTitle'),
+        buttonLabel: t('welcome.pickBtn'),
         properties: ['openDirectory'],
         defaultPath: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
       });
@@ -1847,8 +1847,8 @@ function changeWorkspace() {
   // 托盘态触发时主窗口是隐藏的:原生父窗口对话框不会正常显示,先恢复主窗口
   if (mainWindow && !mainWindow.isVisible()) showMainWindow();
   const pick = dialog.showOpenDialogSync(mainWindow, {
-    title: '切换工作目录(将重启 dsh 服务)',
-    buttonLabel: '切换到此处',
+    title: t('workspace.changeTitle'),
+    buttonLabel: t('workspace.changeBtn'),
     properties: ['openDirectory'],
     defaultPath: cfg.workspace || app.getPath('home'),
   });
@@ -2010,13 +2010,13 @@ if (!gotLock) {
         log('npm 安装进行中收到退出请求,弹确认');
         showMainWindow(); // 收托盘时确认框需要可见窗口
         showDialog({
-          type: 'warning', title: '退出确认', critical: true,
-          message: 'dsh 本体的 npm 安装仍在进行,现在退出会中断安装。',
-          detail: '强制中断可能导致全局 dsh 包损坏。建议等待安装完成(可在状态窗查看进度)。',
+          type: 'warning', title: t('dlg.quitTitle'), critical: true,
+          message: t('dlg.quitInstallMsg'),
+          detail: t('dlg.quitInstallDetail'),
           // 位次契约(DLG-2):主操作/默认焦点居左,取消与关闭类居右,破坏性操作用 danger 且不作默认——
           // Enter/Esc 均落到「取消」,与 dialog.html 的 primary/cancel 回落逻辑配合
           cancel: 0,
-          buttons: [{ id: 'cancel', label: '取消', primary: true }, { id: 'quit', label: '仍然退出', style: 'danger' }],
+          buttons: [{ id: 'cancel', label: t('dlg.cancel'), primary: true }, { id: 'quit', label: t('dlg.quitStill'), style: 'danger' }],
         }, (_i, id) => {
           if (id === 'quit') { forceQuit = true; quitConfirmShown = false; app.quit(); }
           else resetQuitConfirm();

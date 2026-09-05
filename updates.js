@@ -17,6 +17,7 @@ const { spawn } = require('node:child_process');
 const { log, loadConfig, firstLine, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = require('./core');
 const { killTree, dshVersion, findNode } = require('./dsh-process');
 const { multiThreadDownload, resolveDownloadUrl, hashFile, DEFAULT_SEGMENTS } = require('./downloader');
+const { t } = require('./i18n'); // 弹窗 payload 文案收编(X-2):与 main.js 共用同一文案表
 
 autoUpdater.autoDownload = false;        // 由用户确认后再下载
 autoUpdater.autoInstallOnAppQuit = false; // 用户选"稍后"即本次跳过,下次启动检查时再提示
@@ -116,10 +117,10 @@ function quitAndInstallGuarded() {
   if (state.dshInstallChild || state.dshStoppedForInstall) {
     log('阻止立即重启安装:dsh 本体 npm 安装进行中');
     deps.showDialog({
-      type: 'warning', title: '暂不能重启安装',
-      message: 'dsh 本体的 npm 安装尚未结束,立即重启会中断安装,可能导致 dsh 本体损坏。',
-      detail: '请等待 dsh 安装完成(安装流程会自动重启 dsh 服务)后,再点击「立即重启安装」。',
-      buttons: [{ label: '好的', primary: true }],
+      type: 'warning', title: t('update.noReinstallTitle'),
+      message: t('update.noReinstallMsg'),
+      detail: t('update.noReinstallDetail'),
+      buttons: [{ label: t('update.btnOk'), primary: true }],
     });
     return;
   }
@@ -212,16 +213,16 @@ function onUpdateAvailable(info) {
   state.pendingVersion = info.version;
   // 手动=直接弹窗;自动=只发桌面通知,点击通知再弹窗(不抢占当前操作;与 dsh 本体通道语义一致)
   const showResult = (nonIntrusive) => deps.showStatusResult({
-    type: 'info', title: '发现新版本', __origin: 'desktop',
-    detail: `新版本 v${info.version} 可用(当前 v${app.getVersion()})\n「现在更新」将用多线程加速下载,完成后自动重启安装;「稍后」则跳过本次更新。`,
-    buttons: [{ id: 'dl', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
+    type: 'info', title: t('update.availTitle'), __origin: 'desktop',
+    detail: t('update.availDetail', { v: info.version, cur: app.getVersion() }),
+    buttons: [{ id: 'dl', label: t('update.btnUpdate'), primary: true }, { id: 'later', label: t('update.btnLater') }],
   }, (id) => {
     if (id === 'later' || deps.isQuitting()) return deps.closeStatus();
     state.statusOpCancelled = false;
     state.desktopDownloadCanceled = false; // 新一轮下载:清掉上次的取消标记
     state.lastOfficialProgressAt = 0;      // 重置官方进度节流计时(每轮下载独立计)
     state.downloadToken = new CancellationToken(); // ✕ 取消时可真正中止下载传输
-    deps.showStatus({ mode: 'download', title: `正在下载 v${info.version}…`, detail: `当前 v${app.getVersion()}`, pct: '0%', size: '', __origin: 'desktop' });
+    deps.showStatus({ mode: 'download', title: t('update.dlTitle', { v: info.version }), detail: t('update.dlCurDetail', { v: app.getVersion() }), pct: '0%', size: '', __origin: 'desktop' });
     state.downloadInProgress = true;
     runUpdateDownload(info).catch((e) => {
       state.downloadToken = null;
@@ -230,9 +231,9 @@ function onUpdateAvailable(info) {
       log(`更新下载失败: ${e.message}`);
       if (!deps.isQuitting() && !downloadErrorShown()) { // error 事件可能已先弹过同一失败
         deps.showStatusResult({
-          type: 'error', title: '更新下载失败', __origin: 'desktop',
-          detail: `原因: ${e.message}\n可稍后重试,或重新检查更新。`,
-          buttons: [{ id: 'ok', label: '好的' }],
+          type: 'error', title: t('update.dlFailTitle'), __origin: 'desktop',
+          detail: t('update.failDetailRetry', { err: e.message }),
+          buttons: [{ id: 'ok', label: t('update.btnOk') }],
         }, () => deps.closeStatus());
       }
     });
@@ -241,8 +242,8 @@ function onUpdateAvailable(info) {
   try {
     if (Notification.isSupported()) {
       const n = new Notification({
-        title: '发现 DSH 新版本',
-        body: `v${info.version} 可用(当前 v${app.getVersion()}),点击查看。`,
+        title: t('update.notifyAvailTitle'),
+        body: t('update.notifyAvailBody', { v: info.version, cur: app.getVersion() }),
         icon: path.join(__dirname, 'assets', 'icon.ico'),
       });
       n.on('click', () => showResult(true));
@@ -280,9 +281,9 @@ function onUpdateDownloaded() {
   state.downloadInProgress = false;
   state.updateDownloaded = true;
   deps.showStatusResult({
-    type: 'success', title: '更新就绪', __origin: 'desktop',
-    detail: `v${state.pendingVersion} 已下载完成,现在重启并安装?`,
-    buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '稍后' }],
+    type: 'success', title: t('update.readyTitle'), __origin: 'desktop',
+    detail: t('update.readyDetail', { v: state.pendingVersion }),
+    buttons: [{ id: 'install', label: t('update.btnReinstall'), primary: true }, { id: 'later', label: t('update.btnLater') }],
   }, (id) => {
     if (id === 'install') quitAndInstallGuarded();
     else deps.closeStatus();
@@ -295,9 +296,9 @@ function onUpdateNotAvailable() {
   finishUpdateCheckTimer();
   if (state.manualCheck) {
     deps.showStatusResult({
-      type: 'info', title: '检查更新', __origin: 'desktop',
-      detail: `当前已是最新版本(v${app.getVersion()})。`,
-      buttons: [{ id: 'ok', label: '好的' }],
+      type: 'info', title: t('update.checkTitle'), __origin: 'desktop',
+      detail: t('update.latestDetail', { v: app.getVersion() }),
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
   }
 }
@@ -312,9 +313,9 @@ function onUpdaterError(e) {
   if (!state.manualCheck && !wasDownload) return; // 自动检查出错静默
   if (wasDownload && downloadErrorShown()) return; // catch 路径已弹过同一失败,不重复
   deps.showStatusResult({
-    type: 'error', title: wasDownload ? '更新下载失败' : '检查更新失败', __origin: 'desktop',
-    detail: `原因: ${e.message}${wasDownload ? '\n可稍后重试,或重新检查更新。' : '\n请确认网络可用后重试。'}`,
-    buttons: [{ id: 'ok', label: '好的' }],
+    type: 'error', title: wasDownload ? t('update.dlFailTitle') : t('update.checkFailTitle'), __origin: 'desktop',
+    detail: wasDownload ? t('update.failDetailRetry', { err: e.message }) : t('update.failDetailNet', { err: e.message }),
+    buttons: [{ id: 'ok', label: t('update.btnOk') }],
   }, () => deps.closeStatus());
 }
 
@@ -326,21 +327,21 @@ function checkForUpdates(manual) {
   if (manual && (state.dshInstallChild || state.dshStoppedForInstall)) {
     // dsh 本体安装进行中:回到安装进度窗口而不是覆盖它(两个更新流互相顶掉会丢进度/按钮错位)
     log('手动检查更新被忽略:dsh 本体安装仍在进行中');
-    deps.noticeFlowBusy('dsh 本体的 npm 安装正在进行,暂时无法检查更新;请等安装完成后再试。', { mode: 'install', title: '正在安装 dsh 本体…', spin: true, __origin: 'dsh' });
+    deps.noticeFlowBusy(t('update.busyDshInstallCheck'), { mode: 'install', title: t('update.installingTitle'), spin: true, __origin: 'dsh' });
     return;
   }
   if (manual && state.downloadInProgress) {
     // 已有下载在进行:回到下载进度窗口而不是覆盖它(否则进度 UI 丢失、下载仍在后台)
     log('手动检查更新被忽略:下载仍在进行中');
-    deps.noticeFlowBusy('桌面端更新正在下载,暂时无法开始新的检查;可在当前进度窗查看进度。', { mode: 'download', title: '正在下载更新…', spin: true, __origin: 'desktop' });
+    deps.noticeFlowBusy(t('update.busyDesktopCheck'), { mode: 'download', title: t('update.downloadingTitle'), spin: true, __origin: 'desktop' });
     return;
   }
   if (!app.isPackaged) {
     if (manual) {
       deps.showDialog({
-        type: 'info', title: '检查更新',
-        message: '开发模式下不支持在线更新,请使用打包后的应用。',
-        buttons: [{ label: '好的', primary: true }],
+        type: 'info', title: t('update.checkTitle'),
+        message: t('update.devNoUpdateMsg'),
+        buttons: [{ label: t('update.btnOk'), primary: true }],
       });
     }
     return;
@@ -349,9 +350,9 @@ function checkForUpdates(manual) {
     // 便携版会走 NsisUpdater 下载 Setup.exe 并安装,把用户"转正"成安装版,与便携预期不符 → 禁用
     if (manual) {
       deps.showDialog({
-        type: 'info', title: '检查更新',
-        message: '便携版不支持自动更新,请前往 GitHub Releases 下载新版本。',
-        buttons: [{ label: '好的', primary: true }],
+        type: 'info', title: t('update.checkTitle'),
+        message: t('update.portableNoUpdateMsg'),
+        buttons: [{ label: t('update.btnOk'), primary: true }],
       });
     }
     return;
@@ -359,9 +360,9 @@ function checkForUpdates(manual) {
   if (state.updateDownloaded) {
     // 已下载过:直接询问是否重启安装
     deps.showStatusResult({
-      type: 'success', title: '更新就绪', __origin: 'desktop',
-      detail: `v${state.pendingVersion} 已下载完成,现在重启并安装?`,
-      buttons: [{ id: 'install', label: '立即重启安装', primary: true }, { id: 'later', label: '取消' }],
+      type: 'success', title: t('update.readyTitle'), __origin: 'desktop',
+      detail: t('update.readyDetail', { v: state.pendingVersion }),
+      buttons: [{ id: 'install', label: t('update.btnReinstall'), primary: true }, { id: 'later', label: t('dlg.cancel') }],
     }, (id) => {
       if (id === 'install') quitAndInstallGuarded();
       else deps.closeStatus();
@@ -371,15 +372,15 @@ function checkForUpdates(manual) {
   // 手动检查:显示"检查中"状态窗,设超时;超时提示后,迟到结果在宽限期内仍会送达
   if (manual) {
     finishUpdateCheckTimer();
-    deps.showStatus({ mode: 'check', title: '正在检查更新…', detail: `当前 v${app.getVersion()}`, spin: true, __origin: 'desktop' });
+    deps.showStatus({ mode: 'check', title: t('update.checkingTitle'), detail: t('update.dlCurDetail', { v: app.getVersion() }), spin: true, __origin: 'desktop' });
     state.updateCheckTimer = setTimeout(() => {
       state.updateCheckTimer = null;
       state.manualCheckTimedOutAt = Date.now();
       log('检查更新超时(宽限期内迟到结果仍会送达)');
       deps.showStatusResult({
-        type: 'warning', title: '检查更新超时', __origin: 'desktop',
-        detail: `${CHECK_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取最新版本信息。\n网络较慢时结果稍后仍会送达;请确认网络可用后重试。`,
-        buttons: [{ id: 'ok', label: '好的' }],
+        type: 'warning', title: t('update.checkTimeoutTitle'), __origin: 'desktop',
+        detail: t('update.checkTimeoutDetail', { sec: CHECK_UPDATE_TIMEOUT_MS / 1000 }),
+        buttons: [{ id: 'ok', label: t('update.btnOk') }],
       }, () => deps.closeStatus());
     }, CHECK_UPDATE_TIMEOUT_MS);
   }
@@ -517,9 +518,9 @@ async function installDshUpdate(version) {
   if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
     log(`dsh 安装中止:版本号格式异常(${version})`);
     deps.showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `npm 返回的版本号格式异常(${version}),已中止自动安装。\n请在终端手动确认后再试。`,
-      buttons: [{ id: 'ok', label: '好的' }],
+      type: 'error', title: t('update.dshFailTitle'), __origin: 'dsh',
+      detail: t('update.dshBadVersionDetail', { v: version }),
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
     return;
   }
@@ -545,9 +546,9 @@ async function installDshUpdate(version) {
     state.dshStoppedForInstall = false;
     if (!deps.isQuitting()) deps.bootDsh();
     deps.showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: '未能定位 node 或 npm 的 npm-cli.js,已中止自动安装(不使用 shell 拼接以防命令注入)。\n请在终端手动执行:npm install -g @deepseek-ai/dsh\ndsh 服务已恢复(旧版本)。',
-      buttons: [{ id: 'ok', label: '好的' }],
+      type: 'error', title: t('update.dshFailTitle'), __origin: 'dsh',
+      detail: t('update.dshNoToolDetail'),
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
     return;
   }
@@ -555,7 +556,7 @@ async function installDshUpdate(version) {
   const args = [npmCliJs, 'install', '-g', `@deepseek-ai/dsh@${version}`, '--no-audit', '--no-fund']; // 锁版本+跳过 audit/fund 减负
   const opts = { windowsHide: true, env: nodeInfo.env };
   log(`安装 dsh 本体更新: ${exec} ${args.join(' ')}`);
-  deps.showStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: `npm install -g @deepseek-ai/dsh@${version}`, spin: true, __origin: 'dsh' });
+  deps.showStatus({ mode: 'install', title: t('update.dshInstallingTitle', { v: version }), detail: t('update.dshInstallCmdDetail', { v: version }), spin: true, __origin: 'dsh' });
   let child = null;
   try {
     child = spawn(exec, args, opts);
@@ -565,9 +566,9 @@ async function installDshUpdate(version) {
     state.dshStoppedForInstall = false;
     if (!deps.isQuitting()) deps.bootDsh();
     deps.showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `无法启动 npm:${e.message}\ndsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
+      type: 'error', title: t('update.dshFailTitle'), __origin: 'dsh',
+      detail: t('update.dshSpawnFailDetail', { err: e.message }),
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
     return;
   }
@@ -597,11 +598,11 @@ async function installDshUpdate(version) {
     log(ok ? `dsh 本体更新完成(实际 v${actual || version})` : `dsh 更新安装失败: ${msg}`);
     deps.showStatusResult({
       type: ok ? 'success' : 'error',
-      title: ok ? 'dsh 更新完成' : 'dsh 更新失败', __origin: 'dsh',
+      title: ok ? t('update.dshDoneTitle') : t('update.dshFailTitle'), __origin: 'dsh',
       detail: ok
-        ? `dsh 本体已更新(当前版本 v${actual || version}),dsh 服务已自动重启生效。`
-        : `${msg}\n${buf.slice(-300)}\ndsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
+        ? t('update.dshDoneDetail', { v: actual || version })
+        : `${msg}\n${buf.slice(-300)}\n${t('update.dshFailRestoreSuffix')}`,
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
   };
   const onData = (c) => {
@@ -613,7 +614,7 @@ async function installDshUpdate(version) {
     const segs = String(text).split(/\r\n|\r|\n/).map((s) => s.trim()).filter(Boolean);
     if (segs.length) {
       lastOutAt = Date.now();
-      deps.updateStatus({ mode: 'install', title: `正在安装 dsh 本体 v${version}…`, detail: segs[segs.length - 1].slice(0, 130), spin: true });
+      deps.updateStatus({ mode: 'install', title: t('update.dshInstallingTitle', { v: version }), detail: segs[segs.length - 1].slice(0, 130), spin: true });
     }
   };
   child.stdout.on('data', onData);
@@ -622,8 +623,8 @@ async function installDshUpdate(version) {
   idleTimer = setInterval(() => {
     if (Date.now() - lastOutAt > idleMs) {
       deps.updateStatus({
-        mode: 'install', title: `正在安装 dsh 本体 v${version}…`,
-        detail: 'npm 长时间无输出,可能因网络慢或安装卡住;可点 ✕ 取消(将恢复 dsh 服务)重试',
+        mode: 'install', title: t('update.dshInstallingTitle', { v: version }),
+        detail: t('update.dshIdleDetail'),
         spin: true,
       });
     }
@@ -636,19 +637,17 @@ async function installDshUpdate(version) {
     if (state.dshStoppedForInstall) { state.dshStoppedForInstall = false; if (!deps.isQuitting()) deps.bootDsh(); }
     killTree(child);
     deps.showStatusResult({
-      type: 'error', title: 'dsh 更新失败', __origin: 'dsh',
-      detail: `npm 安装超时(${Math.round(totalMs / 60000)} 分钟)已中止,dsh 服务已恢复(旧版本)。`,
-      buttons: [{ id: 'ok', label: '好的' }],
+      type: 'error', title: t('update.dshFailTitle'), __origin: 'dsh',
+      detail: t('update.dshInstallTimeoutDetail', { min: Math.round(totalMs / 60000) }),
+      buttons: [{ id: 'ok', label: t('update.btnOk') }],
     }, () => deps.closeStatus());
   }, totalMs);
   child.on('close', (code) => {
     // 权限类失败(fs 输出含 EPERM/EACCES)给出可执行的引导,而非只报 code
-    const permHint = /EPERM|EACCES/i.test(buf)
-      ? '\n如提示权限不足(EPERM/EACCES),常见原因:npm 前缀位于系统目录需管理员权限;请以管理员身份重试,或执行 npm config set prefix "%APPDATA%\\npm"。'
-      : '';
-    finish(code === 0, code === 0 ? '' : `npm 安装失败 (code=${code})${permHint}`);
+    const permHint = /EPERM|EACCES/i.test(buf) ? '\n' + t('update.dshPermHint') : '';
+    finish(code === 0, code === 0 ? '' : t('update.dshInstallFailCode', { code }) + permHint);
   });
-  child.on('error', (e) => finish(false, `无法启动 npm:${e.message}`));
+  child.on('error', (e) => finish(false, t('update.dshSpawnFail', { err: e.message })));
 }
 
 function checkDshUpdate(manual) {
@@ -659,13 +658,13 @@ function checkDshUpdate(manual) {
   if (manual && (state.downloadInProgress || state.updateDownloaded)) {
     // 桌面端更新进行中(下载/已就绪):回到对应进度窗口而不是覆盖它,避免两个更新流互顶
     log('手动检查 dsh 更新被忽略:桌面端更新流程进行中');
-    deps.noticeFlowBusy('桌面端更新流程正在进行(下载/已就绪),暂时无法检查 dsh 本体更新;请先完成桌面端流程。', { mode: 'download', title: '正在下载更新…', spin: true, __origin: 'desktop' });
+    deps.noticeFlowBusy(t('update.busyDesktopForDsh'), { mode: 'download', title: t('update.downloadingTitle'), spin: true, __origin: 'desktop' });
     return;
   }
   if (manual && (state.dshInstallChild || state.dshStoppedForInstall)) {
     // 本体安装进行中:回到安装进度窗口而不是覆盖
     log('手动检查 dsh 更新被忽略:安装仍在进行中');
-    deps.noticeFlowBusy('dsh 本体安装已在进行,暂时无法再次检查;可在当前进度窗查看安装进度。', { mode: 'install', title: '正在安装 dsh 本体…', spin: true, __origin: 'dsh' });
+    deps.noticeFlowBusy(t('update.busyDshInstallAgain'), { mode: 'install', title: t('update.installingTitle'), spin: true, __origin: 'dsh' });
     return;
   }
   // 仅打包版才有"桌面端更新";dsh 本体检查在开发模式同样可用,故不设 isPackaged 门槛
@@ -674,25 +673,25 @@ function checkDshUpdate(manual) {
     log('检查 dsh 更新: 未定位到 dsh 本体,跳过');
     if (manual) {
       deps.showDialog({
-        type: 'warning', title: '检查 dsh 更新',
-        message: '未检测到 dsh 本体,请先全局安装:',
-        detail: 'npm install -g @deepseek-ai/dsh',
-        buttons: [{ label: '好的', primary: true }],
+        type: 'warning', title: t('update.dshNoDshTitle'),
+        message: t('update.dshNoDshMsg'),
+        detail: t('update.dshNoDshDetail'),
+        buttons: [{ label: t('update.btnOk'), primary: true }],
       });
     }
     return;
   }
   // 手动检查:显示"检查中"状态窗,设超时;超时提示后,迟到结果在宽限期内仍会送达
   if (manual) {
-    deps.showStatus({ mode: 'check', title: '正在检查 dsh 本体更新…', detail: `当前 v${current}`, spin: true, __origin: 'dsh' });
+    deps.showStatus({ mode: 'check', title: t('update.dshCheckingTitle'), detail: t('update.dlCurDetail', { v: current }), spin: true, __origin: 'dsh' });
     state.dshCheckTimer = setTimeout(() => {
       state.dshCheckTimer = null;
       state.dshManualCheckTimedOutAt = Date.now();
       log('检查 dsh 更新超时(宽限期内迟到结果仍会送达)');
       deps.showStatusResult({
-        type: 'warning', title: '检查 dsh 更新超时', __origin: 'dsh',
-        detail: `${CHECK_DSH_UPDATE_TIMEOUT_MS / 1000} 秒内未能获取 dsh 最新版本信息。\n网络较慢时结果稍后仍会送达;请确认网络可用后再试。`,
-        buttons: [{ id: 'ok', label: '好的' }],
+        type: 'warning', title: t('update.dshCheckTimeoutTitle'), __origin: 'dsh',
+        detail: t('update.dshCheckTimeoutDetail', { sec: CHECK_DSH_UPDATE_TIMEOUT_MS / 1000 }),
+        buttons: [{ id: 'ok', label: t('update.btnOk') }],
       }, () => deps.closeStatus());
     }, CHECK_DSH_UPDATE_TIMEOUT_MS);
   }
@@ -703,9 +702,9 @@ function checkDshUpdate(manual) {
       log('检查 dsh 更新失败: 未能获取最新版本信息');
       if (manual) {
         deps.showStatusResult({
-          type: 'error', title: '检查 dsh 本体更新失败', __origin: 'dsh',
-          detail: '请确认网络可用后重试。',
-          buttons: [{ id: 'ok', label: '好的' }],
+          type: 'error', title: t('update.dshCheckFailTitle'), __origin: 'dsh',
+          detail: t('update.dshFailNet'),
+          buttons: [{ id: 'ok', label: t('update.btnOk') }],
         }, () => deps.closeStatus());
       }
       return;
@@ -716,9 +715,9 @@ function checkDshUpdate(manual) {
       log(`dsh 最新版本号无法解析: ${latest}`);
       if (manual) {
         deps.showStatusResult({
-          type: 'error', title: '检查 dsh 本体更新失败', __origin: 'dsh',
-          detail: `未能解析 npm 返回的最新版本号(${latest}),请稍后重试。`,
-          buttons: [{ id: 'ok', label: '好的' }],
+          type: 'error', title: t('update.dshCheckFailTitle'), __origin: 'dsh',
+          detail: t('update.dshFailParse', { v: latest }),
+          buttons: [{ id: 'ok', label: t('update.btnOk') }],
         }, () => deps.closeStatus());
       }
       return;
@@ -730,9 +729,9 @@ function checkDshUpdate(manual) {
         log(`dsh 新版本 v${latest} 超出已验证兼容区间(0.${DSH_COMPATIBLE_MINOR}.x),不自动推送`);
         if (manual) {
           deps.showStatusResult({
-            type: 'warning', title: '发现 dsh 新版本(未验证兼容)', __origin: 'dsh',
-            detail: `dsh 本体 v${latest} 可用(当前 v${current}),但该版本尚未经桌面壳验证。\n建议先在终端执行:\nnpm install -g @deepseek-ai/dsh@${latest}\n确认兼容后再继续使用。`,
-            buttons: [{ id: 'ok', label: '好的' }],
+            type: 'warning', title: t('update.dshCompatTitle'), __origin: 'dsh',
+            detail: t('update.dshCompatDetail', { v: latest, cur: current }),
+            buttons: [{ id: 'ok', label: t('update.btnOk') }],
           }, () => deps.closeStatus());
         }
         return;
@@ -740,9 +739,9 @@ function checkDshUpdate(manual) {
       log(`发现 dsh 新版本 v${latest}(当前 v${current})`);
       // 注意:不写 state.pendingVersion(那是桌面端专用),dsh 版本号全程走闭包参数
       const showResult = (nonIntrusive) => deps.showStatusResult({
-        type: 'info', title: '发现 dsh 新版本', __origin: 'dsh',
-        detail: `dsh 本体新版本 v${latest} 可用(当前 v${current})\n「现在更新」将暂停 dsh 服务、通过 npm 全局安装新版本,完成后自动重启 dsh 服务。`,
-        buttons: [{ id: 'install', label: '现在更新', primary: true }, { id: 'later', label: '稍后' }],
+        type: 'info', title: t('update.dshAvailTitle'), __origin: 'dsh',
+        detail: t('update.dshAvailDetail', { v: latest, cur: current }),
+        buttons: [{ id: 'install', label: t('update.btnUpdate'), primary: true }, { id: 'later', label: t('update.btnLater') }],
       }, (id) => {
         if (id === 'install' && !deps.isQuitting()) installDshUpdate(latest);
         else deps.closeStatus();
@@ -753,8 +752,8 @@ function checkDshUpdate(manual) {
         try {
           if (Notification.isSupported()) {
             const n = new Notification({
-              title: '发现 dsh 新版本',
-              body: `dsh 本体 v${latest} 可用(当前 v${current}),点击查看。`,
+              title: t('update.dshNotifyTitle'),
+              body: t('update.dshNotifyBody', { v: latest, cur: current }),
               icon: path.join(__dirname, 'assets', 'icon.ico'),
             });
             n.on('click', () => showResult(true));
@@ -770,9 +769,9 @@ function checkDshUpdate(manual) {
       }
     } else if (manual) {
       deps.showStatusResult({
-        type: 'info', title: '检查 dsh 更新', __origin: 'dsh',
-        detail: `dsh 本体已是最新版本(v${current})。`,
-        buttons: [{ id: 'ok', label: '好的' }],
+        type: 'info', title: t('update.dshLatestTitle'), __origin: 'dsh',
+        detail: t('update.dshLatestDetail', { v: current }),
+        buttons: [{ id: 'ok', label: t('update.btnOk') }],
       }, () => deps.closeStatus());
     }
   });
