@@ -12,6 +12,11 @@
     font: var(--font-ui); }
   /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close;圆角归一到公共 10px(原 12px 与其余窗口不一) */
   .win-head .logo { width: 18px; height: 18px; flex: none; }
+  /* Win11 Mica 试点(P2-3):系统材质透出——窗口改半透明底并去掉自绘大阴影(系统已有边界) */
+  .win.mica {
+    --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent);
+    --win-shadow: none;
+  }
   .body { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0; min-height: 0; }
   .cls { display: flex; align-items: center; gap: 10px; }
   .badge {
@@ -77,6 +82,7 @@
   function render(p) {
     payload = p;
     document.title = p.name || 'DSH 错误报告';
+    if (p.mica) document.querySelector('.win')?.classList.add('mica'); // Win11 系统材质透出(P2-3)
     // 可见头部文案跟随场景:进程退出时不应再显示「启动诊断」(原为静态文本)
     const headEl = document.getElementById('headTitle');
     if (headEl) headEl.textContent = p.phase === 'exit' ? 'DSH 错误报告 — 进程退出' : 'DSH 错误报告 — 启动诊断';

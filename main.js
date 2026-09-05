@@ -90,6 +90,12 @@ const { IS_PORTABLE } = updates;
 const IS_WIN = process.platform === 'win32';
 // Windows 规范:固定 AppUserModelID,保证任务栏图标/分组/通知归属正确
 if (IS_WIN) app.setAppUserModelId('com.zinkning.dsh-desktop');
+// Win11 判定(build ≥ 22000):Mica/Acrylic 系统材质仅 Win11 可用(P2-3 试点 reportWin)
+function isWin11() {
+  if (!IS_WIN) return false;
+  const m = os.release().match(/^10\.0\.(\d+)$/);
+  return !!m && parseInt(m[1], 10) >= 22000;
+}
 // 后台/遮挡时不挂起 dsh 页面:避免对话正在工作时切走再切回触发重连/视图重建/滚动重置。
 // 保活核心 = dshView 的 backgroundThrottling:false(per-view);全局开关保留与 Windows 遮挡
 // 判定强相关的两个;disable-background-timer-throttling 已明确被 per-view 覆盖(零风险),
@@ -1051,12 +1057,16 @@ function showReport(opts) {
     logPreview,
     reportPath: rep.filePath,
     actions: opts.actions || [],
+    mica: isWin11(), // 渲染层据此改半透明底让 Mica 透出(P2-3)
   };
 
   if (!reportWin) {
     reportWin = new BrowserWindow({
       width: 760, height: 600, minWidth: 640, minHeight: 480, useContentSize: true,
       frame: false, resizable: true, show: false,
+      // Win11 Mica 试点(P2-3,仅 reportWin 一个窗口验证):系统材质透出,页面按 payload.mica
+      // 改半透明底并去掉自绘大阴影;Win10 无此选项自动回落实色
+      backgroundMaterial: isWin11() ? 'mica' : undefined,
       webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'report-preload.js') },
     });
     reportWin.setMenuBarVisibility(false);
@@ -1909,6 +1919,7 @@ if (!gotLock) {
         applyTheme,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
         toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
+        isWin11, // Mica 试点(P2-3):断言 reportWin 的 mica 类与平台判定一致
         configPath, loadConfig, saveConfig,
       };
       if (process.env.DSH_DESKTOP_SMOKE || process.env.DSH_DESKTOP_DEMO) require('./uitest').runSmokeDemo(uitestDeps);

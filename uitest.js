@@ -165,6 +165,11 @@ function runUitest(d) {
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11700, 'd2-choose');
   // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
   uiStep(() => d.showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
+  // P2-3 Mica 试点:reportWin 的 .win.mica 类必须与 Win11 判定一致(Win10 回落实色)
+  uiStep(() => {
+    const want = d.isWin11();
+    readDom(d.reportWin, `(()=>{const m=document.querySelector(".win").classList.contains("mica");return (m===${want})?"PASS mica="+m:"FAIL mica="+m+" want=${want}"})()`, 'mica-flag');
+  }, 12050);
   uiStep(() => readDom(d.reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
   // ⑤ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
   uiStep(() => d.showMenuPopup(), 13000, 'menu-open');
