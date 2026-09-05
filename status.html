@@ -8,6 +8,7 @@
 <title>DSH</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-icons.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
@@ -84,7 +85,7 @@
     cursor: default; border: none; background: transparent; width: 100%; text-align: left;
   }
   .hist:hover { color: var(--c-fg1); }
-  .hist .tri { transition: transform var(--dur-mid); font-size: 9px; }
+  .hist .tri { width: 8px; height: 8px; flex: none; transition: transform var(--dur-mid); }
   .hist.open .tri { transform: rotate(90deg); }
   .trow.ephemeral { opacity: .8; border-style: dashed; }
   @media (prefers-reduced-motion: reduce) { .fill.indet, .fill::after { animation: none; } }
@@ -115,19 +116,8 @@
 </div>
 <script>
   const S = window.__status;
-  const ACT = {
-    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M11 8v3l2 2M16.5 16.5 21 21" stroke-linecap="round"/></svg>',
-    download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    install: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="7.5"/><path d="M12 6v6l3.5 2" stroke-linecap="round"/></svg>',
-    restart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 3.5v3.2h-3.2" stroke-linecap="round"/></svg>',
-    toast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4a5 5 0 0 0-5 5v3.2L5 15h14l-2-2.8V9a5 5 0 0 0-5-5zM10 18a2 2 0 0 0 4 0" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  };
-  const RES = {
-    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.2" stroke-linecap="round"/></svg>',
-    success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 12.2l2.7 2.7L16 9.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4.5 22 20H2z"/><path d="M12 10v4.5M12 17.4v.2" stroke-linecap="round"/></svg>',
-    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6" stroke-linecap="round"/></svg>',
-  };
+  // 图标走 ui-icons.js 共享层(与 dialog 结果图标同源,P1-2):activity=进行中五态,result=结果四态
+  const { activity: ACT, result: RES } = window.UI_ICONS;
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;
   let histOpen = false;
@@ -270,7 +260,8 @@
       h.className = 'hist' + (histOpen ? ' open' : '');
       h.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
       h.setAttribute('aria-controls', 'histWrap');
-      h.innerHTML = `<span class="tri" aria-hidden="true">▶</span><span>已完成 ${done.length} 项</span>`;
+      // 折叠三角用 SVG(原文本 ▶ 字形随字体渲染漂移):aria-expanded 语义不变
+      h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>已完成 ' + done.length + ' 项</span>';
       h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); h.setAttribute('aria-expanded', histOpen ? 'true' : 'false'); toggleHist(); });
       list.appendChild(h);
       const wrap = document.createElement('div');
