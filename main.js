@@ -439,7 +439,9 @@ function statusHeight() {
   const n = statusTasks.size;
   if (n <= 1) {
     const t = statusTasks.values().next().value;
-    return t && t.done ? 250 : 186;
+    // 瞬时 toast 单条时按列表一行的高度,不套结果视图的 250——否则孤儿 toast 是一扇大半空白的窗
+    if (t && t.done) return t.ephemeral ? 176 : 250;
+    return 186;
   }
   const vals = [...statusTasks.values()];
   const act = vals.filter((t) => !t.done).length;

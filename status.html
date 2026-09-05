@@ -296,9 +296,11 @@
   }
 
   function renderTasks(tasks) {
-    listMode = tasks.length > 1;
-    if (!listMode && tasks.length === 1) { render(tasks[0]); return; }
     if (!tasks.length) return; // 主进程随即关窗,忽略空帧
+    // 仅「单任务且非瞬时提示」走旧单视图(像素兼容);瞬时 toast 永远渲染为列表中的一行——
+    // 否则单条 toast 会落入 render() 被当成活动任务,画成"空 detail + 不定态进度条"的假进度窗
+    if (tasks.length === 1 && !tasks[0].ephemeral) { listMode = false; render(tasks[0]); return; }
+    listMode = true;
     renderList(tasks);
   }
 

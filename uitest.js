@@ -205,6 +205,12 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, '(()=>{const ts=[...document.querySelectorAll("#tlist .trow .ltitle")].map(e=>e.textContent);const hasDl=ts.some(s=>s.includes("下载"));const hasDsh=ts.some(s=>s.includes("dsh 本体"));return (hasDl&&!hasDsh)?"PASS":"FAIL "+ts.join("|")})()', 'tc-narrow'), 24500);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 24700, 'tc-close');
   uiStep(() => d.log(`UITEST tc-close win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 24900, 'tc-close-verify');
+  // ⑪' 孤儿 toast(P0-2 回归锁):真实任务全部结束后仅剩一条瞬时提示——必须渲染为列表 ephemeral 行,
+  //    不得落入单任务 render() 画成"空 detail + 不定态进度条"的假进度窗;行级取消后仅剩 toast 同样走列表
+  uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 24950, 'lone-toast-prep');
+  uiStep(() => { d.notifyToast('仅一条瞬时提示'); }, 25150, 'lone-toast-add');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('[...document.querySelectorAll("#tlist .trow:not(.done) .lx")][0].click()').catch(() => {}); }, 25300, 'lone-toast-cancel-active');
+  uiStep(() => readDom(d.statusWin, '(()=>{const list=document.getElementById("tlist");const rows=[...list.querySelectorAll(".trow")];const actEl=document.getElementById("activity");const t=document.getElementById("title").textContent;const ok=list.style.display!=="none"&&rows.length===1&&rows[0].classList.contains("ephemeral")&&actEl.style.display==="none"&&t==="任务中心";return ok?"PASS 单toast走列表行":"FAIL shown="+list.style.display+" rows="+rows.length+" eph0="+(rows[0]&&rows[0].classList.contains("ephemeral"))+" actHidden="+(actEl.style.display==="none")+" t="+t})()', 'lone-toast'), 25550);
   // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
   //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
   uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')
