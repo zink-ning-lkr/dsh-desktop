@@ -114,6 +114,12 @@
       el.addEventListener('click', () => R.action(a.id));
       actions.appendChild(el);
     });
+    // 打开即聚焦主操作(重试;无动作时回落 ✕):键盘 Enter 直达修复动线(RPT-2)。
+    // rAF 等一帧布局稳定后再聚焦,避免测量期焦点被重排吞掉
+    requestAnimationFrame(() => {
+      const target = actions.querySelector('.primary') || actions.querySelector('button') || document.getElementById('xBtn');
+      if (target) target.focus();
+    });
   }
 
   function flash(msg) {

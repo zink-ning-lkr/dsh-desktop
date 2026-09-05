@@ -1810,8 +1810,9 @@ function showWelcome() {
       if (!trustedEvent(e) || !welcomeWin) return;
       const pick = dialog.showOpenDialogSync(welcomeWin, {
         title: '选择 dsh 的工作目录(文件与会话都归属于它)',
+        buttonLabel: '使用此目录',
         properties: ['openDirectory'],
-        defaultLocation: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
+        defaultPath: app.getPath('home'), // 用户主目录(不能硬编码 D:\,无 D 盘机器会行为不确定)
       });
       if (pick && pick[0]) {
         saveConfig({ ...loadConfig(), workspace: pick[0] });
@@ -1842,8 +1843,9 @@ function changeWorkspace() {
   if (mainWindow && !mainWindow.isVisible()) showMainWindow();
   const pick = dialog.showOpenDialogSync(mainWindow, {
     title: '切换工作目录(将重启 dsh 服务)',
+    buttonLabel: '切换到此处',
     properties: ['openDirectory'],
-    defaultLocation: cfg.workspace || app.getPath('home'),
+    defaultPath: cfg.workspace || app.getPath('home'),
   });
   if (!pick || !pick[0]) return;
   saveConfig({ ...cfg, workspace: pick[0] });
@@ -2007,7 +2009,7 @@ if (!gotLock) {
           message: 'dsh 本体的 npm 安装仍在进行,现在退出会中断安装。',
           detail: '强制中断可能导致全局 dsh 包损坏。建议等待安装完成(可在状态窗查看进度)。',
           cancel: 1, // Esc/键盘取消语义显式指向「取消」按钮,不依赖按钮排列
-          buttons: [{ id: 'quit', label: '仍然退出' }, { id: 'cancel', label: '取消', primary: true }],
+          buttons: [{ id: 'quit', label: '仍然退出', style: 'danger' }, { id: 'cancel', label: '取消', primary: true }],
         }, (_i, id) => {
           if (id === 'quit') { forceQuit = true; quitConfirmShown = false; app.quit(); }
           else resetQuitConfirm();

@@ -71,7 +71,7 @@
     <div class="sec">
       <div class="sec-t">多线程分段下载<span class="tag">桌面端更新</span></div>
       <div class="seg-row">
-        <input type="range" id="seg" min="2" max="16" step="1">
+        <input type="range" id="seg" min="2" max="16" step="1" aria-label="并发分段数">
         <span class="seg-n">并发 <b id="segN">6</b> 段</span>
       </div>
       <div class="hint">
@@ -85,12 +85,12 @@
     <div class="sec">
       <div class="sec-t">镜像源<span class="tag">可选</span></div>
       <div class="row">
-        <input type="text" id="mirror" spellcheck="false" placeholder="https://你的镜像根目录/ (留空 = 官方源)">
+        <input type="text" id="mirror" spellcheck="false" placeholder="https://你的镜像根目录/ (留空 = 官方源)" aria-label="镜像源地址(留空恢复官方源)">
       </div>
       <div class="row">
         <button class="btn primary" id="mirrorSave">保存镜像</button>
         <button class="btn danger-ghost" id="mirrorClear">清除</button>
-        <span class="err" id="mirrorErr"></span>
+        <span class="err" id="mirrorErr" aria-live="polite"></span>
       </div>
       <div class="hint">
         镜像目录内放置与 GitHub Release 资产同名的安装包即可
@@ -138,7 +138,7 @@
     cur = p;
     if (p.mica) document.querySelector('.win')?.classList.add('mica'); // Win11 材质透出(v0.6.1)
     seg.value = p.segments;
-    segN.textContent = p.segments;
+    setSegText(p.segments);
     mirror.value = p.downloadMirror || '';
     mirrorErr.textContent = '';
     document.getElementById('cfgPath').textContent = p.cfgPath || 'config.json';
@@ -146,12 +146,13 @@
     document.getElementById('dlNote').style.display = p.downloadActive ? '' : 'none';
   }
 
-  // 滑杆:拖动实时预览数值,松手保存
-  seg.addEventListener('input', () => { segN.textContent = seg.value; });
+  // 滑杆:拖动实时预览数值,松手保存;读屏经 aria-valuetext 播报「N 段」(值本身只是裸数字)
+  function setSegText(n) { segN.textContent = n; seg.setAttribute('aria-valuetext', n + ' 段'); }
+  seg.addEventListener('input', () => setSegText(seg.value));
   seg.addEventListener('change', async () => {
     const r = await A.set('segments', seg.value);
-    if (r.ok) { segN.textContent = r.value; toast('✓ 已保存:并发 ' + r.value + ' 段', true); }
-    else { seg.value = cur ? cur.segments : 6; segN.textContent = seg.value; toast(r.error, false); }
+    if (r.ok) { setSegText(r.value); toast('✓ 已保存:并发 ' + r.value + ' 段', true); }
+    else { seg.value = cur ? cur.segments : 6; setSegText(seg.value); toast(r.error, false); }
   });
 
   async function saveMirror() {

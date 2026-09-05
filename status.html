@@ -126,6 +126,7 @@
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;
   let histOpen = false;
+  let lastViewKey = ''; // 上帧视图键(result/act/list):仅视图切换帧聚焦安全控件,进度帧不打扰焦点
 
   /* -------- 共享语义构件(P1-3):进度条/进度文案/结果按钮只此一份实现,
      单任务视图与列表行分别组合;DOM 形态各自保持像素契约(UITEST 锁定 186/250) -------- */
@@ -160,6 +161,14 @@
       container.appendChild(el);
     });
     return container;
+  }
+
+  // 视图打开时聚焦安全默认控件(ST-1):活动/列表视图聚焦「后台」(与 Esc 梯度对齐,Enter=安全离开),
+  // bgBtn 不可见(列表仅剩完成项)时回落 ✕;结果视图自带主按钮聚焦,不经过这里
+  function focusSafeDefault() {
+    const bg = document.getElementById('bgBtn');
+    if (bg && bg.style.display !== 'none') { bg.focus(); return; }
+    document.getElementById('xBtn')?.focus();
   }
 
   /* -------- 单任务视图(与旧版逐行一致,像素级兼容) --------
@@ -296,10 +305,15 @@
     if (!tasks.length) return; // 主进程随即关窗,忽略空帧
     // 仅「单任务且非瞬时提示」走旧单视图(像素兼容);瞬时 toast 永远渲染为列表中的一行——
     // 否则单条 toast 会落入 render() 被当成活动任务,画成"空 detail + 不定态进度条"的假进度窗
-    if (tasks.length === 1 && !tasks[0].ephemeral) { listMode = false; render(tasks[0]); return; }
-    listMode = true;
-    renderList(tasks);
-    S.rendered(); // 渲染完成回报:主进程按真实内容高度微调窗口(估算只做首帧,P1-1)
+    if (tasks.length === 1 && !tasks[0].ephemeral) { listMode = false; render(tasks[0]); }
+    else { listMode = true; renderList(tasks); S.rendered(); } // 渲染完成回报:主进程按真实内容高度微调窗口(P1-1)
+    // 视图切换帧(ST-1):把焦点交给安全默认控件。进度帧 150ms 一次全量重渲染,
+    // 必须凭 viewKey 变化判帧,否则焦点被钉死在 bgBtn 上,用户 Tab 不出去
+    const viewKey = listMode ? 'list' : (cur && cur.mode === 'result' ? 'result' : 'act');
+    if (viewKey !== lastViewKey) {
+      lastViewKey = viewKey;
+      if (viewKey !== 'result') focusSafeDefault();
+    }
   }
 
   document.getElementById('bgBtn').addEventListener('click', () => S.background());

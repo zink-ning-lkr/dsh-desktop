@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<div class="win" role="dialog" aria-modal="true" aria-labelledby="title" aria-describedby="message">
+<div class="win" role="dialog" aria-modal="true" aria-labelledby="title" aria-describedby="message detail">
   <div class="body">
     <div class="top">
       <div class="big info" id="big" aria-hidden="true"></div>
@@ -51,7 +51,9 @@
     document.title = p.title || 'DSH';
     if (p.acrylic) document.querySelector('.win')?.classList.add('acrylic'); // Win11 材质透出(v0.6.1)
     const type = p.type || 'info';
-    // 类型配色走 ui.css 公共 .big.<type>(与状态窗结果视图同一套)
+    // 类型配色走 ui.css 公共 .big.<type>(与状态窗结果视图同一套);
+    // 警告/错误按 APG 升格为 alertdialog(读屏即时播报,区别于普通 dialog)
+    document.querySelector('.win')?.setAttribute('role', (type === 'warning' || type === 'error') ? 'alertdialog' : 'dialog');
     const big = document.getElementById('big');
     big.className = 'big ' + type;
     big.innerHTML = ICONS[type] || ICONS.info;
@@ -64,7 +66,9 @@
     (p.buttons || []).forEach((b, i) => {
       const el = document.createElement('button');
       el.textContent = b.label;
-      el.className = 'btn' + (b.primary ? ' primary' : '');
+      // style: 'danger'/'success'(与 report 动作按钮同契约,DLG-1);不与 primary 同用
+      el.className = 'btn' + (b.primary ? ' primary' : '')
+        + (b.style === 'danger' || b.style === 'success' ? ' ' + b.style : '');
       if (b.id) el.dataset.id = b.id;
       el.addEventListener('click', () => D.choose(i, b.id || null));
       foot.appendChild(el);

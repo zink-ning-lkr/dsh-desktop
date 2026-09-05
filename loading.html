@@ -114,9 +114,11 @@
   function pushLog(line) {
     tailEl.textContent = line || '';
   }
-  // 慢启动兜底:主进程 15s 未加载出服务页时调用,亮出自助操作行
+  // 慢启动兜底:主进程 15s 未加载出服务页时调用,亮出自助操作行并聚焦主操作「重试」
+  // (键盘 Enter 直达,无需 Tab 搜索;此时页面其余部分无焦点锚点)
   function showSlowActions() {
     document.getElementById('slow').classList.add('show');
+    document.getElementById('btnRetry').focus();
   }
   // 动作桥 dshBoot 由 dsh-preload.js 按 file:// 协议条件暴露;远程 dsh 页无此对象
   for (const [btnId, act] of [['btnLog', 'view-log'], ['btnRetry', 'retry'], ['btnQuit', 'quit']]) {
