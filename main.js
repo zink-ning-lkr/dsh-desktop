@@ -1284,14 +1284,7 @@ ipcMain.on('m:action', (e, id) => {
       cfg.theme = order[(order.indexOf(cfg.theme || 'auto') + 1) % order.length];
       saveConfig(cfg);
       applyTheme();
-      // 窗口画布底色随主题刷新:浅色启动时 loading 页(底色 = --c-bg0)与未绘制边缘无缝
-      try {
-        const bg = chromeBgColor();
-        mainWindow?.setBackgroundColor(bg);
-        dshView?.setBackgroundColor(bg);
-        // 标题栏 surface 以 dsh 页面采样色为准(与栏视觉一致),无采样时才回落画布色
-        titlebarView?.setBackgroundColor(lastTitlebarTheme || bg);
-      } catch { /* 窗口销毁竞态等,忽略 */ }
+      applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
       const label = { auto: '跟随系统', dark: '深色', light: '浅色' }[cfg.theme];
       log(`外观已切换为: ${label}`);
       notifyToast(`外观已切换:${label}`);
@@ -1338,6 +1331,20 @@ async function syncTitleBarTheme() {
     titlebarView.setBackgroundColor(hex);
   } catch { /* 页面未就绪等,忽略 */ } finally { titlebarThemeInFlight = false; }
 }
+
+// 窗口画布/标题栏 surface 底色随主题刷新:浅色下启动首帧与未绘制边缘不露深色。
+// 两个触发源共用:菜单「外观」切换(cycle-theme)与系统主题变化(auto 模式下 OS 换深浅色,
+// 渲染层经 matchMedia 即时换肤,但画布底色必须在这里同步,否则未绘制边缘露出相反底色, P0-5);
+// 标题栏 surface 以 dsh 页面采样色为准(与栏视觉一致),无采样时才回落画布色
+function applyChromeBg() {
+  try {
+    const bg = chromeBgColor();
+    mainWindow?.setBackgroundColor(bg);
+    dshView?.setBackgroundColor(bg);
+    titlebarView?.setBackgroundColor(lastTitlebarTheme || bg);
+  } catch { /* 窗口销毁竞态等,忽略 */ }
+}
+nativeTheme.on('updated', applyChromeBg);
 
 function createWindow() {
   mainWindow = new BrowserWindow({
