@@ -662,7 +662,8 @@ ipcMain.on('st:dismiss', (e, taskId) => {
   if (!trustedEvent(e)) return;
   dismissTask(String(taskId));
 });
-// ✕ 按钮语义 = 取消当前操作并关闭窗口(检查/下载/安装);「后台」按钮才是最小化
+// ✕ 按钮语义(P0-1 全模式对齐):单任务活动态 = 取消该操作并关闭;结果态 = 仅关闭;
+// 列表模式 = 取消全部未完成任务并关闭(st:cancel-all);「后台」按钮才是最小化(不打断任务)
 ipcMain.on('st:cancel', (e) => {
   if (!trustedEvent(e)) return;
   updates.cancelStatusOp(statusPayload?.__origin); // 取消逻辑本体在 updates.js(清计时器/忽略迟到结果/中止下载与 npm 安装)
@@ -672,6 +673,17 @@ ipcMain.on('st:cancel-one', (e, taskId) => {
   if (!trustedEvent(e)) return;
   const id = String(taskId);
   updates.cancelStatusOp(id === 'default' ? undefined : id);
+});
+// 列表模式「全部关闭」(✕/Esc)= 逐个取消未完成任务后整窗关闭。
+// 旧实现走 st:close → closeStatus() 直接清注册表:运行中的下载/安装成了"不可见且不可取消"
+// 的孤儿任务(进度帧被丢弃、托盘丢"下载中"段、再无任何 UI 可达);现复用 cancelStatusOp 的
+// 按流收窄逻辑逐流取消,与单任务「✕ = 取消并关闭」契约对齐(P0-1)
+ipcMain.on('st:cancel-all', (e) => {
+  if (!trustedEvent(e)) return;
+  for (const t of [...statusTasks.values()]) {
+    if (!t.done) updates.cancelStatusOp(t.id);
+  }
+  closeStatus(); // 未完成任务已取消,结果历史随窗一并丢弃(与「全部关闭」语义一致)
 });
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
@@ -1753,6 +1765,7 @@ if (!gotLock) {
         get currentBarH() { return currentBarH; },
         get trayState() { return trayState; },
         trayStatusText,
+        updatesState: updates.state, // 双通道共享状态对象(稳定引用):断言取消旗标/安装子进程等
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
         notifyToast,
         getThemeSource: () => nativeTheme.themeSource,

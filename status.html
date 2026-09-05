@@ -297,9 +297,10 @@
   }
 
   document.getElementById('bgBtn').addEventListener('click', () => S.background());
-  // 单任务:活动态 ✕ = 取消并关闭,结果态 ✕ = 仅关闭;多任务列表:✕ = 全部关闭
+  // 单任务:活动态 ✕ = 取消并关闭,结果态 ✕ = 仅关闭;多任务列表:✕ = 取消全部未完成任务并关闭
+  // (列表关闭不再直接丢弃运行中任务——那会让下载/安装成为不可见且不可取消的孤儿,P0-1)
   document.getElementById('xBtn').addEventListener('click', () => {
-    if (listMode) { S.close(); return; }
+    if (listMode) { S.cancelAll(); return; }
     (cur && cur.mode === 'result' ? S.close() : S.cancel());
   });
   document.addEventListener('keydown', (e) => {

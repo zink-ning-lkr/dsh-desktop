@@ -214,6 +214,19 @@ function runUitest(d) {
   uiStep(() => { d.notifyToast('仅一条瞬时提示'); }, 25150, 'lone-toast-add');
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('[...document.querySelectorAll("#tlist .trow:not(.done) .lx")][0].click()').catch(() => {}); }, 25300, 'lone-toast-cancel-active');
   uiStep(() => readDom(d.statusWin, '(()=>{const list=document.getElementById("tlist");const rows=[...list.querySelectorAll(".trow")];const actEl=document.getElementById("activity");const t=document.getElementById("title").textContent;const ok=list.style.display!=="none"&&rows.length===1&&rows[0].classList.contains("ephemeral")&&actEl.style.display==="none"&&t==="任务中心";return ok?"PASS 单toast走列表行":"FAIL shown="+list.style.display+" rows="+rows.length+" eph0="+(rows[0]&&rows[0].classList.contains("ephemeral"))+" actHidden="+(actEl.style.display==="none")+" t="+t})()', 'lone-toast'), 25550);
+  // ⑪'' 全部关闭语义(P0-1 回归锁):列表模式 ✕ = 逐个取消全部未完成任务再收窗——
+  //    旧实现 st:close 直接清注册表,运行中的任务成为不可见且不可取消的孤儿
+  uiStep(() => {
+    d.updatesState.manualCheckDropped = false;      // 复位旗标:仅观察本轮取消效果
+    d.updatesState.dshManualCheckDropped = false;
+    d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' });
+  }, 25800, 'cancel-all-prep');
+  uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); }, 25950, 'cancel-all-second');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 26100, 'cancel-all-click');
+  uiStep(() => {
+    const ok = !d.statusWin && d.updatesState.manualCheckDropped && d.updatesState.dshManualCheckDropped;
+    d.log(`UITEST cancel-all win=${!!d.statusWin}(期望 false) desktopDrop=${d.updatesState.manualCheckDropped} dshDrop=${d.updatesState.dshManualCheckDropped}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 26250, 'cancel-all-verify');
   // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
   //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
   uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')
