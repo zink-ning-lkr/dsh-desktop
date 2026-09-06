@@ -960,7 +960,7 @@ function showAccelSettings() {
   cancelAccelRecycle(); // 正在使用:取消闲置回收
   if (!accelWin) {
     accelWin = new BrowserWindow({
-      width: 520, height: 556, useContentSize: true,
+      width: 520, height: 566, useContentSize: true, // 内容 470px 在 11px 标签后零余量:+10px 恢复呼吸空间(第四轮 X4-5)
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
       // Win11 Mica(P2-3 铺开,v0.6.1):与 reportWin 同档系统材质
       backgroundMaterial: isWin11() ? 'mica' : undefined,

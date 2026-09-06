@@ -11,14 +11,15 @@
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
   /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close(✕ 悬停统一规范红);
-     仅覆写本页图标尺寸与品牌色 */
+     仅覆写本页图标尺寸、品牌色,并把头部横向内边距对齐内容列(20px,原 16px 错位 4px) */
+  .win-head { --head-pad: 14px 20px 10px; }
   .win-head .ico { width: 18px; height: 18px; color: var(--c-brand); }
   .win-head .ico svg { width: 17px; height: 17px; }
   .content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 14px; }
   .sec { display: flex; flex-direction: column; gap: 9px; }
   .sec-t { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--c-fg0); }
   .sec-t .tag {
-    font-size: 10px; font-weight: 500; color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent);
+    font-size: 11px; font-weight: 500; color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--c-brand-hi) 25%, transparent); border-radius: 999px; padding: 2px 8px; letter-spacing: .02em;
   }
   .hint { font-size: 12px; color: var(--c-fg2); line-height: 1.55; }
@@ -31,6 +32,7 @@
   input[type=range] { flex: 1; accent-color: var(--c-brand); height: 4px; cursor: default; }
   .seg-n {
     flex: none; min-width: 58px; text-align: center; font-size: 13px; font-weight: 600; color: var(--c-fg0);
+    font-variant-numeric: tabular-nums; /* 拖动滑杆时数字等宽,数值框内容零横跳 */
     background: var(--c-bg2); border: 1px solid var(--c-border); border-radius: var(--radius-m); padding: 6px 0;
   }
   .seg-n b { color: var(--c-brand-hi); }
@@ -44,7 +46,8 @@
   }
   input[type=text]:focus { border-color: var(--c-brand); }
   input[type=text]::placeholder { color: var(--c-placeholder); }
-  .err { min-height: 0; font-size: 11.5px; color: var(--c-err); line-height: 1.4; }
+  /* flex:1 + min-width:0:长校验文案占按钮行剩余宽度折行,不被按钮挤压或横向截断 */
+  .err { flex: 1; min-width: 0; min-height: 0; font-size: 11.5px; color: var(--c-err); line-height: 1.4; }
   .cmd {
     display: flex; align-items: center; gap: 8px; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
     padding: 9px 11px; font: 11.5px/1.5 var(--font-mono); color: var(--c-brand-hi);

@@ -62,7 +62,6 @@
     font: 11px/1.7 "Cascadia Mono", Consolas, monospace;
     color: var(--c-fg2); text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    opacity: .8;
   }
   .hint { margin: 0; font-size: 12px; color: var(--c-fg2); }
   /* 慢启动自助行(P0-2):默认隐藏,主进程 15s 未就绪时经 showSlowActions() 亮出 */
@@ -73,7 +72,7 @@
   }
   .slow.show { display: flex; }
   .slow-tip { font-size: 12px; color: var(--c-warn); }
-  .slow-btns { display: flex; gap: 10px; }
+  .slow-btns { display: flex; gap: 8px; } /* 间距与全局决策按钮行一致(dialog/report/status 同为 8px) */
   @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i, .slow { animation: none; } }
 </style>
 </head>
@@ -85,7 +84,7 @@
   <p class="hint" id="hint"></p>
   <div class="slow" id="slow" role="group" aria-label="启动较慢时的自助操作">
     <p class="slow-tip" id="slowTip"></p>
-    <div class="slow-btns">
+    <div class="slow-btns btn-row">
       <button class="btn" id="btnLog" type="button"></button>
       <button class="btn primary" id="btnRetry" type="button"></button>
       <button class="btn danger-ghost" id="btnQuit" type="button"></button>
