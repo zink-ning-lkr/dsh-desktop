@@ -18,7 +18,8 @@
     /* 纯色背景,不再有底部渐隐区:栏高与页面顶边完全对齐(原渐变区不透明,会把页面顶部盖掉一截) */
     background-color: var(--bg);
     color: var(--fg);
-    font: 12px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+    /* 行距取 --lh-ctrl(原 12px/1:栏内文字与采样色背景贴合过紧,且与其他窗口行距体系脱节) */
+    font: var(--fs-ctrl)/var(--lh-ctrl) "Segoe UI", "Microsoft YaHei", sans-serif;
     user-select: none;
     -webkit-app-region: drag; /* 整条可拖动移动窗口;双击最大化/还原 */
   }
@@ -32,11 +33,11 @@
     transition: background var(--dur-mid) ease, color var(--dur-mid) ease;
   }
   /* 焦点环走 ui.css 公共 :focus-visible(all:unset 清掉默认轮廓后由它补回) */
-  #menuBtn { width: 32px; height: 22px; border-radius: var(--radius-s); margin-left: 5px; }
+  #menuBtn { width: 32px; height: 24px; border-radius: var(--radius-s); margin-left: 5px; }
   #menuBtn svg { width: 13px; height: 13px; }
-  #menuBtn:hover { background: rgba(127, 127, 127, .25); }
+  #menuBtn:hover { background: var(--c-hover); }
   #menuBtn:hover svg { color: var(--c-brand-hi); }
-  #menuBtn.active, #menuBtn.active:hover { background: rgba(127, 127, 127, .30); }
+  #menuBtn.active, #menuBtn.active:hover { background: var(--c-hover-strong); }
   #menuBtn.active svg { color: var(--c-brand-hi); }
   #collapseBtn { width: 34px; }
   #collapseBtn svg { width: 11px; height: 11px; transition: transform var(--dur-mid) ease; }
@@ -53,7 +54,7 @@
   .spacer { flex: 1; }
   .cap { display: flex; height: 100%; flex: none; }
   .cap button { width: 44px; }
-  .cap button:hover { background: rgba(127, 127, 127, .18); }
+  .cap button:hover { background: var(--c-hover); }
   .cap svg { width: 11px; height: 11px; transition: transform var(--dur-fast) ease; }
   .cap button:hover svg { transform: scale(1.12); }
   #closeBtn:hover { background: var(--c-close-hover); color: #fff; }

@@ -410,8 +410,9 @@ function showTrayMenu() {
   closeTrayMenu();
   closeMenuPopup(true); // 与主菜单弹层互斥:托盘菜单弹出时收起主菜单
   const items = trayMenuItems();
-  let mh = 20; // 上下内边距
-  for (const it of items) mh += it.type === 'sep' ? 9 : 30;
+  let mh = 20; // 上下内边距(.panel padding 10px × 2)
+  // 逐项高度须与 menu.html 的 .item/.sep 实际盒高一致(.item 32px、.sep 1+8=9px),否则菜单底部被裁
+  for (const it of items) mh += it.type === 'sep' ? 9 : 32;
   const W = 264 + 24, H = mh + 24; // 含阴影边距,与主菜单一致
   const cursor = screen.getCursorScreenPoint();
   const wa = screen.getDisplayNearestPoint(cursor).workArea;
@@ -901,11 +902,11 @@ ipcMain.on('dl:choose', (e, i, id) => {
   if (!dialogBusy) scheduleDialogRecycle(); // 没有后续:隐藏即开始闲置计时(P0-3)
 });
 
-// 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 32/20 + 边框 2)
+// 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 36/20 + 边框 2)
 ipcMain.on('dl:rendered', (e) => {
   if (!trustedEvent(e) || !dialogWin || e.sender !== dialogWin.webContents) return;
   fitWindowToContent(dialogWin,
-    'document.querySelector(".top").getBoundingClientRect().height + document.querySelector(".foot").getBoundingClientRect().height + 54',
+    'document.querySelector(".top").getBoundingClientRect().height + document.querySelector(".foot").getBoundingClientRect().height + 58',
     { min: 200, max: dialogMaxHeight(), recenter: true });
 });
 
@@ -1322,8 +1323,9 @@ function showMenuPopup() {
   if (!mainWindow) return;
   closeTrayMenu(); // 与托盘菜单互斥
   const items = menuItems();
-  let mh = 20; // 上下内边距
-  for (const it of items) mh += it.type === 'sep' ? 9 : 30;
+  let mh = 20; // 上下内边距(.panel padding 10px × 2)
+  // 逐项高度须与 menu.html 的 .item/.sep 实际盒高一致(.item 32px、.sep 1+8=9px),否则菜单底部被裁
+  for (const it of items) mh += it.type === 'sep' ? 9 : 32;
   ensureMenuPopup();
   menuPopupView.setBounds({
     x: 0,

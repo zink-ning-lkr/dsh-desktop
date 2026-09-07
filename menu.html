@@ -22,19 +22,23 @@
     border: 1px solid var(--c-border);
     border-radius: var(--radius-l);
     box-shadow: var(--c-panel-shadow);
-    padding: 10px 6px;
+    padding: 10px 8px;
     animation: menuIn .16s cubic-bezier(.2, .9, .3, 1.1);
   }
   @keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+  /* 行高 32px(--ctl-h + 2):菜单是纯点击目标,命中区不小于标准按钮;
+     与主进程 showMenuPopup() 的逐项高度常量严格对应(main.js:1326),改此处必须同步改那里 */
   .item {
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 30px;
-    padding: 0 10px;
+    height: 32px;
+    padding: 0 12px;
     border-radius: var(--radius-s);
     cursor: default;
     white-space: nowrap;
+    font-size: var(--fs-body);
+    line-height: var(--lh-ctrl);
     transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     animation: itemIn .18s ease backwards;
     animation-delay: calc(var(--i, 0) * 8ms);
@@ -44,7 +48,7 @@
   .item .ico { width: 16px; height: 16px; flex: none; color: var(--c-fg2); display: flex; align-items: center; justify-content: center; transition: color var(--dur-fast) ease, transform var(--dur-fast) ease; }
   .item:hover .ico, .item.sel .ico { color: var(--c-brand-hi); transform: translateX(1px); }
   .item .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .item .accel { color: var(--c-fg2); font-size: 12px; padding-left: 18px; }
+  .item .accel { color: var(--c-fg2); font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); padding-left: 18px; }
   .sep { height: 1px; background: var(--c-bg2); margin: 4px 8px; }
   .item.danger:hover, .item.danger.sel { background: var(--c-danger-bg); }
   /* 只读状态行:.72 与标题栏工作目录同一「弱化但达 AA」梯度(原 .55 低于 4.5:1) */

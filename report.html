@@ -17,34 +17,36 @@
     --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent);
     --win-shadow: none;
   }
-  .body { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 0; min-height: 0; }
-  .cls { display: flex; align-items: center; gap: 10px; }
+  .body { flex: 1; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); min-height: 0; }
+  .cls { display: flex; align-items: center; gap: var(--sp-3); }
   .badge {
-    flex: none; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    flex: none; padding: 4px var(--sp-3); border-radius: 999px; font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl);
     background: color-mix(in srgb, var(--c-err) 15%, transparent); color: var(--c-err); border: 1px solid color-mix(in srgb, var(--c-err) 35%, transparent);
   }
-  .cls .name { font-size: 14px; font-weight: 600; color: var(--c-fg0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cause { font-size: 12.5px; color: var(--c-fg1); line-height: 1.55; background: var(--c-bg1); border: 1px solid var(--c-bg2);
-    border-radius: var(--radius-m); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 88px; overflow-y: auto; user-select: text; }
-  .sec-label { font-size: 11px; font-weight: 600; color: var(--c-fg2); letter-spacing: .06em; }
-  .advice { display: flex; flex-direction: column; gap: 6px; }
-  .advice .row { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--c-fg2); line-height: 1.5; }
+  .cls .name { font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 结论块:正文级 13/1.6(原 12.5/1.55),下沉底色与窗底分层——它是全窗的第一信息块 */
+  .cause { font-size: var(--fs-body); color: var(--c-fg1); line-height: var(--lh-body); background: var(--c-bg1); border: 1px solid var(--c-bg2);
+    border-radius: var(--radius-m); padding: 10px var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 88px; overflow-y: auto; user-select: text; }
+  /* .sec-label 走 ui.css 公共规格(原为本地复制的一份) */
+  .advice { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .advice .row { display: flex; gap: var(--sp-2); align-items: flex-start; font-size: var(--fs-body); color: var(--c-fg2); line-height: var(--lh-body); }
   .advice .row::before { content: "•"; color: var(--c-brand); flex: none; }
-  .log-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .log-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
   .log {
     flex: 1; min-height: 0; overflow: auto; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
-    padding: 10px 12px; font: 12px/1.55 "Cascadia Mono", Consolas, monospace; color: var(--c-fg2);
+    padding: 10px var(--sp-3); font: var(--fs-ctrl)/1.6 var(--font-mono); color: var(--c-fg2);
     white-space: pre-wrap; word-break: break-all; user-select: text;
   }
-  .foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
+  /* 脚区与正文之间加一条发丝线:动作/取证工具与上方内容分属两个层级(原无分隔,按钮组在长日志下像正文续行) */
+  .foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--c-hairline); }
   /* 动作按钮(重试/退出等)必须是独立的 flex 行且不可压缩:
      此前 #actions 是块级容器,报告路径占据空间后其内部 inline 按钮会换行堆叠成竖排,
      与「进程退出」场景的横排布局不一致(几何实测 y=514 与 y=549 两行)。
      位次(RPT-1):动作组居左(主操作/默认焦点位),取证工具组靠右——动线「先修复、后取证」;
      导出报告是取证动作不是流程终点,不占用 success 强调色(全窗仅一个 primary) */
-  #actions { display: flex; flex: none; align-items: center; gap: 8px; }
+  #actions { display: flex; flex: none; align-items: center; gap: var(--sp-2); }
   .foot .spacer { flex: 1; }
-  .foot .note { font-size: 11px; color: var(--c-fg2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+  .foot .note { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
   /* 就地反馈走 ui.css 公共 .inline-feedback(与 accel 窗同一套,样式/配色单一来源) */
 </style>
 </head>

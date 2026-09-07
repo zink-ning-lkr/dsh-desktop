@@ -19,11 +19,11 @@
     color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
     transition: background var(--dur-mid), color var(--dur-mid);
   }
-  .hmbtn:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
-  #bgBtn { width: 60px; height: 24px; font-size: 12px; gap: 4px; }
+  .hmbtn:hover { background: var(--c-hover); color: var(--c-fg0); }
+  #bgBtn { width: 64px; height: 26px; padding: 0 8px; font-size: var(--fs-ctrl); line-height: 1; gap: 5px; }
   #bgBtn svg { width: 12px; height: 12px; }
-  .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 14px; }
-  .detail { font-size: 12px; color: var(--c-fg2); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 14px; }
+  .detail { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere;
     max-height: 60px; min-height: 0; overflow-y: auto; user-select: text; }
   .bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
   .fill {
@@ -45,22 +45,25 @@
   }
   .fill.indet::after { display: none; }
   @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
-  .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-fg2);
+  .meta { display: flex; justify-content: space-between; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2);
     font-variant-numeric: tabular-nums; /* 进度帧 150ms 刷新:数字等宽,零横跳 */ }
   /* -------- 结果视图(单任务) -------- */
+  /* 竖向节奏在 186/250 锁定档内重排:内距 12/16(原 14/18)、间隙 10(原 12)、
+     rdetail 上限 58(原 62)——腾出的空间用于结果按钮 30px 命中区(原 28),净高度不增 */
   .result { display: none; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center;
-    gap: 12px; padding: 14px 20px 18px; }
+    gap: 10px; padding: var(--sp-3) var(--sp-5) var(--sp-4); }
   .result .big { width: 46px; height: 46px; } /* 尺寸覆盖 ui.css 公共 .big(40px),配色仍走 .big.<type> */
   .result .big svg { width: 24px; height: 24px; }
-  .rtitle { font-size: 15px; font-weight: 600; color: var(--c-fg0); text-align: center; line-height: 1.35; }
-  .rdetail { font-size: 12px; color: var(--c-fg2); text-align: center; line-height: 1.5; max-height: 62px; min-height: 0; overflow-y: auto;
+  .rtitle { font-size: var(--fs-title); font-weight: 600; color: var(--c-fg0); text-align: center; line-height: var(--lh-title); }
+  .rdetail { font-size: var(--fs-ctrl); color: var(--c-fg2); text-align: center; line-height: var(--lh-body); max-height: 58px; min-height: 0; overflow-y: auto;
     white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-  .btns { flex: none; display: flex; gap: 8px; margin-top: 2px; }
+  .btns { flex: none; display: flex; gap: var(--sp-2); margin-top: 2px; }
   /* -------- 任务列表(多任务) -------- */
-  .tlist { display: none; flex: 1; min-height: 0; flex-direction: column; gap: 4px; padding: 8px 10px 12px; overflow-y: auto; }
+  .tlist { display: none; flex: 1; min-height: 0; flex-direction: column; gap: 6px; padding: var(--sp-2) 10px var(--sp-3); overflow-y: auto; }
   .trow {
-    display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px;
+    display: flex; gap: var(--sp-3); align-items: flex-start; padding: 10px var(--sp-3);
     border: 1px solid var(--c-border); border-radius: var(--radius-l); background: var(--c-bg1);
+    box-shadow: var(--c-elev-1); /* 卡片与窗底分层:列表滚动时行边界可辨 */
   }
   .trow .lico { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--c-brand-hi); }
   .trow .lico svg { width: 18px; height: 18px; }
@@ -69,23 +72,27 @@
   .trow.done .lico.warning { color: var(--c-warn); }
   .trow.done .lico.error { color: var(--c-err); }
   .trow .lbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-  .trow .ltitle { font-size: 13px; color: var(--c-fg0); font-weight: 600; line-height: 1.35; }
-  .trow .ldetail { font-size: 11.5px; color: var(--c-fg2); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
-    max-height: 34px; overflow-y: auto; user-select: text; }
+  .trow .ltitle { font-size: var(--fs-body); color: var(--c-fg0); font-weight: 600; line-height: var(--lh-title); }
+  .trow .ldetail { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-ctrl); white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 36px; overflow-y: auto; user-select: text; }
   .trow .lbtns { display: flex; gap: 6px; }
-  .trow .lbtns .btn { padding: 4px 10px; font-size: 11.5px; }
+  /* 行内小按钮:高度 --ctl-h-sm(26px,原 22),命中区与行内密度折中;不参与决策行 88px 等宽 */
+  .trow .lbtns .btn { min-height: var(--ctl-h-sm); padding: 0 10px; font-size: var(--fs-micro); }
   .trow .lx {
-    width: 22px; height: 22px; flex: none; border: none; border-radius: var(--radius-s); background: transparent;
+    width: 24px; height: 24px; flex: none; border: none; border-radius: var(--radius-s); background: transparent;
     color: var(--c-fg2); cursor: default; display: flex; align-items: center; justify-content: center;
     transition: background var(--dur-mid), color var(--dur-mid);
   }
-  .trow .lx:hover { background: rgba(127, 127, 127, .22); color: var(--c-fg0); }
+  .trow .lx:hover { background: var(--c-hover); color: var(--c-fg0); }
   .trow .lx svg { width: 11px; height: 11px; }
+  /* 历史折叠行:整行可点,补圆角与悬停底色(原仅文字变色,可点性不可辨) */
   .hist {
-    display: flex; align-items: center; gap: 6px; padding: 6px 10px 2px; font-size: 11.5px; color: var(--c-fg2);
+    display: flex; align-items: center; gap: 6px; padding: 6px var(--sp-2); border-radius: var(--radius-s);
+    font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2);
     cursor: default; border: none; background: transparent; width: 100%; text-align: left;
+    transition: background var(--dur-mid), color var(--dur-mid);
   }
-  .hist:hover { color: var(--c-fg1); }
+  .hist:hover { background: color-mix(in srgb, var(--c-fg2) 12%, transparent); color: var(--c-fg1); }
   .hist .tri { width: 8px; height: 8px; flex: none; transition: transform var(--dur-mid); }
   .hist.open .tri { transform: rotate(90deg); }
   .trow.ephemeral { opacity: .8; border-style: dashed; }

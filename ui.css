@@ -1,7 +1,14 @@
 /* ui.css —— 全部自绘页面共享的设计令牌与公共组件(单一事实源)。
-   令牌命名:--c-* 颜色 / --radius-* 圆角 / --dur-* 时长 / --ease-* 曲线 / --font-* 字栈。
+   令牌命名:--c-* 颜色 / --radius-* 圆角 / --dur-* 时长 / --ease-* 曲线 / --font-* 字栈
+             --fs-* 字号 / --lh-* 行距 / --sp-* 间距 / --ctl-* 控件尺寸。
    各页面经 <link rel="stylesheet" href="ui.css"> 引入(CSP 已允许 style-src 'self');
-   页面内联 <style> 在其后声明,需要微调时用更高优先级或 --win-* 变量覆写。 */
+   页面内联 <style> 在其后声明,需要微调时用更高优先级或 --win-* 变量覆写。
+
+   第五轮(统一排版/按钮/视觉层级)新增三条硬约束:
+   ① 字号只能用 --fs-* 六级(display/title/head/body/ctrl/micro),行距只能用 --lh-*;
+      页面不得再出现 12.5 / 11.5 / 19 这类离群值。
+   ② 间距一律取 --sp-*(4 基准);控件高度取 --ctl-*(30 / 26 / 40)。
+   ③ 层叠与焦点:卡片走 --c-elev-1,主操作带品牌辉光,强调色按钮的焦点环用反色。 */
 :root {
   /* 色板:GitHub Dark 系,与 dsh 生态视觉一致 */
   --c-bg0: #0d1117;
@@ -25,6 +32,50 @@
   --c-err-strong: #da3633; /* danger 渐变上端 */
   --c-err-deep: #b62324;   /* danger 渐变下端 */
   --c-progress-accent: #8b5cf6; /* 进度条渐变副色(品牌紫) */
+
+  /* ---- 排版尺度(第五轮):字号/行距单一来源 ---- */
+  --fs-display: 20px; /* 首启欢迎主标题(唯一展示级) */
+  --fs-title: 15px;   /* 对话框标题 / 结果标题 */
+  --fs-head: 14px;    /* 窗口头部标题 / 结论行名称 */
+  --fs-body: 13px;    /* 正文、列表行标题(基准字号) */
+  --fs-ctrl: 12px;    /* 控件文本:按钮/输入/元信息/日志 */
+  --fs-micro: 11px;   /* 分区标签、脚注、提示(字号地板,不再更小) */
+  --lh-display: 1.3;
+  --lh-dense: 1.25; /* 单行紧凑控件文本(分区标题/数值/徽标):高度敏感,不套正文行距 */
+  --lh-title: 1.4;
+  --lh-head: 1.4;
+  --lh-body: 1.6;   /* 正文与多行段落 */
+  --lh-ctrl: 1.45;  /* 单行控件文本 */
+  --lh-micro: 1.5;
+
+  /* ---- 间距尺度(4 基准) ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* ---- 控件尺寸:触控/鼠标点击区域统一 ---- */
+  --ctl-h: 30px;    /* 标准按钮、输入框 */
+  --ctl-h-sm: 26px; /* 行内小按钮(任务行) */
+  --ctl-h-lg: 40px; /* 首启主 CTA */
+  --btn-min-w: 88px; /* 决策按钮等宽(文案长短不牵动宽度) */
+  --btn-pad-x: 16px;
+
+  /* ---- 层级:分隔线 / 阴影 / 焦点环 / 主操作辉光 ----
+     color-mix 派生:浅色主题下随 --c-border / --c-brand 自动成立,无需另写一套 */
+  --c-hairline: color-mix(in srgb, var(--c-border) 72%, transparent);
+  --c-elev-1: 0 1px 2px rgba(0, 0, 0, .30); /* 卡片与窗底分层(任务行) */
+  --c-accent-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-brand) 70%, transparent);
+  --c-ok-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-ok) 70%, transparent);
+  --c-danger-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-err) 70%, transparent);
+  --c-focus: var(--c-brand);
+  --c-focus-on-accent: #ffffff; /* 实心强调按钮上的焦点环:品牌色环压在品牌色底上不可辨 */
+  /* 中性悬停底(标题栏/状态窗头部/行内 ✕ 原本各写一份 .18/.22/.25/.30 灰度,同一应用四种悬停) */
+  --c-hover: rgba(127, 127, 127, .22);
+  --c-hover-strong: rgba(127, 127, 127, .30);
+
   /* 尺寸/动效 */
   --radius-s: 6px;
   --radius-m: 7px;
@@ -33,8 +84,8 @@
   --dur-mid: .15s;
   --dur-win: .22s;
   --ease-win: cubic-bezier(.2, .9, .3, 1.15);
-  /* 字栈 */
-  --font-ui: 13px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+  /* 字栈:行距 1.6 为正文基线(原 1 会让所有未显式声明行距的文本挤在一起) */
+  --font-ui: 13px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
   --font-mono: "Cascadia Mono", Consolas, monospace;
   /* 语义令牌:窗口壳/浮层/选中态(浅色主题整体覆写,页面不得再硬编码这些值) */
   --c-win-bg: rgba(22, 27, 34, .98);
@@ -78,6 +129,7 @@
   --c-danger-bg: rgba(209, 36, 47, .12);
   --c-reveal-bg: rgba(255, 255, 255, .85);
   --c-reveal-bg-hover: rgba(240, 243, 246, .98);
+  --c-elev-1: 0 1px 2px rgba(31, 35, 40, .12);
   color-scheme: light;
 }
 
@@ -89,8 +141,10 @@
 ::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
 
-/* ---- 公共:键盘焦点环(all:unset/透明背景按钮后必须有可见焦点,a11y) ---- */
-:where(button, input, [tabindex]):focus-visible { outline: 2px solid var(--c-brand); outline-offset: 2px; }
+/* ---- 公共:键盘焦点环(all:unset/透明背景按钮后必须有可见焦点,a11y) ----
+   实心强调按钮(primary/success/danger)换反色环:同色环压在同色底上等于没有焦点提示 */
+:where(button, input, [tabindex]):focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.btn.primary:focus-visible, .btn.success:focus-visible, .btn.danger:focus-visible { outline-color: var(--c-focus-on-accent); }
 
 /* ---- 公共:无边框窗口外壳(页面可用 --win-bg/--win-radius/--win-shadow 微调) ---- */
 .win {
@@ -104,27 +158,33 @@
 }
 @keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
 
-/* ---- 公共:按钮(status/dialog/accel/report 原本各自重复 4 份) ---- */
+/* ---- 公共:按钮(status/dialog/accel/report 原本各自重复 4 份) ----
+   规格:高 30px(--ctl-h)、横向内距 16px、字号 12px、行距 1(高度由 min-height 锁定,
+   不受根行距 1.6 影响);点击区域 30px 起,与 WinUI 控件高度同级 */
 .btn {
-  border: 1px solid var(--c-border); background: var(--c-bg2); color: var(--c-fg1);
-  padding: 7px 16px; border-radius: var(--radius-m);
-  font-size: 12px; cursor: default; white-space: nowrap;
-  transition: background var(--dur-mid), border-color var(--dur-mid), transform .08s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--ctl-h); padding: 0 var(--btn-pad-x);
+  border: 1px solid var(--c-border); border-radius: var(--radius-m);
+  background: var(--c-bg2); color: var(--c-fg1);
+  font-family: inherit; font-size: var(--fs-ctrl); line-height: 1;
+  cursor: default; white-space: nowrap;
+  transition: background var(--dur-mid), border-color var(--dur-mid), color var(--dur-mid),
+    transform .08s, box-shadow var(--dur-mid);
 }
-.btn:hover { background: var(--c-border); border-color: var(--c-border-hover); }
+.btn:hover { background: var(--c-border); border-color: var(--c-border-hover); color: var(--c-fg0); }
 .btn:active { transform: scale(.97); }
-.btn.primary { background: linear-gradient(180deg, var(--c-brand), var(--c-brand-deep)); border-color: transparent; color: #fff; }
-.btn.primary:hover { filter: brightness(1.12); }
-.btn.success { background: linear-gradient(180deg, var(--c-ok-strong), var(--c-ok-deep)); border-color: transparent; color: #fff; }
-.btn.success:hover { filter: brightness(1.12); }
-.btn.danger { background: linear-gradient(180deg, var(--c-err-strong), var(--c-err-deep)); border-color: transparent; color: #fff; }
-.btn.danger:hover { filter: brightness(1.12); }
+.btn.primary { background: linear-gradient(180deg, var(--c-brand), var(--c-brand-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-accent-glow); }
+.btn.primary:hover { filter: brightness(1.12); color: #fff; }
+.btn.success { background: linear-gradient(180deg, var(--c-ok-strong), var(--c-ok-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-ok-glow); }
+.btn.success:hover { filter: brightness(1.12); color: #fff; }
+.btn.danger { background: linear-gradient(180deg, var(--c-err-strong), var(--c-err-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-danger-glow); }
+.btn.danger:hover { filter: brightness(1.12); color: #fff; }
 /* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充;color-mix 派生使浅色主题自动成立 */
-.btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--c-err) 33%, transparent); color: var(--c-err); }
-.btn.danger-ghost:hover { background: color-mix(in srgb, var(--c-err) 12%, transparent); border-color: var(--c-err); }
+.btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--c-err) 33%, transparent); color: var(--c-err); box-shadow: none; }
+.btn.danger-ghost:hover { background: color-mix(in srgb, var(--c-err) 12%, transparent); border-color: var(--c-err); color: var(--c-err); }
 /* 按钮行(对话框脚区/状态窗结果按钮):同排按钮等宽,文案长短不牵动宽度(X-1);
    列表行内小按钮(.lbtns)不参与——行内密度优先 */
-.btn-row .btn { min-width: 88px; }
+.btn-row .btn { min-width: var(--btn-min-w); }
 
 /* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
    头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
@@ -136,9 +196,10 @@
 }
 .win-head .ico { width: 20px; height: 20px; flex: none; color: var(--c-brand-hi); display: flex; align-items: center; justify-content: center; }
 .win-head .ico svg { width: 20px; height: 20px; }
-.win-head .t { flex: 1; font-size: 14px; font-weight: 600; color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-head .ico img { width: 18px; height: 18px; } /* 位图 logo(welcome):与 svg 图标槽同槽同对齐 */
+.win-head .t { flex: 1; font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win-close {
-  -webkit-app-region: no-drag; width: 28px; height: 24px; flex: none;
+  -webkit-app-region: no-drag; width: 30px; height: 24px; flex: none;
   border: none; border-radius: var(--radius-s); background: transparent; color: var(--c-fg2);
   cursor: default; display: flex; align-items: center; justify-content: center;
   transition: background var(--dur-mid), color var(--dur-mid);
@@ -149,11 +210,18 @@
 /* ---- 公共:就地瞬时反馈(accel 保存 / report 复制导出;取代各页私有的 .toast/.flash) ----
    用法:<span class="inline-feedback"> + JS 切换 .on 显示、.ok/.bad 定色(默认随 --c-ok) */
 .inline-feedback {
-  flex: none; font-size: 12px; font-weight: 600; opacity: 0;
+  flex: none; font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl); opacity: 0;
   transition: opacity .2s; white-space: nowrap; color: var(--c-ok);
 }
 .inline-feedback.on { opacity: 1; }
 .inline-feedback.bad { color: var(--c-err); }
+
+/* ---- 公共:分区小标题(错误报告「关键日志预览」/加速设置区间名等) ----
+   统一 11px / 600 / 字距 .06em,避免各页自造一套弱化标签 */
+.sec-label {
+  font-size: var(--fs-micro); font-weight: 600; color: var(--c-fg2);
+  line-height: var(--lh-micro); letter-spacing: .06em;
+}
 
 /* ---- 公共:类型圆标(status 结果视图与 dialog 原本逐字符重复 2 份) ----
    用法:class="big info|success|warning|error"(与图标同元素携带类型) */

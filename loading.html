@@ -13,7 +13,8 @@
     height: 100%;
     background: var(--c-bg0);
     color: var(--c-fg2);
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    /* 字栈走 ui.css 公共 --font-ui(原为本地重复的一份硬编码字栈) */
+    font: var(--font-ui);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -48,7 +49,7 @@
     opacity: .6;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .stage { margin: 0; font-size: 13px; color: var(--c-fg1); min-height: 18px; animation: fadeUp .3s ease; }
+  .stage { margin: 0; font-size: var(--fs-body); line-height: var(--lh-title); color: var(--c-fg1); min-height: 20px; animation: fadeUp .3s ease; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   .dots { display: flex; gap: 7px; height: 6px; }
   .dots i {
@@ -59,19 +60,19 @@
   @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
   .logtail {
     position: absolute; left: 16px; right: 16px; bottom: 14px;
-    font: 11px/1.7 "Cascadia Mono", Consolas, monospace;
+    font: var(--fs-micro)/var(--lh-micro) "Cascadia Mono", Consolas, monospace;
     color: var(--c-fg2); text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .hint { margin: 0; font-size: 12px; color: var(--c-fg2); }
+  .hint { margin: 0; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2); }
   /* 慢启动自助行(P0-2):默认隐藏,主进程 15s 未就绪时经 showSlowActions() 亮出 */
   .slow {
     position: absolute; left: 0; right: 0; bottom: 46px;
-    display: none; flex-direction: column; align-items: center; gap: 12px;
+    display: none; flex-direction: column; align-items: center; gap: var(--sp-3);
     animation: fadeUp .3s ease;
   }
   .slow.show { display: flex; }
-  .slow-tip { font-size: 12px; color: var(--c-warn); }
+  .slow-tip { font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-warn); }
   .slow-btns { display: flex; gap: 8px; } /* 间距与全局决策按钮行一致(dialog/report/status 同为 8px) */
   @media (prefers-reduced-motion: reduce) { .logo, .ring::before, .ring::after, .dots i, .slow { animation: none; } }
 </style>
