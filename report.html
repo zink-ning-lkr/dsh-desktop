@@ -33,11 +33,32 @@
   .advice .row { display: flex; gap: var(--sp-2); align-items: flex-start; font-size: var(--fs-body); color: var(--c-fg2); line-height: var(--lh-body); }
   .advice .row::before { content: "•"; color: var(--c-brand); flex: none; }
   .log-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+  /* 日志区头部(阶段 3 S4-RPT-3):sec-label 居左、计数居中、错误筛选 toggle 居右
+     —— 把「行号 / 仅错误行 / 命中数」三个辅助件与日志本身同处一束,避免挤脚区破坏 RPT-1 */
+  .log-head { display: flex; align-items: center; gap: var(--sp-2); }
+  .log-head .sec-label { margin: 0; }
+  .log-meta { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); font-variant-numeric: tabular-nums; }
+  .log-head .spacer { flex: 1; }
+  /* toggle:与 .btn 同底,但 aria-pressed=true 时切换为「按下」视觉(主色细边框),
+     让用户在不依赖对比度的前提下也能看出筛选开关状态 */
+  .log-toggle[aria-pressed="true"] { border-color: var(--c-brand); color: var(--c-brand); }
   .log {
     flex: 1; min-height: 0; overflow: auto; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
     padding: 10px var(--sp-3); font: var(--fs-ctrl)/1.6 var(--font-mono); color: var(--c-fg2);
     white-space: pre-wrap; word-break: break-all; user-select: text;
   }
+  /* 行级视觉(阶段 3 S4-RPT-3):每行包一层 .line 便于 toggle 过滤;
+     行号 .lnum 4 位右对齐 tabular-nums,保证多行对齐不随数字位数抖动;
+     错误 / 警告行用主题色 + 左侧细线强调(色弱友好) */
+  .log .line { display: block; }
+  .log .line .lnum { display: inline-block; width: 4ch; margin-right: var(--sp-2); color: var(--c-fg3); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+  .log .line.err { color: var(--c-err); border-left: 2px solid color-mix(in srgb, var(--c-err) 60%, transparent); padding-left: calc(var(--sp-2) - 2px); margin-left: calc(var(--sp-2) * -1); }
+  .log .line.warn { color: var(--c-warn); border-left: 2px solid color-mix(in srgb, var(--c-warn) 60%, transparent); padding-left: calc(var(--sp-2) - 2px); margin-left: calc(var(--sp-2) * -1); }
+  /* 仅错误模式下,非错误行整个 .line 折叠(而不是隐藏 DOM),保留 grep/复制全文的能力 */
+  .log.err-only .line:not(.err) { display: none; }
+  /* 颜色变量缺失时(浅色主题个别子集)走兜底,避免无声白屏 */
+  :root { --c-warn: #f59e0b; --c-fg3: #909296; }
+  [data-theme="light"] { --c-warn: #b45309; --c-fg3: #6b7280; }
   /* 脚区与正文之间加一条发丝线:动作/取证工具与上方内容分属两个层级(原无分隔,按钮组在长日志下像正文续行) */
   .foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--c-hairline); }
   /* 动作按钮(重试/退出等)必须是独立的 flex 行且不可压缩:
@@ -66,7 +87,12 @@
     <div class="cause" id="cause"></div>
     <div class="advice" id="advice" role="list"></div>
     <div class="log-wrap">
-      <span class="sec-label" id="logLabel"></span>
+      <div class="log-head">
+        <span class="sec-label" id="logLabel"></span>
+        <span class="log-meta" id="logMeta" aria-live="polite"></span>
+        <span class="spacer"></span>
+        <button class="btn log-toggle" id="errOnlyBtn" type="button" aria-pressed="false"></button>
+      </div>
       <div class="log" id="log" role="log" aria-labelledby="logLabel"></div>
     </div>
   </div>
@@ -93,11 +119,68 @@
   document.getElementById('copyBtn').textContent = T('report.copy');
   document.getElementById('exportBtn').textContent = T('report.export');
   document.getElementById('logBtn').textContent = T('report.logFile');
+  // 错误筛选 toggle(阶段 3 S4-RPT-3):默认显示「仅错误行」按钮文案,按下后切换为「显示全部」
+  // —— 让用户在不依赖对比度的前提下也能看出筛选开关状态(文案即状态)
+  const errOnlyBtn = document.getElementById('errOnlyBtn');
+  errOnlyBtn.textContent = T('report.logOnlyErrors');
+  errOnlyBtn.setAttribute('aria-label', T('report.logOnlyErrors'));
   {
     const x = document.getElementById('xBtn');
     x.title = T('common.close');
     x.setAttribute('aria-label', T('common.close'));
   }
+
+  // 行级分类(阶段 3 S4-RPT-3):同一正则跑两次没必要 —— 一次返回类别字符串,
+  // 渲染层做 toggle 时再按需 filter,避免拆两次 + 一次样式分配造成的性能漂移
+  const LINE_ERR = /(error|err|fail|throw|✕)/i;
+  const LINE_WARN = /(warn|warning|⚠)/i;
+  function classify(line) {
+    if (LINE_ERR.test(line)) return 'err';
+    if (LINE_WARN.test(line)) return 'warn';
+    return '';
+  }
+  const logEl = document.getElementById('log');
+  const logMeta = document.getElementById('logMeta');
+  // 计数 aria-live=polite:筛选状态变化时把「N / M 行」播报给读屏软件
+  function updateLogMeta() {
+    const all = logEl.children;
+    const total = all.length;
+    const errs = logEl.querySelectorAll('.line.err').length;
+    const on = errOnlyBtn.getAttribute('aria-pressed') === 'true';
+    logMeta.textContent = T('report.logMeta', { shown: on ? errs : total, total });
+  }
+  function renderLog(text) {
+    // 空日志用占位文案;trim 后为空(纯空行)也算空,避免渲染「空容器 + N / 0 行」的诡异 UI
+    const body = (text || '').replace(/\s+$/, '');
+    if (!body) {
+      logEl.replaceChildren(document.createTextNode(T('report.noLog')));
+      logMeta.textContent = T('report.logMeta', { shown: 0, total: 0 });
+      return;
+    }
+    const lines = body.split(/\r?\n/);
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < lines.length; i++) {
+      const span = document.createElement('span');
+      const cls = classify(lines[i]);
+      span.className = cls ? 'line ' + cls : 'line';
+      const ln = document.createElement('span');
+      ln.className = 'lnum';
+      ln.textContent = String(i + 1).padStart(4, '0'); // 4 位 0 填,与 .lnum{width:4ch} 对齐
+      span.appendChild(ln);
+      span.appendChild(document.createTextNode(lines[i]));
+      frag.appendChild(span);
+    }
+    logEl.replaceChildren(frag);
+    updateLogMeta();
+  }
+  errOnlyBtn.addEventListener('click', () => {
+    const on = errOnlyBtn.getAttribute('aria-pressed') !== 'true';
+    errOnlyBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    errOnlyBtn.textContent = on ? T('report.logShowAll') : T('report.logOnlyErrors');
+    errOnlyBtn.setAttribute('aria-label', errOnlyBtn.textContent);
+    logEl.classList.toggle('err-only', on);
+    updateLogMeta();
+  });
 
   function render(p) {
     payload = p;
@@ -121,7 +204,7 @@
       advice.appendChild(row);
     });
     const logEl = document.getElementById('log');
-    logEl.textContent = (p.logPreview || T('report.noLog')).trim() || T('report.noLog');
+    renderLog(p.logPreview || T('report.noLog'));
     logEl.scrollTop = 0; // 复用窗口时回到顶部,避免新内容被旧滚动位置裁掉
     const np = document.getElementById('reportPath');
     if (p.reportPath) { np.textContent = p.reportPath; np.title = p.reportPath; } // 直接在底部显示完整保存路径(悬停/可选中复制)

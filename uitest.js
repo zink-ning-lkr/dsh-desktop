@@ -479,6 +479,47 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST settings ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2606, 'settings-static');
+  // ⓠ 报告窗日志行号 + 错误筛选(阶段 3 · v0.8.2-RPT-3)。三类静默故障:
+  //    ① 行号宽度没锁定 → 多行对齐抖动(阅读时眼睛要重新对齐,色弱用户更糟);
+  //    ② 错误判定正则不带 i → INFO 也会被吞(英文 INFO 都不命中,但「Warning:」会被吞就属于 bug);
+  //    ③ toggle 用 display:none 隐藏非错误行 → 复制全文按钮拿不到过滤掉的内容。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const html = read('report.html');
+    const i18n = require('./i18n');
+    const files = JSON.parse(read('package.json')).build.files;
+    // 行号容器 + 4 位右对齐 tabular-nums:任何一处漏了,多行对齐就会跳
+    t('rep-line-num', /\.lnum \{[^}]*?width: 4ch;[^}]*?font-variant-numeric: tabular-nums/.test(html)
+      && /padStart\(4, '0'\)/.test(html));
+    // 错误 / 警告判定正则带 i,且 warn 优先级在 err 之后(否则 Warning: error 类既不算 err 也不算 warn)
+    t('rep-classify', /LINE_ERR = \/\(error\|err\|fail\|throw\|✕\)\/i/.test(html)
+      && /LINE_WARN = \/\(warn\|warning\|⚠\)\/i/.test(html)
+      && /function classify\(line\)/.test(html)
+      && /if \(LINE_ERR\.test\(line\)\) return 'err';[\s\S]{0,80}?LINE_WARN/.test(html));
+    // 错误 / 警告视觉:左边一条主题色细线(色弱友好,绕过"红色太浅看不出来")
+    t('rep-line-styles', /\.log \.line\.err \{ color: var\(--c-err\)/.test(html)
+      && /\.log \.line\.warn \{ color: var\(--c-warn\)/.test(html)
+      && /\.log \.line\.err \{[\s\S]{0,200}?border-left: 2px solid/.test(html));
+    // 仅错误筛选:不删 DOM,用 CSS 折叠 —— 保留复制全文的能力
+    t('rep-err-only', /\.log\.err-only \.line:not\(\.err\) \{ display: none; \}/.test(html)
+      && /logEl\.classList\.toggle\('err-only', on\)/.test(html));
+    // toggle 按钮:aria-pressed 状态 + 文案切换(文案即状态,无需对比度也能看出)
+    t('rep-toggle', /id="errOnlyBtn"/.test(html) && /aria-pressed="false"/.test(html)
+      && /T\('report\.logOnlyErrors'\)/.test(html) && /T\('report\.logShowAll'\)/.test(html)
+      && /errOnlyBtn\.setAttribute\('aria-pressed'/.test(html));
+    // 计数面板:N / M 行,数字用 tabular-nums 防抖
+    t('rep-meta', /id="logMeta"/.test(html) && /aria-live="polite"/.test(html)
+      && /T\('report\.logMeta', \{ shown:[\s\S]{0,80}?total \}\)/.test(html)
+      && /font-variant-numeric: tabular-nums/.test(html));
+    // 文案入表 + 文件入打包白名单(装机时不能漏)
+    t('rep-i18n', ['report.logOnlyErrors', 'report.logShowAll', 'report.logMeta']
+      .every((k) => i18n.t(k) !== k));
+    t('rep-packed', files.includes('report.html'));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST report-log ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2607, 'report-log-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
