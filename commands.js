@@ -50,19 +50,27 @@ const list = [
 
   { id: 'check-update', group: 'update', kind: 'action', label: (c) => (c.isPortable ? c.t('menu.checkUpdatePortable') : c.t('menu.checkUpdateCurrent', { v: c.version })) },
   { id: 'check-dsh-update', group: 'update', kind: 'action', label: (c) => c.t('menu.checkDshUpdate', { v: c.dshVersion }) },
-  { id: 'download-accel', group: 'update', kind: 'setting', label: (c) => c.t('menu.downloadAccel') },
+  // 深链(阶段 3):原「下载加速设置」条目改为打开设置窗的「更新与下载」分区 ——
+  // 该分区现在装着全部下载相关设置,菜单不再各自弹出一个窗
+  { id: 'settings-download', group: 'update', kind: 'nav', label: (c) => c.t('menu.settingsDownload') },
 
   { id: 'toggle-bar', group: 'appearance', kind: 'setting', label: (c) => (c.barVisible ? c.t('menu.hideBar') : c.t('menu.showBar')) },
   { id: 'fullscreen', group: 'appearance', kind: 'action', label: (c) => c.t('menu.fullscreen') },
-  // 外观三态循环(auto→dark→light):扁平菜单无子菜单,单条目循环最省行数,label 即当前值
-  { id: 'cycle-theme', group: 'appearance', kind: 'setting', label: (c) => c.t('menu.appearance', { mode: c.t(THEME_KEYS[c.cfg.theme || 'auto']) }) },
-  { id: 'auto-open-browser', group: 'appearance', kind: 'setting', checked: (c) => !!c.cfg.openBrowser, label: (c) => c.t('menu.autoOpenBrowser') },
+  // 菜单这里改为深链:三档选择、关闭行为、启动浏览器都收进设置窗的「外观与行为」分区
+  { id: 'settings-appearance', group: 'appearance', kind: 'nav', label: (c) => c.t('menu.settingsAppearance') },
+  // 循环步进仍是一条真命令:命令栏主题按钮与命令面板都走它(菜单不上,面板上要能搜到)。
+  // 注册表里删掉它,runCommand 那个 case 就成了没有出处的孤儿分支(cmd-no-orphan 会拦)
+  { id: 'cycle-theme', group: 'appearance', kind: 'setting', menu: false, label: (c) => c.t('menu.appearance', { mode: c.t(THEME_KEYS[c.cfg.theme || 'auto']) }) },
+  // 关闭行为例外保留勾选项:它是安全相关开关(误设会直接退出、丢掉后台 dsh 服务),
+  // 一键可达的价值高于"全部收进设置窗"的整齐。落盘路径与设置窗共用(applyCloseAction)
   { id: 'close-to-tray', group: 'appearance', kind: 'setting', checked: (c) => c.cfg.closeAction !== 'quit', label: (c) => c.t('menu.closeToTray') },
 
   { id: 'reload', group: 'diagnostics', kind: 'action', label: (c) => c.t('menu.reload') },
   { id: 'devtools', group: 'diagnostics', kind: 'action', label: (c) => c.t('menu.devtools') },
   { id: 'log', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.openLog') },
-  { id: 'memory-info', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.memoryInfo', { n: c.mem }) },
+  // 内存详情对话框:数据已并入设置窗「高级」分区,这里只保留面板直达(不入菜单)
+  { id: 'memory-info', group: 'diagnostics', kind: 'nav', menu: false, label: (c) => c.t('menu.memoryInfo', { n: c.mem }) },
+  { id: 'settings-advanced', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.settingsAdvanced') },
   { id: 'shortcuts', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.shortcuts') },
 
   // 注意:这里不显示 Alt+F4 快捷键。默认「关闭时最小化到托盘」下,Alt+F4 只隐藏窗口而非退出,

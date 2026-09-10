@@ -1198,13 +1198,13 @@ const WELCOME_H_EXPR = '(()=>{const q=(s)=>document.querySelector(s);'
   + '+q(".hero-in").getBoundingClientRect().height+pad'
   + '+q(".act").getBoundingClientRect().height'
   + '+q(".foot").getBoundingClientRect().height)})()';
-const ACCEL_H_EXPR = '(()=>{const q=(s)=>document.querySelector(s);'
+const SETTINGS_H_EXPR = '(()=>{const q=(s)=>document.querySelector(s);'
   + 'return Math.ceil(q(".win-head").getBoundingClientRect().height'
   + '+q(".content").scrollHeight'
   + '+q(".foot").getBoundingClientRect().height)})()';
 // 下限:窗口被内容压到过矮会显得像残骸(截断感),给一个仍明显小于原固定档的地板
 const WELCOME_MIN_H = 360;
-const ACCEL_MIN_H = 320;
+const SETTINGS_MIN_H = 320;
 
 // 首启欢迎窗:窗口先于主窗创建,故 centerOn 走「主显示器工作区居中」分支
 ipcMain.on('wl:rendered', (e) => {
@@ -1214,9 +1214,9 @@ ipcMain.on('wl:rendered', (e) => {
 });
 // 设置窗(原加速设置窗)
 ipcMain.on('acc:rendered', (e) => {
-  if (!trustedEvent(e) || !accelWin || e.sender !== accelWin.webContents) return;
-  fitWindowToContent(accelWin, ACCEL_H_EXPR,
-    { min: ACCEL_MIN_H, max: maxContentHeight(accelWin), recenter: true });
+  if (!trustedEvent(e) || !settingsWin || e.sender !== settingsWin.webContents) return;
+  fitWindowToContent(settingsWin, SETTINGS_H_EXPR,
+    { min: SETTINGS_MIN_H, max: maxContentHeight(settingsWin), recenter: true });
 });
 
 // 解除对话框模态(阶段 0 修复 X3 的配套兜底)。
@@ -1316,55 +1316,86 @@ ipcMain.on('dl:rendered', (e) => {
 
 // ---------- 下载加速设置窗(可视化表单:分段数 / 镜像源,改动即时写入 config.json) ----------
 // 分段数取值区间在 core.js(与 updates.js 的加速下载共用同一份契约)
-let accelWin = null;
-let accelQueued = false; // 窗口仍在加载中(等待 did-finish-load 后展示)
-let accelIdleTimer = null; // 隐藏后的空闲回收定时器(内存优化 P0-3,与对话框同策略)
+let settingsWin = null;
+let settingsQueued = false; // 窗口仍在加载中(等待 did-finish-load 后展示)
+let settingsIdleTimer = null; // 隐藏后的空闲回收定时器(内存优化 P0-3,与对话框同策略)
 
-function scheduleAccelRecycle() {
-  clearTimeout(accelIdleTimer);
-  accelIdleTimer = setTimeout(() => {
-    accelIdleTimer = null;
-    if (!accelWin) return;
+function scheduleSettingsRecycle() {
+  clearTimeout(settingsIdleTimer);
+  settingsIdleTimer = setTimeout(() => {
+    settingsIdleTimer = null;
+    if (!settingsWin) return;
     log('加速设置窗闲置回收:销毁释放渲染进程');
-    accelWin.destroy();
-    accelWin = null;
+    settingsWin.destroy();
+    settingsWin = null;
   }, AUX_IDLE_DESTROY_MS);
 }
-function cancelAccelRecycle() {
-  clearTimeout(accelIdleTimer);
-  accelIdleTimer = null;
+function cancelSettingsRecycle() {
+  clearTimeout(settingsIdleTimer);
+  settingsIdleTimer = null;
 }
 
-// 从 config.json 读当前生效的设置(缺失时回落默认值)
-function accelSettingsFromConfig() {
+// 从 config.json 读当前生效的设置(缺失时回落默认值)。
+// 阶段 3 起按三个分区组织载荷,但**频道与字段名保持旧貌**:acc:get/acc:set/acc:close 三条契约不变,
+// settings.html 只是把原来的下载分区搬进标签页,再多了外观与高级两组字段。
+// section = 菜单深链要落在哪个分区('download' | 'appearance' | 'advanced'),缺省沿用当前分区。
+const SETTINGS_SECTIONS = ['download', 'appearance', 'advanced'];
+
+function settingsPayload(section) {
   const cfg = loadConfig();
   const seg = Math.round(Number(cfg.downloadSegments));
   return {
+    // ① 更新与下载
     segments: Number.isFinite(seg)
       ? Math.max(ACCEL_SEGMENTS_MIN, Math.min(ACCEL_SEGMENTS_MAX, seg))
       : DEFAULT_SEGMENTS,
     downloadMirror: typeof cfg.downloadMirror === 'string' ? cfg.downloadMirror : '',
-    cfgPath: configPath(), // 底部提示"改动保存到哪"
-    // 有更新下载进行中:accel 窗显示提示条(新设置只对下次下载生效)
+    // 有更新下载进行中:设置窗显示提示条(新设置只对下次下载生效)
     downloadActive: !!(updates.state.downloadInProgress || (statusPayload && statusPayload.mode === 'download')),
+    // ② 外观与行为(原 ☰ 菜单里的散落勾选项,收进本窗后仍可从菜单那两处直接抵达)
+    theme: cfg.theme || 'auto',
+    closeAction: cfg.closeAction === 'quit' ? 'quit' : 'tray',
+    openBrowser: !!cfg.openBrowser,
+    // ③ 高级
+    cfgPath: configPath(), // 底部提示"改动保存到哪"
+    logPath: logFile,
+    mem: settingsMemInfo(),
+    section: SETTINGS_SECTIONS.includes(section) ? section : '',
     mica: isWin11(), // 渲染层据此让 Mica 透出(v0.6.1)
   };
 }
 
-function flushAccel() {
-  if (!accelQueued || !accelWin) return;
-  cancelAccelRecycle();
-  accelQueued = false;
-  accelWin.webContents.send('acc:show', accelSettingsFromConfig());
-  centerOn(accelWin, mainWindow);
-  accelWin.show();
-  accelWin.focus();
+// 高级分区的内存读数:与诊断对话框(dlg.mem*)同一口径,壳 + dsh 进程树
+function settingsMemInfo() {
+  const shell = shellMemMB();
+  const total = cachedTotalMemMB ?? shell;
+  return {
+    shell: fmtMB(shell),
+    dsh: fmtMB(Math.max(0, total - shell)),
+    total: fmtMB(total),
+    // 三档评价沿用对话框的分级(基线约 1.4GB),文案键复用 dlg.memLevel*
+    level: total <= 1500 ? t('dlg.memLevelOk') : total <= 2200 ? t('dlg.memLevelHigh') : t('dlg.memLevelVeryHigh'),
+  };
 }
 
-function showAccelSettings() {
-  cancelAccelRecycle(); // 正在使用:取消闲置回收
-  if (!accelWin) {
-    accelWin = new BrowserWindow({
+function flushSettings() {
+  if (!settingsQueued || !settingsWin) return;
+  cancelSettingsRecycle();
+  settingsQueued = false;
+  settingsWin.webContents.send('acc:show', settingsPayload(settingsSection));
+  centerOn(settingsWin, mainWindow);
+  settingsWin.show();
+  settingsWin.focus();
+}
+
+// section: 菜单深链的目标分区('download'|'appearance'|'advanced');窗口复用时也要刷新分区,
+// 否则从「外观与行为设置」点进来,看到的是上次停留的分区
+let settingsSection = 'download';
+function showSettings(section) {
+  cancelSettingsRecycle(); // 正在使用:取消闲置回收
+  if (SETTINGS_SECTIONS.includes(section)) settingsSection = section;
+  if (!settingsWin) {
+    settingsWin = new BrowserWindow({
       // 首帧估算(阶段 3 S2:固定档已撤)。窗口展示后由 acc:rendered 按真实内容高度回填,
       // 内容变高(下载中提示显形/镜像校验文案折行)时窗口跟着长;上限见 maxContentHeight()。
       // 566 的来历:内容 470px + 11px 标签后零余量 + 10px 呼吸(第四轮 X4-5)——仅作估算沿用
@@ -1372,26 +1403,26 @@ function showAccelSettings() {
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
       // Win11 Mica(P2-3 铺开,v0.6.1):与 reportWin 同档系统材质
       backgroundMaterial: isWin11() ? 'mica' : undefined,
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'accel-preload.js') },
+      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'settings-preload.js') },
     });
-    accelWin.setMenuBarVisibility(false);
-    accelWin.loadFile(path.join(__dirname, 'accel.html')).catch(() => {});
-    accelWin.webContents.once('did-finish-load', flushAccel);
-    accelWin.on('closed', () => { accelWin = null; cancelAccelRecycle(); });
-    accelQueued = true;
+    settingsWin.setMenuBarVisibility(false);
+    settingsWin.loadFile(path.join(__dirname, 'settings.html')).catch(() => {});
+    settingsWin.webContents.once('did-finish-load', flushSettings);
+    settingsWin.on('closed', () => { settingsWin = null; cancelSettingsRecycle(); });
+    settingsQueued = true;
     return;
   }
-  if (accelQueued) return; // 仍在加载:等 did-finish-load 统一展示
-  accelWin.webContents.send('acc:show', accelSettingsFromConfig());
-  centerOn(accelWin, mainWindow);
-  accelWin.show();
-  accelWin.focus();
+  if (settingsQueued) return; // 仍在加载:等 did-finish-load 统一展示
+  settingsWin.webContents.send('acc:show', settingsPayload(settingsSection));
+  centerOn(settingsWin, mainWindow);
+  settingsWin.show();
+  settingsWin.focus();
 }
 
 ipcMain.on('acc:close', (e) => {
   if (!trustedEvent(e)) return;
-  accelWin?.hide();
-  scheduleAccelRecycle(); // 隐藏即开始闲置计时(P0-3)
+  settingsWin?.hide();
+  scheduleSettingsRecycle(); // 隐藏即开始闲置计时(P0-3)
 });
 
 ipcMain.on('acc:copy', (e, text) => {
@@ -1401,7 +1432,7 @@ ipcMain.on('acc:copy', (e, text) => {
 
 ipcMain.handle('acc:get', (e) => {
   if (!trustedEvent(e)) return null;
-  return accelSettingsFromConfig();
+  return settingsPayload(settingsSection);
 });
 
 // 校验并保存单个设置项;返回 {ok} 或 {ok:false,error}
@@ -1412,30 +1443,76 @@ ipcMain.handle('acc:set', (e, payload) => {
   const value = payload && payload.value;
   if (field === 'segments') {
     const v = Math.round(Number(value));
-    if (!Number.isFinite(v)) return { ok: false, error: t('accel.errNotInt') };
+    if (!Number.isFinite(v)) return { ok: false, error: t('settings.errNotInt') };
     const clamped = Math.max(ACCEL_SEGMENTS_MIN, Math.min(ACCEL_SEGMENTS_MAX, v));
     const cfg = loadConfig();
     cfg.downloadSegments = clamped;
-    if (!saveConfig(cfg)) return { ok: false, error: t('accel.errSaveFail') };
+    if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
     log(`下载加速设置: 分段数 → ${clamped}`);
     return { ok: true, value: clamped }; // 就地反馈由 accel 窗 .inline-feedback 呈现,不再跨窗重复提示(P0-3)
   }
   if (field === 'mirror') {
     const raw = String(value || '').trim();
     if (raw) {
-      if (!/^https?:\/\//i.test(raw)) return { ok: false, error: t('accel.errProtocol') };
+      if (!/^https?:\/\//i.test(raw)) return { ok: false, error: t('settings.errProtocol') };
       // host 段非空且不含空白(仅协议前缀如 "https://" 或含空格的串,下载时才失败,这里提前拦)
-      if (!/^https?:\/\/[^\s/]+(\/|$)/i.test(raw)) return { ok: false, error: t('accel.errFormat') };
+      if (!/^https?:\/\/[^\s/]+(\/|$)/i.test(raw)) return { ok: false, error: t('settings.errFormat') };
     }
     const cfg = loadConfig();
     if (raw) cfg.downloadMirror = raw;
     else delete cfg.downloadMirror;
-    if (!saveConfig(cfg)) return { ok: false, error: t('accel.errSaveFail') };
+    if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
     log(`下载加速设置: 镜像源 ${raw ? '→ ' + raw : '已清除'}`);
-    return { ok: true, value: raw }; // 同上:accel 窗自带就地反馈(P0-3)
+    return { ok: true, value: raw }; // 同上:设置窗自带就地反馈(P0-3)
   }
-  return { ok: false, error: t('accel.errUnknownField') };
+  // ② 外观与行为的三个字段:它们原本只存在于 ☰ 菜单(runCommand 的 case),收进设置窗后
+  //    两侧必须走同一条落盘路径 —— 否则会出现"在设置里改了、菜单还显示旧值"的漂移。
+  //    故这里复用同一组副作用函数,而不是在窗口里另写一遍。
+  if (field === 'theme') {
+    const v = String(value || '');
+    if (!commands.THEME_KEYS[v]) return { ok: false, error: t('settings.errUnknownField') };
+    return applyThemeChange(v);
+  }
+  if (field === 'closeAction') {
+    return applyCloseAction(value === 'quit' ? 'quit' : 'tray');
+  }
+  if (field === 'openBrowser') {
+    const v = !!value;
+    const cfg = loadConfig();
+    cfg.openBrowser = v;
+    if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
+    log(`自动打开浏览器已切换为: ${v ? '开启' : '关闭'}`);
+    return { ok: true, value: v };
+  }
+  return { ok: false, error: t('settings.errUnknownField') };
 });
+
+// 切主题的一侧副作用(落盘 + 换肤 + 通知 + 命令栏状态),菜单「外观」与设置窗共用。
+// themeSource 一改,全部自绘页经 ui-theme.js 的 matchMedia 自动换肤,无需逐窗通知
+function applyThemeChange(next) {
+  const cfg = loadConfig();
+  cfg.theme = next;
+  if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
+  applyTheme();
+  applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
+  const label = t(commands.THEME_KEYS[cfg.theme]);
+  log(`外观已切换为: ${label}`);
+  notify(t('menu.appearance', { mode: label }));
+  pushTitlebarStatus(); // 命令栏主题钮的提示文案随模式变(阶段 1 S1)
+  return { ok: true, value: cfg.theme };
+}
+
+// 关闭行为的一侧副作用(落盘 + 关闭按钮 tooltip 语义),菜单勾选项与设置窗共用。
+// 返回 {ok,value} 或 {ok:false,error} —— 菜单那条路径忽略返回值,设置窗要拿它做就地反馈
+function applyCloseAction(next) {
+  const v = next === 'quit' ? 'quit' : 'tray';
+  const cfg = loadConfig();
+  cfg.closeAction = v;
+  if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
+  sendCloseTip(); // 标题栏关闭按钮 tooltip 语义同步
+  log(`关闭行为已切换为: ${v === 'quit' ? '直接退出' : '最小化到托盘'}`);
+  return { ok: true, value: v };
+}
 
 // ---------- 错误报告窗(启动失败 / dsh 意外退出,一键导出) ----------
 let reportWin = null;
@@ -1820,44 +1897,30 @@ function runCommand(id) {
     case 'memory-info': showMemoryInfo(); break;
     case 'check-update': updates.checkForUpdates(true); break;
     case 'check-dsh-update': updates.checkDshUpdate(true); break;
-    case 'download-accel': {
-      showAccelSettings(); // 可视化设置窗:分段数 / 镜像源即时保存到 config.json
-      break;
-    }
+    // 设置窗三组深链(阶段 3):菜单项不再各自弹出一个窗,而是带分区名落到同一窗。
+    // 分区由 showSettings(section) 记住,窗口复用时也按新分区刷新
+    case 'settings-download': showSettings('download'); break;
+    case 'settings-appearance': showSettings('appearance'); break;
+    case 'settings-advanced': showSettings('advanced'); break;
     case 'shortcuts': {
       showShortcutsDialog(); // 快捷键速查浮层(P2-2)
       break;
     }
-    case 'auto-open-browser': {
-      // 设置项:启动 dsh 时是否随带打开系统浏览器(dsh 0.1.0-rc.8 起默认会,故桌面壳默认关闭并传 --no-open)
-      const cfg = loadConfig();
-      cfg.openBrowser = !cfg.openBrowser;
-      saveConfig(cfg);
-      log(`自动打开浏览器已切换为: ${cfg.openBrowser ? '开启' : '关闭'}`);
-      break;
-    }
     case 'close-to-tray': {
-      // 设置项:切换"关闭按钮 = 最小化到托盘 / 直接退出"
+      // 设置项:切换"关闭按钮 = 最小化到托盘 / 直接退出"。菜单里保留这一个勾选项
+      // (关闭行为是安全相关开关,一键可达的价值高于"全部收进设置窗"的整齐),
+      // 落盘路径与设置窗共用,故这里走 runCommand 的同一条 case
       const cfg = loadConfig();
-      cfg.closeAction = cfg.closeAction === 'quit' ? 'tray' : 'quit';
-      saveConfig(cfg);
-      sendCloseTip(); // 标题栏关闭按钮 tooltip 语义同步
-      log(`关闭行为已切换为: ${cfg.closeAction === 'quit' ? '直接退出' : '最小化到托盘'}`);
+      applyCloseAction(cfg.closeAction === 'quit' ? 'tray' : 'quit');
       break;
     }
     case 'cycle-theme': {
-      // 外观三态循环:auto(跟随系统) → dark → light → auto
-      // themeSource 变更后,全部自绘页经 ui-theme.js 的 matchMedia 自动换肤,无需逐窗通知
+      // 外观三态循环:auto(跟随系统) → dark → light → auto。两条触发源共用:
+      // ① 命令栏主题按钮(tb:cycle-theme)② 系统主题变化。落盘与换肤的副作用收敛到 applyThemeChange,
+      //    与设置窗的 theme 字段同一条路径 —— 否则"设置里改了主题,命令栏提示还停在旧值"
       const cfg = loadConfig();
       const order = ['auto', 'dark', 'light'];
-      cfg.theme = order[(order.indexOf(cfg.theme || 'auto') + 1) % order.length];
-      saveConfig(cfg);
-      applyTheme();
-      applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
-      const label = t(commands.THEME_KEYS[cfg.theme]);
-      log(`外观已切换为: ${label}`);
-      notify(t('menu.appearance', { mode: label }));
-      pushTitlebarStatus(); // 命令栏主题钮的提示文案随模式变(阶段 1 S1);此路径不走 refreshTray
+      applyThemeChange(order[(order.indexOf(cfg.theme || 'auto') + 1) % order.length]);
       break;
     }
     case 'quit': app.quit(); break;
@@ -2607,7 +2670,7 @@ if (!gotLock) {
         get statusWin() { return statusWin; },
         get dialogWin() { return dialogWin; },
         get reportWin() { return reportWin; },
-        get accelWin() { return accelWin; },
+        get settingsWin() { return settingsWin; },
         get menuPopupView() { return menuPopupView; },
         get trayMenuWin() { return trayMenuWin; },
         get currentBarH() { return currentBarH; },
@@ -2642,7 +2705,7 @@ if (!gotLock) {
         get paletteView() { return paletteView; },
         showPalette, closePalette, paletteOpen,
         PALETTE_W, PALETTE_MARGIN, PALETTE_INPUT_H, PALETTE_ROW_H, PALETTE_MAX_ROWS,
-        toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
+        toggleTitlebar, showSettings, installDshUpdate: updates.installDshUpdate,
         isWin11, // Mica 试点(P2-3):断言 reportWin 的 mica 类与平台判定一致
         configPath, loadConfig, saveConfig,
       };

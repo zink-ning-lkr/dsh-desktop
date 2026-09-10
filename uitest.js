@@ -418,18 +418,18 @@ function runUitest(d) {
     const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
     const main = read('main.js');
     const welcome = read('welcome.html');
-    const accel = read('accel.html');
+    const accel = read('settings.html');
     const wPre = read('welcome-preload.js');
-    const aPre = read('accel-preload.js');
+    const aPre = read('settings-preload.js');
     t('size-max-helper', /function maxContentHeight\(ref\)/.test(main) && /return maxContentHeight\(mainWindow\);/.test(main));
     t('size-welcome-ping', /W\.rendered\(\);/.test(welcome) && /rendered: \(\) => ipcRenderer\.send\('wl:rendered'\)/.test(wPre));
     t('size-accel-ping', /function reportH\(\)/.test(accel) && /reportH\(\);/.test(accel) && /rendered: \(\) => ipcRenderer\.send\('acc:rendered'\)/.test(aPre));
     t('size-welcome-handler', /ipcMain\.on\('wl:rendered'/.test(main) && /fitWindowToContent\(welcomeWin, WELCOME_H_EXPR/.test(main));
-    t('size-accel-handler', /ipcMain\.on\('acc:rendered'/.test(main) && /fitWindowToContent\(accelWin, ACCEL_H_EXPR/.test(main));
+    t('size-accel-handler', /ipcMain\.on\('acc:rendered'/.test(main) && /fitWindowToContent\(settingsWin, SETTINGS_H_EXPR/.test(main));
     t('size-handler-trusted', /!trustedEvent\(e\) \|\| !welcomeWin \|\| e\.sender !== welcomeWin\.webContents/.test(main)
-      && /!trustedEvent\(e\) \|\| !accelWin \|\| e\.sender !== accelWin\.webContents/.test(main));
-    t('size-handler-max', /max: maxContentHeight\(welcomeWin\)/.test(main) && /max: maxContentHeight\(accelWin\)/.test(main));
-    t('size-min-floor', /const WELCOME_MIN_H = 360;/.test(main) && /const ACCEL_MIN_H = 320;/.test(main));
+      && /!trustedEvent\(e\) \|\| !settingsWin \|\| e\.sender !== settingsWin\.webContents/.test(main));
+    t('size-handler-max', /max: maxContentHeight\(welcomeWin\)/.test(main) && /max: maxContentHeight\(settingsWin\)/.test(main));
+    t('size-min-floor', /const WELCOME_MIN_H = 360;/.test(main) && /const SETTINGS_MIN_H = 320;/.test(main));
     // 欢迎页必须量内层 .hero-in:量被 flex:1 拉伸的 .hero 会得到窗口高度,回填就成了自我确认
     t('size-welcome-inner', /class="hero-in"/.test(welcome) && /q\("\.hero-in"\)/.test(main) && /\.hero-in \{ display: flex/.test(welcome));
     // 设置窗量可滚动区的 scrollHeight:被 max 夹住时它仍等于自然内容高
@@ -439,6 +439,46 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST sizing ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2605, 'sizing-static');
+  // ⓥ 设置窗静态契约(阶段 3 v0.8.1):accel.html → settings.html 三分区 + 菜单散项改深链。
+  //    三条硬契约:① acc:get / acc:set / acc:close 频道名不变(方案原文);
+  //    ② 菜单散落的勾选项收进窗里,且**与菜单共用同一条落盘路径**(否则"设置里改了、菜单显示旧值");
+  //    ③ 菜单对应项改为深链 —— 三个入口都通向同一扇窗,而不是各自弹一个。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const html = read('settings.html');
+    const pre = read('settings-preload.js');
+    const cmds = require('./commands');
+    const files = JSON.parse(read('package.json')).build.files;
+    // ① 三条契约不变:频道名原样保留(改动它们要连 preload 与页面一起改,且属破坏性变更)
+    t('set-ipc-unchanged', ['acc:show', 'acc:get', 'acc:set', 'acc:copy', 'acc:close'].every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
+    t('set-no-accel-file', !files.includes('accel.html') && !files.includes('accel-preload.js')
+      && files.includes('settings.html') && files.includes('settings-preload.js'));
+    // ② 落盘路径唯一:菜单勾选项与设置窗都走 applyCloseAction / applyThemeChange
+    t('set-shared-write', /function applyCloseAction\(next\)/.test(main) && /function applyThemeChange\(next\)/.test(main)
+      && /return applyCloseAction\(/.test(main) && /applyThemeChange\(order\[/.test(main));
+    t('set-new-fields', /field === 'theme'/.test(main) && /field === 'closeAction'/.test(main) && /field === 'openBrowser'/.test(main));
+    // ③ 深链:三个入口各带分区名;section 只允许白名单里的值,非法值回落空串(不落到任意分区)
+    t('set-deeplink', /case 'settings-download': showSettings\('download'\)/.test(main)
+      && /case 'settings-appearance': showSettings\('appearance'\)/.test(main)
+      && /case 'settings-advanced': showSettings\('advanced'\)/.test(main)
+      && /const SETTINGS_SECTIONS = \['download', 'appearance', 'advanced'\]/.test(main));
+    // 三分区结构:tablist/tab/tabpanel 齐全,且面板默认只露一个(堆叠会让窗口顶到上限)
+    t('set-three-sections', (html.match(/role="tabpanel"/g) || []).length === 3
+      && html.includes('role="tablist"') && (html.match(/role="tab"/g) || []).length === 3
+      && (html.match(/\shidden>/g) || []).length >= 2);
+    // 分区切换必须回报高度:三个分区内容高度不同,换分区不回报就会留白/裁切
+    t('set-switch-reports', /function selectTab\(i, focus\)/.test(html) && /reportH\(\); \/\/ 换了分区就等于换了内容高度/.test(html));
+    // 菜单项已改名且仍在注册表里:注册表是唯一真名,runCommand 必须有对应 case
+    t('set-registry', ['settings-download', 'settings-appearance', 'settings-advanced'].every((id) => cmds.list.some((c) => c.id === id))
+      && !cmds.list.some((c) => c.id === 'download-accel') && !cmds.list.some((c) => c.id === 'auto-open-browser'));
+    // 勾选项渲染通道不能被清空(菜单 checkbox 的渲染与 a11y-roles 的 chk>=1 断言都依赖它)
+    t('set-keeps-checkbox', cmds.list.some((c) => c.id === 'close-to-tray' && typeof c.checked === 'function'));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST settings ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2606, 'settings-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
@@ -955,37 +995,68 @@ function runUitest(d) {
       server.close();
       try { fs.unlinkSync(dest); } catch { /* ignore */ }
     }
-    // ⑧ 下载加速设置窗冒烟:打开 → 读当前默认 → 保存分段数/镜像源(含非法值校验) → 关闭
+    // ⑧ 设置窗冒烟(阶段 3):深链落到「外观与行为」→ 三分区结构 → 三个字段落盘 →
+    //    回到「更新与下载」验证分段数/镜像源(含非法值校验)→ 尺寸自适应 → 关闭
     try {
-      d.showAccelSettings();
-      hookWin(d.accelWin, 'accel');
-      await new Promise((resolve) => d.accelWin.webContents.once('did-finish-load', resolve));
+      d.showSettings('appearance');
+      hookWin(d.settingsWin, 'settings');
+      await new Promise((resolve) => d.settingsWin.webContents.once('did-finish-load', resolve));
       await new Promise((r) => setTimeout(r, 350)); // 等渲染层 A.get() 初始化表单
-      const before = await d.accelWin.webContents.executeJavaScript('window.__accel.get()');
-      const uiSeg = await d.accelWin.webContents.executeJavaScript('document.getElementById("segN").textContent');
-      const s1 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("segments", 12)');
+      // 三分区结构与深链:带 section 打开时,外观分区必须已选中且只有它可见
+      const tabs = await d.settingsWin.webContents.executeJavaScript('(()=>{const q=(s)=>document.querySelector(s);const sel=q(".tab[aria-selected=\\"true\\"]");const vis=["secDownload","secAppearance","secAdvanced"].filter((id)=>!document.getElementById(id).hidden);return {tab:sel&&sel.id,vis:vis.join(","),n:document.querySelectorAll(".tab").length}})()');
+      const tabOk = tabs.n === 3 && tabs.tab === 'tabAppearance' && tabs.vis === 'secAppearance';
+      d.log(`UITEST settings-tabs tab=${tabs.tab} vis=${tabs.vis} n=${tabs.n} → ${tabOk ? 'PASS' : 'FAIL'}`);
+      // 外观与行为:三个字段经 acc:set 落盘 —— 与菜单勾选项共用同一条落盘路径(否则菜单会显示旧值)
+      const th0 = d.loadConfig().theme;
+      const s1t = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("theme", "dark")');
+      const cfgT = d.loadConfig().theme;
+      const s1c = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("closeAction", "quit")');
+      const cfgC = d.loadConfig().closeAction;
+      const s1b = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("openBrowser", true)');
+      const cfgB = d.loadConfig().openBrowser;
+      const badTheme = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("theme", "nope")');
+      const appOk = s1t.ok && cfgT === 'dark' && s1c.ok && cfgC === 'quit' && s1b.ok && cfgB === true && !badTheme.ok;
+      d.log(`UITEST settings-appearance theme=${cfgT} close=${cfgC} browser=${cfgB} bad=!${badTheme.ok} → ${appOk ? 'PASS' : 'FAIL'}`);
+      // 高级分区:配置文件路径与日志路径都来自主进程,不能是占位默认值
+      const adv = await d.settingsWin.webContents.executeJavaScript('(()=>{document.getElementById("tabAdvanced").click();return {cfg:document.getElementById("cfgPathText").textContent,log:document.getElementById("logPathText").textContent,mem:document.getElementById("memTotalVal").textContent}})()');
+      const advOk = /config\.json$/.test(adv.cfg) && /\.log$/.test(adv.log) && adv.mem !== '—';
+      d.log(`UITEST settings-advanced cfg=${adv.cfg} log=${adv.log} mem=${adv.mem} → ${advOk ? 'PASS' : 'FAIL'}`);
+      // 回到下载分区:原 accel 窗的能力必须一个不少
+      await d.settingsWin.webContents.executeJavaScript('document.getElementById("tabDownload").click()');
+      const before = await d.settingsWin.webContents.executeJavaScript('window.__accel.get()');
+      const uiSeg = await d.settingsWin.webContents.executeJavaScript('document.getElementById("segN").textContent');
+      const s1 = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("segments", 12)');
       const cfg1 = d.loadConfig().downloadSegments;
-      const s2 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "https://m.example.com/dir/")');
+      const s2 = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("mirror", "https://m.example.com/dir/")');
       const cfg2 = d.loadConfig().downloadMirror;
-      const bad = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "not-a-url")');
-      const aCls = await d.accelWin.webContents.executeJavaScript('document.querySelector(".win").classList.contains("mica")');
-      d.log(`UITEST accel-mica cls=${aCls} want=${d.isWin11()} → ${aCls === d.isWin11() ? 'PASS' : 'FAIL'}`);
-      // 尺寸自适应运行锁(阶段 3 S2):原 566 固定档已撤,窗口高度须等于 .content 的自然内容高
-      const winH = d.accelWin.getContentSize()[1];
-      const contentH = await d.accelWin.webContents.executeJavaScript('(()=>{const q=(s)=>document.querySelector(s);return Math.ceil(q(".win-head").getBoundingClientRect().height+q(".content").scrollHeight+q(".foot").getBoundingClientRect().height)})()');
-      const maxH = d.screen.getDisplayMatching(d.accelWin.getBounds()).workArea.height - 120;
+      const bad = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("mirror", "not-a-url")');
+      const aCls = await d.settingsWin.webContents.executeJavaScript('document.querySelector(".win").classList.contains("mica")');
+      d.log(`UITEST settings-mica cls=${aCls} want=${d.isWin11()} → ${aCls === d.isWin11() ? 'PASS' : 'FAIL'}`);
+      // 尺寸自适应运行锁(阶段 3 S2):原 566 固定档已撤,窗口高度须等于 .content 的自然内容高。
+      // 换分区会整体换内容 → 高度必须跟着变(三个分区高度本就不同),这是"自适应"而非"一次性回填"的证据
+      const winH = d.settingsWin.getContentSize()[1];
+      const contentH = await d.settingsWin.webContents.executeJavaScript('(()=>{const q=(s)=>document.querySelector(s);return Math.ceil(q(".win-head").getBoundingClientRect().height+q(".tabs").getBoundingClientRect().height+q(".content").scrollHeight+q(".foot").getBoundingClientRect().height)})()');
+      const maxH = d.screen.getDisplayMatching(d.settingsWin.getBounds()).workArea.height - 120;
       const sizeOk = Math.abs(winH - contentH) <= 8 && winH >= 320 && winH <= maxH;
-      d.log(`UITEST accel-size win=${winH} content=${contentH} max=${maxH} → ${sizeOk ? 'PASS' : 'FAIL'}`);
-      const s3 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "")');
+      d.log(`UITEST settings-size win=${winH} content=${contentH} max=${maxH} → ${sizeOk ? 'PASS' : 'FAIL'}`);
+      await d.settingsWin.webContents.executeJavaScript('document.getElementById("tabAdvanced").click()');
+      await new Promise((r) => setTimeout(r, 250));
+      const winH2 = d.settingsWin.getContentSize()[1];
+      d.log(`UITEST settings-resize download=${winH} advanced=${winH2} → ${winH !== winH2 ? 'PASS 分区切换后高度跟着变' : 'FAIL 高度没跟着分区变'}`);
+      const s3 = await d.settingsWin.webContents.executeJavaScript('window.__accel.set("mirror", "")');
       const cfg3 = d.loadConfig().downloadMirror; // delete 后应为 undefined
       const ok = before.segments === 6 && before.downloadMirror === '' && uiSeg === '6'
         && s1.ok && s1.value === 12 && cfg1 === 12
         && s2.ok && cfg2 === 'https://m.example.com/dir/'
         && !bad.ok && s3.ok && cfg3 === undefined;
-      d.log(`UITEST accel-win ✓ UIseg=${uiSeg} → ${ok ? 'PASS' : 'FAIL'} (seg=${cfg1} mirror=${cfg2} bad=${!bad.ok} cleared=${cfg3 === undefined})`);
-      d.accelWin.close();
+      d.log(`UITEST settings-win ✓ UIseg=${uiSeg} → ${ok ? 'PASS' : 'FAIL'} (seg=${cfg1} mirror=${cfg2} bad=${!bad.ok} cleared=${cfg3 === undefined})`);
+      // 恢复外观三态,别把测试留在 dark/quit/开启浏览器上影响后续步骤
+      await d.settingsWin.webContents.executeJavaScript(`window.__accel.set("theme", ${JSON.stringify(th0 || 'auto')})`);
+      await d.settingsWin.webContents.executeJavaScript('window.__accel.set("closeAction", "tray")');
+      await d.settingsWin.webContents.executeJavaScript('window.__accel.set("openBrowser", false)');
+      d.settingsWin.close();
     } catch (err) {
-      d.log(`UITEST accel-win ✗ ${err.stack || err}`);
+      d.log(`UITEST settings-win ✗ ${err.stack || err}`);
     }
   }, 24200);
   // ⑬ 任务列表 keyed diff 的运行锁(阶段 2 v0.7.14 · 修 C3)。

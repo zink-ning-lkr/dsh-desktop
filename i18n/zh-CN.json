@@ -81,7 +81,10 @@
     "quit": "退出",
     "showMain": "显示 DSH",
     "ariaLabel": "菜单",
-    "enabled": "已启用"
+    "enabled": "已启用",
+    "settingsDownload": "下载与更新设置…",
+    "settingsAppearance": "外观与行为设置…",
+    "settingsAdvanced": "高级设置…"
   },
   "tip": {
     "closeTray": "关闭(最小化到托盘)",
@@ -237,8 +240,8 @@
     "copied": "已复制到剪贴板",
     "exportedFlash": "报告已导出"
   },
-  "accel": {
-    "title": "下载加速设置",
+  "settings": {
+    "title": "设置",
     "segTitle": "多线程分段下载",
     "tagDesktop": "桌面端更新",
     "segHint": "更新安装包将分成多段同时下载并校验 sha512。段数越多越快,但并发过高可能被 CDN 限流;文件过小时会自动退化为单段下载。保存后对<strong>下一次更新下载</strong>生效(进行中的下载不受影响)。",
@@ -265,11 +268,36 @@
     "toastMirrorSaved": "✓ 镜像源已保存",
     "toastReset": "✓ 已恢复官方源",
     "toastCopied": "✓ 命令已复制",
-    "errNotInt": "分段数必须是整数(2-16)",
     "errSaveFail": "保存失败:config.json 写入被拒绝,请稍后重试",
     "errProtocol": "镜像地址必须以 http:// 或 https:// 开头",
     "errFormat": "镜像地址格式无效(需包含主机名,且不能含空格)",
-    "errUnknownField": "未知设置项"
+    "errUnknownField": "未知设置项",
+    "tabDownload": "更新与下载",
+    "tabAppearance": "外观与行为",
+    "tabAdvanced": "高级",
+    "themeTitle": "主题",
+    "themeHint": "「跟随系统」会随系统深浅色自动切换;其余两档为强制。",
+    "closeTitle": "关闭行为",
+    "closeHint": "关闭按钮的行为。收进托盘后应用仍在后台运行,dsh 服务不中断。",
+    "closeTray": "收进托盘",
+    "closeQuit": "直接退出",
+    "browserTitle": "启动时打开浏览器",
+    "browserHint": "开启后 dsh 启动会自动打开系统浏览器。桌面壳已内嵌界面,默认关闭。",
+    "confTitle": "配置文件",
+    "confHint": "所有设置保存在此文件,可直接编辑后重启生效。",
+    "logTitle": "日志文件",
+    "memTitle": "内存占用",
+    "memRefresh": "刷新",
+    "memTotal": "合计",
+    "memShell": "桌面壳",
+    "memDsh": "dsh 本体",
+    "toastTheme": "外观已切换为 {mode}",
+    "toastClose": "关闭行为已更新",
+    "toastBrowser": "已更新",
+    "errNotInt": "分段数必须是 2–16 之间的整数",
+    "tablistAria": "设置分区",
+    "on": "开启",
+    "off": "关闭"
   },
   "welcome": {
     "title": "欢迎使用 DSH Desktop",

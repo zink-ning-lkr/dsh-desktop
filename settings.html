@@ -1,0 +1,464 @@
+<!-- 设置窗(阶段 3):三分区 —— 更新与下载 / 外观与行为 / 高级。
+     由原 accel.html(下载加速设置窗)演进:散落在 ☰ 菜单里的勾选项(主题 / 关闭行为 / 启动浏览器)
+     收回本窗,菜单对应项改为深链(settings.html#download|#appearance|#advanced)。
+     IPC 面与旧 accel 窗完全一致(acc:show / acc:get / acc:set / acc:copy / acc:close / acc:rendered),
+     只是 acc:get 的载荷按分区扩了字段 —— 契约不改,载荷可以长。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>DSH</title>
+<link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
+<script src="ui-kit.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
+    font: var(--font-ui); }
+  .win-head { --head-pad: 12px 20px 8px; }
+  .win-head .ico { width: 18px; height: 18px; color: var(--c-brand); }
+  .win-head .ico svg { width: 17px; height: 17px; }
+  /* 分区切换条:三个分区共用一窗,靠标签切换而不是纵向堆叠 —— 窗口高度按当前分区的内容自适应
+     (acc:rendered 回填);堆叠会让小屏直接顶到上限并开始滚动,三个分区互相干扰视线 */
+  .tabs { flex: none; display: flex; gap: 2px; padding: 2px var(--sp-5) 0; border-bottom: 1px solid var(--c-bg2); }
+  .tab {
+    appearance: none; background: transparent; border: 0; border-bottom: 2px solid transparent;
+    padding: 7px var(--sp-3) 6px; font: var(--fs-ctrl)/var(--lh-ctrl) var(--font-ui); color: var(--c-fg2);
+    cursor: default; border-radius: var(--radius-s) var(--radius-s) 0 0;
+  }
+  .tab:hover { color: var(--c-fg1); background: color-mix(in srgb, var(--c-fg0) 5%, transparent); }
+  .tab[aria-selected="true"] { color: var(--c-fg0); font-weight: 600; border-bottom-color: var(--c-brand); }
+  .tab:focus-visible { outline: 2px solid var(--c-brand); outline-offset: -2px; }
+  .content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: 2px var(--sp-5) 10px; }
+  .sec { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .sec-t { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-dense); color: var(--c-fg0); }
+  .sec-t .tag {
+    font-size: var(--fs-micro); font-weight: 500; line-height: var(--lh-dense); color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 25%, transparent); border-radius: 999px; padding: 1px var(--sp-2); letter-spacing: .02em;
+  }
+  .hint { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-micro); }
+  .hint code { background: var(--c-bg1); border: 1px solid var(--c-bg2); border-radius: 4px; padding: 1px 5px; font-size: var(--fs-micro); color: var(--c-fg1); }
+  .dl-note {
+    font-size: var(--fs-ctrl); color: var(--c-warn); line-height: var(--lh-micro); background: color-mix(in srgb, var(--c-warn) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-warn) 30%, transparent); border-radius: var(--radius-m); padding: 7px 10px;
+  }
+  .seg-row { display: flex; align-items: center; gap: 14px; }
+  input[type=range] { flex: 1; accent-color: var(--c-brand); height: 4px; cursor: default; }
+  .seg-n {
+    flex: none; min-width: 58px; text-align: center; font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-dense); color: var(--c-fg0);
+    font-variant-numeric: tabular-nums; /* 拖动滑杆时数字等宽,数值框内容零横跳 */
+    background: var(--c-bg2); border: 1px solid var(--c-border); border-radius: var(--radius-m); padding: 5px 0;
+  }
+  .seg-n b { color: var(--c-brand-hi); }
+  .row { display: flex; align-items: center; gap: var(--sp-2); }
+  .row .grow { flex: 1; }
+  input[type=text] {
+    flex: 1; min-width: 0; min-height: var(--ctl-h); background: var(--c-bg0); border: 1px solid var(--c-border); border-radius: var(--radius-m);
+    color: var(--c-fg0); font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); padding: 6px 10px; outline: none; user-select: text;
+    font-family: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+    transition: border-color var(--dur-mid);
+  }
+  input[type=text]:focus { border-color: var(--c-brand); }
+  input[type=text]::placeholder { color: var(--c-placeholder); }
+  /* flex:1 + min-width:0:长校验文案占按钮行剩余宽度折行,不被按钮挤压或横向截断 */
+  .err { flex: 1; min-width: 0; min-height: 0; font-size: var(--fs-ctrl); color: var(--c-err); line-height: var(--lh-ctrl); }
+  .cmd {
+    display: flex; align-items: center; gap: var(--sp-2); background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
+    padding: 9px 11px; font: var(--fs-ctrl)/var(--lh-micro) var(--font-mono); color: var(--c-brand-hi);
+    word-break: break-all; user-select: text;
+  }
+  /* 档位选择:一组按钮里当前档高亮,读屏靠 aria-pressed(比 radio 组更贴合"扁平设置条") */
+  .choice { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .choice .btn { min-height: var(--ctl-h); }
+  .choice .btn[aria-pressed="true"] { border-color: var(--c-brand); color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand) 12%, transparent); }
+  /* 路径行:路径文本等宽可截断,复制按钮不随长度跑偏 */
+  .path { display: flex; align-items: center; gap: var(--sp-2); }
+  .path code {
+    flex: 1; min-width: 0; font: var(--fs-ctrl)/var(--lh-micro) var(--font-mono); color: var(--c-fg1);
+    background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m); padding: 6px 9px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text;
+  }
+  .mem { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); align-items: baseline; margin: 0; }
+  .mem dt { font-size: var(--fs-ctrl); color: var(--c-fg2); }
+  .mem dd { margin: 0; font-size: var(--fs-ctrl); color: var(--c-fg1); font-variant-numeric: tabular-nums; }
+  .mem dd.total { color: var(--c-fg0); font-weight: 600; }
+  /* Win11 Mica(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
+  .win.mica { --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent); --win-shadow: none; }
+  .foot { flex: none; display: flex; align-items: center; gap: 10px; padding: var(--sp-2) var(--sp-5) 10px; border-top: 1px solid var(--c-bg2); }
+  .foot .note { flex: 1; min-width: 0; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .foot .note code { color: var(--c-fg2); }
+  /* 就地反馈走 ui.css 公共 .inline-feedback(与 report 窗同一套,样式/配色单一来源) */
+</style>
+</head>
+<body>
+<div class="win" role="main">
+  <div class="win-head">
+    <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.4M12 18.4v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M6.9 17.1l-1.7 1.7M18.8 5.2l-1.7 1.7" stroke-linecap="round"/></svg></span>
+    <span class="t" id="headTitle"></span>
+    <button class="win-close" id="xBtn" title="" aria-label=""><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
+  <!-- 分区标签:WAI-ARIA tabs 模式(roving tabindex + ←→/Home/End),与项目其余列表同一套键盘契约 -->
+  <div class="tabs" role="tablist" id="tabs">
+    <button class="tab" type="button" role="tab" id="tabDownload" aria-controls="secDownload" aria-selected="true" tabindex="0"></button>
+    <button class="tab" type="button" role="tab" id="tabAppearance" aria-controls="secAppearance" aria-selected="false" tabindex="-1"></button>
+    <button class="tab" type="button" role="tab" id="tabAdvanced" aria-controls="secAdvanced" aria-selected="false" tabindex="-1"></button>
+  </div>
+
+  <div class="content">
+    <!-- ① 更新与下载(原 accel 窗的全部内容) -->
+    <div class="sec" id="secDownload" role="tabpanel" aria-labelledby="tabDownload" tabindex="0">
+      <div class="sec">
+        <div class="sec-t"><span id="segTitle"></span><span class="tag" id="tagDesktop"></span></div>
+        <div class="seg-row">
+          <input type="range" id="seg" min="2" max="16" step="1">
+          <span class="seg-n"><span id="segPre"></span> <b id="segN">6</b> <span id="segSuf"></span></span>
+        </div>
+        <div class="hint" id="segHint"></div>
+        <div class="dl-note" id="dlNote" style="display:none"></div>
+      </div>
+
+      <!-- ② 镜像源(可选,桌面端更新) -->
+      <div class="sec">
+        <div class="sec-t"><span id="mirrorTitle"></span><span class="tag" id="tagOptional"></span></div>
+        <div class="row">
+          <input type="text" id="mirror" spellcheck="false">
+        </div>
+        <div class="row">
+          <button class="btn primary" id="mirrorSave"></button>
+          <button class="btn danger-ghost" id="mirrorClear"></button>
+          <span class="err" id="mirrorErr" aria-live="polite"></span>
+        </div>
+        <div class="hint" id="mirrorHint"></div>
+      </div>
+
+      <!-- ③ dsh 本体更新加速(npm) -->
+      <div class="sec">
+        <div class="sec-t"><span id="npmTitle"></span><span class="tag" id="tagNpm"></span></div>
+        <div class="hint" id="npmHint"></div>
+        <div class="cmd" id="npmCmd"></div>
+        <div class="row">
+          <button class="btn" id="npmCopy"></button>
+          <span class="hint" id="npmAfter"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ② 外观与行为 -->
+    <div class="sec" id="secAppearance" role="tabpanel" aria-labelledby="tabAppearance" tabindex="0" hidden>
+      <div class="sec">
+        <div class="sec-t"><span id="themeTitle"></span></div>
+        <div class="choice" id="themeChoice">
+          <button class="btn" type="button" data-theme="auto" aria-pressed="false"></button>
+          <button class="btn" type="button" data-theme="dark" aria-pressed="false"></button>
+          <button class="btn" type="button" data-theme="light" aria-pressed="false"></button>
+        </div>
+        <div class="hint" id="themeHint"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-t"><span id="closeTitle"></span></div>
+        <div class="choice" id="closeChoice">
+          <button class="btn" type="button" data-close="tray" aria-pressed="false"></button>
+          <button class="btn" type="button" data-close="quit" aria-pressed="false"></button>
+        </div>
+        <div class="hint" id="closeHint"></div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-t"><span id="browserTitle"></span></div>
+        <div class="choice" id="browserChoice">
+          <button class="btn" type="button" data-browser="off" aria-pressed="false"></button>
+          <button class="btn" type="button" data-browser="on" aria-pressed="false"></button>
+        </div>
+        <div class="hint" id="browserHint"></div>
+      </div>
+    </div>
+
+    <!-- ③ 高级 -->
+    <div class="sec" id="secAdvanced" role="tabpanel" aria-labelledby="tabAdvanced" tabindex="0" hidden>
+      <div class="sec">
+        <div class="sec-t"><span id="confTitle"></span></div>
+        <div class="path"><code id="cfgPathText">config.json</code><button class="btn" id="cfgCopy" type="button"></button></div>
+        <div class="hint" id="confHint"></div>
+      </div>
+      <div class="sec">
+        <div class="sec-t"><span id="logTitle"></span></div>
+        <div class="path"><code id="logPathText">dsh-web.log</code><button class="btn" id="logCopy" type="button"></button></div>
+      </div>
+      <div class="sec">
+        <div class="sec-t"><span id="memTitle"></span></div>
+        <dl class="mem">
+          <dt id="memShellLabel"></dt><dd id="memShellVal">—</dd>
+          <dt id="memDshLabel"></dt><dd id="memDshVal">—</dd>
+          <dt id="memTotalLabel"></dt><dd class="total" id="memTotalVal">—</dd>
+        </dl>
+        <div class="row">
+          <button class="btn" id="memRefresh" type="button"></button>
+          <span class="hint" id="memLevel"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="note"><span id="saveNote"></span><code id="cfgPath">config.json</code></span>
+    <span class="inline-feedback" id="toast"></span>
+  </div>
+</div>
+<script>
+  const A = window.__accel;
+  // 复合构件走共享层(阶段 0):就地反馈
+  const K = window.UI_KIT;
+  // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <i> 标签),用 innerHTML
+  const T = (k, p) => window.__i18n.t(k, p);
+  {
+    document.title = T('settings.title');
+    const set = (id, k) => { const el = document.getElementById(id); if (el) el.textContent = T(k); };
+    set('headTitle', 'settings.title');
+    set('tabDownload', 'settings.tabDownload');
+    set('tabAppearance', 'settings.tabAppearance');
+    set('tabAdvanced', 'settings.tabAdvanced');
+    set('segTitle', 'settings.segTitle');
+    set('tagDesktop', 'settings.tagDesktop');
+    set('segPre', 'settings.segPre');
+    set('segSuf', 'settings.segSuf');
+    set('dlNote', 'settings.dlNote');
+    set('mirrorTitle', 'settings.mirrorTitle');
+    set('tagOptional', 'settings.tagOptional');
+    set('mirrorSave', 'settings.save');
+    set('mirrorClear', 'settings.clear');
+    set('npmTitle', 'settings.npmTitle');
+    set('tagNpm', 'settings.tagNpm');
+    set('npmHint', 'settings.npmHint');
+    set('npmCmd', 'settings.npmCmd');
+    set('npmCopy', 'settings.copyCmd');
+    set('npmAfter', 'settings.npmAfter');
+    set('saveNote', 'settings.saveNote');
+    // 外观与行为
+    set('themeTitle', 'settings.themeTitle');
+    set('themeHint', 'settings.themeHint');
+    set('closeTitle', 'settings.closeTitle');
+    set('closeHint', 'settings.closeHint');
+    set('browserTitle', 'settings.browserTitle');
+    set('browserHint', 'settings.browserHint');
+    // 高级
+    set('confTitle', 'settings.confTitle');
+    set('confHint', 'settings.confHint');
+    set('logTitle', 'settings.logTitle');
+    set('memTitle', 'settings.memTitle');
+    set('memRefresh', 'settings.memRefresh');
+    document.getElementById('segHint').innerHTML = T('settings.segHint');
+    document.getElementById('mirrorHint').innerHTML = T('settings.mirrorHint');
+    document.getElementById('seg').setAttribute('aria-label', T('settings.segAria'));
+    // 三档主题按钮:文案与菜单「外观」同表(commands.js THEME_KEYS),不另写一份
+    for (const b of document.querySelectorAll('#themeChoice .btn')) {
+      b.textContent = T('menu.appearance' + b.dataset.theme.charAt(0).toUpperCase() + b.dataset.theme.slice(1));
+    }
+    // 分区切换条的可访问名入表(aria-label 也是面向读屏的文案,不能硬编码中文)
+    document.getElementById('tabs').setAttribute('aria-label', T('settings.tablistAria'));
+    for (const b of document.querySelectorAll('#closeChoice .btn')) {
+      b.textContent = b.dataset.close === 'quit' ? T('settings.closeQuit') : T('settings.closeTray');
+    }
+    for (const b of document.querySelectorAll('#browserChoice .btn')) {
+      b.textContent = b.dataset.browser === 'on' ? T('settings.on') : T('settings.off');
+    }
+    set('memShellLabel', 'settings.memShell');
+    set('memDshLabel', 'settings.memDsh');
+    set('memTotalLabel', 'settings.memTotal');
+    for (const id of ['cfgCopy', 'logCopy']) {
+      const el = document.getElementById(id);
+      el.textContent = T('settings.copyCmd');
+      el.setAttribute('aria-label', T('settings.copyCmd') + ':' + (id === 'cfgCopy' ? T('settings.confTitle') : T('settings.logTitle')));
+    }
+    const mirrorEl = document.getElementById('mirror');
+    mirrorEl.placeholder = T('settings.mirrorPlaceholder');
+    mirrorEl.setAttribute('aria-label', T('settings.mirrorAria'));
+    const xEl = document.getElementById('xBtn');
+    xEl.title = T('common.close');
+    xEl.setAttribute('aria-label', T('common.close'));
+  }
+  let cur = null;
+
+  // 内容高度回报(阶段 3 S2):窗口尺寸不再是固定档,凡可能改高度的写入都回报一次。
+  // 分区切换会整体换掉可见内容,更要回报 —— 三个分区的内容高度本来就不一样。
+  // 绝不在 resize 上回报:setContentSize 自身会触发 resize,挂上去就是自激循环
+  function reportH() { requestAnimationFrame(() => A.rendered()); }
+
+  function toast(msg, ok) {
+    // 就地反馈走共享构件(.inline-feedback + 统一 2200ms)。
+    // 原实现在本页自维护一个反馈计时器与 2600ms 时长,与 report 的 1800ms 并存——
+    // 同一交互两种时长,收编后由 ui-kit 一处决定;连点不叠加由构件内的 WeakMap 计时器保证
+    K.feedback(document.getElementById('toast'), msg, { ok });
+  }
+
+  const seg = document.getElementById('seg');
+  const segN = document.getElementById('segN');
+  const mirror = document.getElementById('mirror');
+  const mirrorErr = document.getElementById('mirrorErr');
+
+  /* ---------- 分区切换(WAI-ARIA tabs) ---------- */
+  const TABS = [
+    { btn: document.getElementById('tabDownload'), panel: document.getElementById('secDownload'), key: 'download' },
+    { btn: document.getElementById('tabAppearance'), panel: document.getElementById('secAppearance'), key: 'appearance' },
+    { btn: document.getElementById('tabAdvanced'), panel: document.getElementById('secAdvanced'), key: 'advanced' },
+  ];
+  let active = 0;
+  function selectTab(i, focus) {
+    active = Math.max(0, Math.min(TABS.length - 1, i));
+    TABS.forEach((t, k) => {
+      const on = k === active;
+      t.btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.btn.tabIndex = on ? 0 : -1;
+      t.panel.hidden = !on;
+    });
+    if (focus) TABS[active].btn.focus();
+    reportH(); // 换了分区就等于换了内容高度
+  }
+  TABS.forEach((t, k) => {
+    t.btn.addEventListener('click', () => selectTab(k));
+    t.btn.addEventListener('keydown', (e) => {
+      // tabs 模式:←→ 在标签间移动(首尾循环),Home/End 到两端;Enter/Space 由原生 button 激活
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); selectTab((active + 1) % TABS.length, true); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); selectTab((active - 1 + TABS.length) % TABS.length, true); }
+      else if (e.key === 'Home') { e.preventDefault(); selectTab(0, true); }
+      else if (e.key === 'End') { e.preventDefault(); selectTab(TABS.length - 1, true); }
+    });
+  });
+
+  /* ---------- ① 更新与下载 ---------- */
+  function apply(p) {
+    cur = p;
+    if (p.mica) document.querySelector('.win')?.classList.add('mica'); // Win11 材质透出(v0.6.1)
+    seg.value = p.segments;
+    setSegText(p.segments);
+    mirror.value = p.downloadMirror || '';
+    mirrorErr.textContent = '';
+    document.getElementById('cfgPath').textContent = p.cfgPath || 'config.json';
+    // 下载进行中打开设置窗:提示新设置只对下次下载生效,避免误以为能加速当前下载
+    document.getElementById('dlNote').style.display = p.downloadActive ? '' : 'none';
+    // 外观与行为:值来自主进程 config,本页只做呈现与回写
+    setChoice('themeChoice', 'theme', p.theme || 'auto');
+    setChoice('closeChoice', 'close', p.closeAction === 'quit' ? 'quit' : 'tray');
+    setChoice('browserChoice', 'browser', p.openBrowser ? 'on' : 'off');
+    // 高级:路径与内存(内存由主进程算,与诊断对话框同一口径)
+    document.getElementById('cfgPathText').textContent = p.cfgPath || 'config.json';
+    document.getElementById('logPathText').textContent = p.logPath || '';
+    renderMem(p.mem);
+    // 深链:菜单里的「…设置」项带着分区名来,落到对应分区(不带则沿用当前分区)
+    const i = TABS.findIndex((t) => t.key === p.section);
+    if (i >= 0) selectTab(i);
+    reportH();
+  }
+  function setChoice(id, attr, val) {
+    for (const b of document.querySelectorAll('#' + id + ' .btn')) {
+      b.setAttribute('aria-pressed', b.dataset[attr] === String(val) ? 'true' : 'false');
+    }
+  }
+  function renderMem(mem) {
+    const put = (id, text) => { document.getElementById(id).textContent = text; };
+    put('memShellVal', (mem && mem.shell) || '—');
+    put('memDshVal', (mem && mem.dsh) || '—');
+    put('memTotalVal', (mem && mem.total) || '—');
+    put('memLevel', (mem && mem.level) || '');
+  }
+
+  // 滑杆:拖动实时预览数值,松手保存;读屏经 aria-valuetext 播报「N 段」(值本身只是裸数字)
+  function setSegText(n) {
+    segN.textContent = n;
+    seg.setAttribute('aria-valuetext', T('settings.segAriaVal', { n }));
+  }
+  seg.addEventListener('input', () => setSegText(seg.value));
+  seg.addEventListener('change', async () => {
+    const r = await A.set('segments', seg.value);
+    if (r.ok) { setSegText(r.value); toast(T('settings.toastSeg', { n: r.value }), true); }
+    else { seg.value = cur ? cur.segments : 6; setSegText(seg.value); toast(r.error, false); }
+  });
+
+  async function saveMirror() {
+    const v = mirror.value.trim();
+    const r = await A.set('mirror', v);
+    if (r.ok) {
+      mirror.value = r.value;
+      mirrorErr.textContent = '';
+      toast(r.value ? T('settings.toastMirrorSaved') : T('settings.toastReset'), true);
+    } else {
+      // 错误只在字段级就地呈现(配合 aria-live 播报);底部 toast 只报成功/状态
+      mirrorErr.textContent = r.error;
+      reportH(); // 校验文案可能折行成两行 → 窗口要跟着长,别把按钮挤出可视区
+    }
+  }
+  document.getElementById('mirrorSave').addEventListener('click', saveMirror);
+  document.getElementById('mirrorClear').addEventListener('click', async () => {
+    const r = await A.set('mirror', '');
+    if (r.ok) { mirror.value = ''; mirrorErr.textContent = ''; toast(T('settings.toastReset'), true); }
+    else { mirrorErr.textContent = r.error; reportH(); } // 清除失败(写入被拒)同样就地呈现,不再静默
+  });
+  mirror.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveMirror(); });
+
+  document.getElementById('npmCopy').addEventListener('click', () => {
+    A.copy(document.getElementById('npmCmd').textContent);
+    toast(T('settings.toastCopied'), true);
+  });
+
+  /* ---------- ② 外观与行为(原散落在 ☰ 菜单里的勾选项) ---------- */
+  // 三组档位按钮共用一套回写:点哪个就把哪个值写进 config。
+  // 写失败时**不动高亮** —— 高亮代表磁盘上真实生效的值,而不是"用户刚才点了什么"
+  function chooseGroup(id, attr, field, okMsg) {
+    for (const b of document.querySelectorAll('#' + id + ' .btn')) {
+      b.addEventListener('click', async () => {
+        const raw = b.dataset[attr];
+        const value = field === 'openBrowser' ? raw === 'on' : raw;
+        const r = await A.set(field, value);
+        if (!r.ok) { toast(r.error, false); return; }
+        const next = field === 'openBrowser' ? (r.value ? 'on' : 'off') : String(r.value);
+        if (cur) {
+          if (field === 'theme') cur.theme = next;
+          else if (field === 'closeAction') cur.closeAction = next;
+          else cur.openBrowser = !!r.value;
+        }
+        setChoice(id, attr, next);
+        toast(okMsg(next), true);
+      });
+    }
+  }
+  const themeLabel = (v) => T('menu.appearance' + v.charAt(0).toUpperCase() + v.slice(1));
+  chooseGroup('themeChoice', 'theme', 'theme', (v) => T('settings.toastTheme', { mode: themeLabel(v) }));
+  chooseGroup('closeChoice', 'close', 'closeAction', () => T('settings.toastClose'));
+  chooseGroup('browserChoice', 'browser', 'openBrowser', () => T('settings.toastBrowser'));
+
+  /* ---------- ③ 高级 ---------- */
+  const copyPath = (text) => { A.copy(text); toast(T('settings.toastCopied'), true); };
+  document.getElementById('cfgCopy').addEventListener('click', () => copyPath(document.getElementById('cfgPathText').textContent));
+  document.getElementById('logCopy').addEventListener('click', () => copyPath(document.getElementById('logPathText').textContent));
+  // 内存:重新枚举 dsh 进程树一次(与诊断对话框同一口径),由主进程回推
+  document.getElementById('memRefresh').addEventListener('click', async () => {
+    const p = await A.get().catch(() => null);
+    if (!p) return;
+    renderMem(p.mem);
+    if (cur) cur.mem = p.mem;
+    if (p.section) { const i = TABS.findIndex((t) => t.key === p.section); if (i >= 0) selectTab(i); }
+    reportH();
+  });
+
+  // 关闭护栏:分段数即时保存,镜像却需显式保存——直接关窗会静默丢弃已输入的合法地址
+  // (60s 回收后下次打开按 config 回填)。关闭前有未保存变更时:合法则自动落盘后关闭,
+  // 校验失败则留在窗口聚焦输入框修正(或清空后关闭),与「改动即时保存」的窗内承诺一致
+  async function closeGuarded() {
+    const saved = cur ? String(cur.downloadMirror || '') : '';
+    const typed = mirror.value.trim();
+    if (typed !== saved) {
+      const r = await A.set('mirror', typed);
+      if (!r.ok) { mirrorErr.textContent = r.error; reportH(); mirror.focus(); return; }
+    }
+    A.close();
+  }
+  document.getElementById('xBtn').addEventListener('click', closeGuarded);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuarded(); });
+
+  A.onShow(apply);
+  A.get().then((p) => { if (p) { apply(p); segN.textContent = p.segments; } }).catch(() => {}); // 异常时不改表单,保持默认值
+  // 兜底回报:即使 A.get() 失败(上面 catch 里不 apply),窗口也至少要按默认表单回填一次高度
+  reportH();
+</script>
+</body>
+</html>
