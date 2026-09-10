@@ -216,6 +216,48 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST cmdbar ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2575, 'cmdbar-static');
+  // ⓠ 命令注册表静态契约(阶段 2·可发现性):commands.js 是「☰ 菜单 / 命令面板 / 托盘菜单」
+  //    三方唯一来源。它一旦与执行侧脱节,表现是"面板里看得到这条命令、点下去毫无反应"——
+  //    静默失败,且只在命令面板里可见(菜单恰恰因为不走这条 id 而看起来一切正常)。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const cmds = require('./commands');
+    const i18n = require('./i18n');
+    const files = JSON.parse(read('package.json')).build.files;
+    // 注册表本体:进白名单 + 主进程真的在用它拼条目
+    t('cmd-packed', files.includes('commands.js'));
+    t('cmd-require', main.includes("require('./commands')") && /function commandCtx\(\)/.test(main));
+    t('cmd-menu-from-registry', /function menuItems\(\)[\s\S]{0,1200}?commands\.list/.test(main));
+    // 唯一真名正向:每个注册表 id 必须能在 runCommand 里找到执行分支
+    const missing = cmds.list.filter((c) => !main.includes(`case '${c.id}':`)).map((c) => c.id);
+    t('cmd-ids', missing.length === 0);
+    // 反向:runCommand 不许出现注册表以外的 case(残留的孤儿分支会让人误以为命令还在)
+    const declared = new Set(cmds.list.map((c) => c.id));
+    const orphans = [...(main.match(/case '[a-z-]+':/g) || [])]
+      .map((s) => s.slice(6, -2))
+      .filter((id) => !declared.has(id));
+    t('cmd-no-orphan', orphans.length === 0);
+    // 分组名/分类名合法,且每个分组都能取到标题(缺键会在菜单与面板里渲染成 cmd.groupXxx 裸键)
+    t('cmd-groups', cmds.groups.length >= 4
+      && cmds.list.every((c) => cmds.groups.includes(c.group) && cmds.KINDS.includes(c.kind))
+      && cmds.groups.every((g) => i18n.t(cmds.groupLabelKey(g)) !== cmds.groupLabelKey(g)));
+    // 文案可解析:用桩上下文把所有 label 跑一遍——菜单文案表漏键(渲染成 menu.xxx 裸键)当场现形
+    const ctx = { t: i18n.t, cfg: {}, barVisible: true, version: '0.0.0', dshVersion: '0.0.0', mem: '0 MB', isPortable: false };
+    const bare = cmds.list.filter((c) => /^(menu|cmd)\./.test(cmds.labelOf(c, ctx))).map((c) => c.id);
+    t('cmd-labels', bare.length === 0);
+    // 快捷键不许有孤儿:shortcuts.js 的每个 id 都必须是注册表里的命令,否则该快捷键指向不存在的命令
+    const sc = require('./shortcuts');
+    t('cmd-accel-linked', sc.list.every((s) => declared.has(s.id)));
+    // 迁移完成标志:主菜单条目不得再手写 label(手写一份 = 又回到"改一处漏一处")
+    t('cmd-menu-no-inline', !/id: 'open-workspace', label: t\(/.test(main));
+    // 托盘菜单也接注册表(加速键/勾选态不再各写一份)
+    t('cmd-tray-linked', /function trayMenuItems\(\)[\s\S]{0,900}?commands\.labelOf/.test(main));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST cmd ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}${missing.length ? ` 缺执行分支:${missing.join(',')}` : ''}${orphans.length ? ` 孤儿分支:${orphans.join(',')}` : ''}${bare.length ? ` 裸键:${bare.join(',')}` : ''}`);
+  }, 2598, 'cmd-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。

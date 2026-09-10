@@ -82,6 +82,7 @@ const { DEFAULT_SEGMENTS } = require('./downloader');
 const core = require('./core');
 const { log, flushLog, logFile, loadConfig, saveConfig, configPath, crashFilePath, redactToken, ACCEL_SEGMENTS_MIN, ACCEL_SEGMENTS_MAX } = core;
 const shortcuts = require('./shortcuts'); // 快捷键单一数据源(P2-2):菜单文案/accelerator/速查浮层共用
+const commands = require('./commands'); // 命令注册表(阶段 2):☰ 菜单 / 命令面板 / 托盘菜单共用同一份条目
 const i18n = require('./i18n'); // 文案集中(P2-6 结构先行):主进程自绘文案渐进收编,渲染层后续接入
 const { t } = i18n;
 const dshProc = require('./dsh-process');
@@ -510,17 +511,31 @@ function trayMenuStatusLabel() {
   return `dsh${v ? ` v${v}` : ''} · ${st}${up}`;
 }
 
+// 托盘菜单(阶段 2):条目元信息取自注册表(commands.js),加速键与勾选态不再各写一份。
+// 两处有意不回注册表:① tray-status 是只读状态行,不属命令域;② check-update 在托盘用短文案——
+// 托盘菜单宽固定 264px,'检查更新…(便携版请手动下载)' 会被省略号截掉,托盘场景要的是"能点就行"。
+// show-main 只进托盘与命令面板(主窗隐藏时从托盘/面板唤起),故注册表里标了 menu:false。
 function trayMenuItems() {
+  const ctx = commandCtx();
+  const pick = (id) => {
+    const c = commands.list.find((x) => x.id === id);
+    const it = { type: 'item', id, label: commands.labelOf(c, ctx) };
+    const accel = commands.accelOf(id);
+    if (accel) it.accel = accel;
+    const checked = commands.checkedOf(c, ctx);
+    if (checked !== undefined) it.checked = checked;
+    return it;
+  };
   return [
     { type: 'item', id: 'tray-status', label: trayMenuStatusLabel(), enabled: false }, // 只读状态行(P0-3)
     { type: 'sep' },
-    { type: 'item', id: 'show-main', label: t('menu.showMain') },
-    { type: 'item', id: 'open-workspace', label: t('menu.openWorkspace'), accel: 'Ctrl+O' },
+    pick('show-main'),
+    pick('open-workspace'),
     { type: 'item', id: 'check-update', label: IS_PORTABLE ? t('menu.checkUpdate') : t('menu.checkUpdateCurrent', { v: app.getVersion() }) },
     { type: 'sep' },
-    { type: 'item', id: 'close-to-tray', label: t('menu.closeToTray'), checked: loadConfig().closeAction !== 'quit' },
+    pick('close-to-tray'),
     { type: 'sep' },
-    { type: 'item', id: 'quit', label: t('menu.quit') },
+    pick('quit'),
   ];
 }
 
@@ -1579,38 +1594,40 @@ async function showMemoryInfo() {
   });
 }
 
+// 命令注册表的运行时上下文(阶段 2):注册表只描述"有哪些命令",值从哪来由这里拼。
+// 集中在一处,菜单与命令面板取到的是同一帧的同一份值(否则两处会各自 loadConfig 一次,
+// 面板里显示的外观模式可能比菜单晚一帧 → 用户看到两个不一样的当前值)。
+function commandCtx() {
+  return {
+    t,
+    cfg: loadConfig(),
+    barVisible,
+    version: app.getVersion(),
+    dshVersion: dshVersion(),
+    mem: fmtMB(cachedTotalMemMB ?? shellMemMB()),
+    isPortable: IS_PORTABLE,
+  };
+}
+
+// ☰ 主菜单条目(阶段 2):由 commands.js 注册表生成,不再手写第二份顺序与文案。
+// menu:false 的条目(复制路径 / 任务中心)只进命令面板,菜单留底部一行「所有命令…」引过去。
+// 分组分隔符暂用 type:'sep'(v0.7.13 换成分组小标题,届时这里改为 type:'sec')。
 function menuItems() {
-  // 快捷键文案与 buildMenu 的 accelerator 同源自 shortcuts.js(P2-2),不手写第二份
-  const AC = Object.fromEntries(shortcuts.list.map((s) => [s.id, shortcuts.display(s.menu)]));
-  // 标签统一走 i18n 文案表(v0.6.2);外观三态循环(auto→dark→light):扁平菜单无子菜单,
-  // 单条目循环最省行数,label 即当前值
-  const mode = t({ auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' }[loadConfig().theme || 'auto']);
-  return [
-    { type: 'item', id: 'open-workspace', label: t('menu.openWorkspace'), accel: AC['open-workspace'] },
-    { type: 'item', id: 'restart-dsh', label: t('menu.restartDsh'), accel: AC['restart-dsh'] },
-    { type: 'item', id: 'open-browser', label: t('menu.openBrowser') },
-    { type: 'sep' },
-    { type: 'item', id: 'fullscreen', label: t('menu.fullscreen'), accel: AC['fullscreen'] },
-    { type: 'item', id: 'toggle-bar', label: barVisible ? t('menu.hideBar') : t('menu.showBar'), accel: AC['toggle-bar'] },
-    { type: 'item', id: 'reload', label: t('menu.reload'), accel: AC['reload'] },
-    { type: 'item', id: 'devtools', label: t('menu.devtools'), accel: AC['devtools'] },
-    { type: 'sep' },
-    { type: 'item', id: 'dsh-home', label: t('menu.dshHome') },
-    { type: 'item', id: 'log', label: t('menu.openLog') },
-    { type: 'item', id: 'memory-info', label: t('menu.memoryInfo', { n: fmtMB(cachedTotalMemMB ?? shellMemMB()) }) },
-    { type: 'item', id: 'check-update', label: IS_PORTABLE ? t('menu.checkUpdatePortable') : t('menu.checkUpdateCurrent', { v: app.getVersion() }) },
-    { type: 'item', id: 'check-dsh-update', label: t('menu.checkDshUpdate', { v: dshVersion() }) },
-    { type: 'item', id: 'download-accel', label: t('menu.downloadAccel') },
-    { type: 'item', id: 'shortcuts', label: t('menu.shortcuts') },
-    { type: 'sep' },
-    { type: 'item', id: 'auto-open-browser', label: t('menu.autoOpenBrowser'), checked: !!loadConfig().openBrowser },
-    { type: 'item', id: 'close-to-tray', label: t('menu.closeToTray'), checked: loadConfig().closeAction !== 'quit' },
-    { type: 'item', id: 'cycle-theme', label: t('menu.appearance', { mode }) },
-    { type: 'sep' },
-    // 注意:这里不显示 Alt+F4 快捷键。默认「关闭时最小化到托盘」下,Alt+F4 只隐藏窗口而非退出,
-    // 提示该快捷键会误导用户;点击本项是真正的 app.quit()
-    { type: 'item', id: 'quit', label: t('menu.quit') },
-  ];
+  const ctx = commandCtx();
+  const items = [];
+  let prevGroup = null;
+  for (const c of commands.list) {
+    if (c.menu === false) continue;
+    if (prevGroup !== null && c.group !== prevGroup) items.push({ type: 'sep' });
+    prevGroup = c.group;
+    const it = { type: 'item', id: c.id, label: commands.labelOf(c, ctx) };
+    const accel = commands.accelOf(c.id);
+    if (accel) it.accel = accel; // 无快捷键的命令不带 accel 字段,menu.html 也就不会画空白槽位
+    const checked = commands.checkedOf(c, ctx);
+    if (checked !== undefined) it.checked = checked; // 返回 undefined 才是普通 menuitem,不能写成 falsy 判断
+    items.push(it);
+  }
+  return items;
 }
 
 // 快捷键速查浮层(P2-2):数据源与菜单弹层/应用菜单同源(shortcuts.js),不手写第二份
@@ -1701,10 +1718,9 @@ ipcMain.on('tb:menu', (e) => {
   showMenuPopup();
 });
 
-// 命令分发单一入口(阶段 1 S1):主菜单弹层 / 托盘菜单 / 命令栏状态簇走同一实现,
-// 不再各自维护一份 switch(此前命令栏若要复用只能照抄一份,必然漂移)。
-// 阶段 2 的 commands.js 会把这里提升为「id → {labelKey, icon, accel, run}」注册表,届时
-// 本函数退化为注册表查表执行;现在先把入口收敛,保证三条路径行为一致。
+// 命令分发单一入口(阶段 1 S1,阶段 2 收口):主菜单弹层 / 托盘菜单 / 命令栏状态簇 /
+// 命令面板全部走同一实现。命令的"元信息"(分组/分类/文案/勾选态/加速键)归 commands.js,
+// 本函数只管"执行"——注册表描述命令,这里执行命令,职责不重叠。
 function runCommand(id) {
   switch (id) {
     case 'show-main': showMainWindow(); break;
@@ -1713,6 +1729,8 @@ function runCommand(id) {
     case 'open-browser': if (dshWebUrl) shell.openExternal(dshWebUrl); break;
     case 'fullscreen': toggleFullscreen(); break;
     case 'toggle-bar': toggleTitlebar(!barVisible); break;
+    case 'copy-workspace': copyWorkspacePath(); break;
+    case 'open-tasks': focusStatusWindow(); break;
     case 'reload': dshView?.webContents.reload(); break;
     case 'devtools': dshView?.webContents.toggleDevTools(); break;
     case 'dsh-home': shell.openPath(path.join(os.homedir(), '.dsh')); break;
@@ -1754,7 +1772,7 @@ function runCommand(id) {
       saveConfig(cfg);
       applyTheme();
       applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
-      const label = t({ auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' }[cfg.theme]);
+      const label = t(commands.THEME_KEYS[cfg.theme]);
       log(`外观已切换为: ${label}`);
       notify(t('menu.appearance', { mode: label }));
       pushTitlebarStatus(); // 命令栏主题钮的提示文案随模式变(阶段 1 S1);此路径不走 refreshTray
@@ -2037,10 +2055,11 @@ ipcMain.on('tb:show-bar', (e) => {
   toggleTitlebar(true);
   dshView?.webContents.focus();
 });
-// 命令栏状态簇(阶段 1 S1):四个动作全部复用 runCommand / 既有函数,不另写一份语义
+// 命令栏状态簇(阶段 1 S1):四个动作全部复用 runCommand(阶段 2 起四个都成了注册表里的命令),
+// 不另写一份语义
 ipcMain.on('tb:tasks', (e) => {
   if (!trustedEvent(e)) return;
-  focusStatusWindow();
+  runCommand('open-tasks'); // 与命令面板「任务中心」同源
 });
 ipcMain.on('tb:update', (e) => {
   if (!trustedEvent(e)) return;
@@ -2052,7 +2071,7 @@ ipcMain.on('tb:cycle-theme', (e) => {
 });
 ipcMain.on('tb:copy-ws', (e) => {
   if (!trustedEvent(e)) return;
-  copyWorkspacePath();
+  runCommand('copy-workspace'); // 与命令面板「复制工作目录路径」同源
 });
 
 // ---------- 启动 / 重启 dsh 并加载页面 ----------

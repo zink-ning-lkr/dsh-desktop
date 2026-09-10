@@ -87,6 +87,16 @@
     "closeTray": "关闭(最小化到托盘)",
     "closeQuit": "关闭(直接退出)"
   },
+  "cmd": {
+    "groupWorkspace": "工作区",
+    "groupService": "服务",
+    "groupUpdate": "更新",
+    "groupAppearance": "外观与行为",
+    "groupDiagnostics": "诊断与帮助",
+    "groupQuit": "退出",
+    "openTasks": "任务中心",
+    "copyWorkspace": "复制工作目录路径"
+  },
   "cmdbar": {
     "groupLabel": "状态与命令",
     "tasks": "任务中心 · {n} 项进行中",
