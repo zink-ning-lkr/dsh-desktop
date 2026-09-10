@@ -323,6 +323,55 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST palette ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2602, 'palette-static');
+  // ⓠ 菜单分组树静态契约(阶段 2 · v0.7.13):菜单从"一串平铺条目 + 分隔线"改成按 commands.js
+  //    的 groups 渲染的分组树,并多出一行底部入口。三类静默故障:
+  //    ① 小标题漏进 navRows → 键盘导航会停在一条点不动、typeahead 还会命中的假行上;
+  //    ② 行高常量与菜单实际盒高脱节 → 分组让菜单长高 144px,底部那行(也就是整个可发现性闭环的入口)
+  //       正好被裁掉,而这一行恰恰是用户唯一能发现 Ctrl+K 的地方;
+  //    ③ 底部入口被登记成"命令" → 它会自己出现在命令面板的搜索结果里(在面板里搜"所有命令")。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const html = read('menu.html');
+    const i18n = require('./i18n');
+    const cmds = require('./commands');
+    // 分组小标题由注册表的分组顺序驱动,文案走 groupLabelKey(不手写第二份组名)
+    t('menu-sec', /function menuItems\(\)[\s\S]{0,1600}?type: 'sec'[\s\S]{0,400}?groupLabelKey/.test(main));
+    t('menu-sec-render', /it\.type === 'sec'/.test(html) && html.includes('sec-label'));
+    // 分组名必须进无障碍树:role=menu 只认 menuitem/group/separator,裸标题 div 只是静态文本
+    t('menu-sec-aria', html.includes("setAttribute('role', 'group')")
+      && /grp\.setAttribute\('aria-label', it\.label\)/.test(html)
+      && /head\.setAttribute\('aria-hidden', 'true'\)/.test(html));
+    // 小标题不入键盘导航:sec 分支必须以 return 收尾,不能顺流到 navRows.push
+    t('menu-sec-nav', /if \(it\.type === 'sec'\) \{[\s\S]{0,900}?host = grp;\s*\n\s*return;\s*\n\s*\}/.test(html));
+    // 逐项高度收敛成一个函数:两处菜单共用,且不许再有第二份手写循环(多一种行类型只改一处)
+    t('menu-height-fn', /function menuHeight\(items\)/.test(main)
+      && (main.match(/menuHeight\(items\)/g) || []).length >= 2
+      && !/for \(const it of items\) mh \+= /.test(main));
+    // 常量 ↔ 渲染层盒高三处对齐(.item 32 / .sec 24 / .sep 1px + 上下各 4px 外边距 = 9)
+    t('menu-height-sync', /MENU_ITEM_H = 32/.test(main) && /MENU_SEC_H = 24/.test(main) && /MENU_SEP_H = 9/.test(main)
+      && /height: 32px/.test(html) && /height: 24px/.test(html) && /\.sep \{ height: 1px/.test(html));
+    // 分组让菜单长高 144px:矮屏溢出必须钳制 + 内部滚动兜底,否则底部入口在 1366×768 上永远看不见
+    t('menu-overflow', /screen\.getDisplayMatching\(mainWindow\.getBounds\(\)\)\.workArea/.test(main)
+      && /max-height: calc\(100% - 24px\)/.test(html) && /overflow-y: auto/.test(html));
+    t('menu-scrollinto', /navRows\[sel\]\.scrollIntoView\(\{ block: 'nearest' \}\)/.test(html));
+    // 分隔线仍挂在菜单上而非落进分组:否则 a11y-roles 的 sep 计数会掉到 0(菜单就没有分隔线了)
+    t('menu-sep-host', /if \(it\.type === 'sep'\)[\s\S]{0,400}?panel\.appendChild\(sep\);\s*\n\s*host = panel;/.test(html));
+    // 底部入口:文案入表 + 加速键取自 shortcuts.js(不手写 "Ctrl+K")+ 图标按 id 挂在 menu 族
+    t('menu-footer', main.includes("id: 'open-palette'") && main.includes("t('cmd.allCommands')")
+      && /accel: shortcuts\.display\('CmdOrCtrl\+K'\)/.test(main)
+      && i18n.t('cmd.allCommands') !== 'cmd.allCommands'
+      && read('ui-icons.js').includes("'open-palette':"));
+    // 它是界面入口而非命令:走 m:action 专线直达面板,不进注册表——进了注册表它就会出现在
+    // 面板自己的搜索结果里,而 cmd-no-orphan 又只认 runCommand 的 case,两条约束在此合流
+    t('menu-footer-wired', /ipcMain\.on\('m:action'[\s\S]{0,600}?if \(id === 'open-palette'\) \{ showPalette\(\); return; \}/.test(main)
+      && !cmds.list.some((c) => c.id === 'open-palette')
+      && !main.includes("case 'open-palette':"));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST menu-tree ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2603, 'menu-tree-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
@@ -701,6 +750,10 @@ function runUitest(d) {
   uiStep(() => { d.showMenuPopup(); }, 26300, 'a11y-menu-open');
   // P0-7:菜单焦点落在 role=menu 容器(panel)上,aria-activedescendant 才对读屏器生效
   uiStep(() => readDom(d.menuPopupView, '(()=>{const ae=document.activeElement;return (ae&&ae.id==="panel")?"PASS focus=panel":"FAIL ae="+(ae?(ae.id||ae.tagName):"none")})()', 'a11y-menu-focus'), 26500);
+  // 分组树结构(v0.7.13):组数 = 注册表分组数、每组都有可访问名且真的装着条目、
+  // 小标题一行都没混进可交互行、末尾那行必须是「所有命令…」且确实是 menuitem(点得动)
+  const grpN = require('./commands').groups.length;
+  uiStep(() => readDom(d.menuPopupView, `(()=>{const p=document.getElementById("panel");const gs=p.querySelectorAll("[role=group]");const secs=p.querySelectorAll(".sec");const bad=[...gs].filter(g=>!g.getAttribute("aria-label")||!g.querySelector("[role=menuitem],[role=menuitemcheckbox]")).length;const rows=[...p.querySelectorAll(".item")];const last=rows[rows.length-1];const okTail=!!last&&last.getAttribute("role")==="menuitem"&&last.textContent.includes("所有命令");const leak=p.querySelectorAll(".sec.item,.sec[role=menuitem],.sec[role=menuitemcheckbox]").length;return (gs.length===${grpN}&&secs.length===${grpN}&&bad===0&&okTail&&leak===0)?"PASS groups="+gs.length+" sec="+secs.length+" tail="+last.textContent.trim().slice(0,10):"FAIL groups="+gs.length+" sec="+secs.length+" bad="+bad+" leak="+leak+" tail="+(last?last.textContent.trim().slice(0,12):"none")})()`, 'a11y-menu-tree'), 26600);
   uiStep(() => readDom(d.menuPopupView, '(()=>{const p=document.getElementById("panel");const items=p.querySelectorAll("[role=menuitem],[role=menuitemcheckbox]").length;const chk=p.querySelectorAll("[role=menuitemcheckbox][aria-checked=true]").length;const sep=p.querySelectorAll("[role=separator]").length;return (p.getAttribute("role")==="menu"&&items>=10&&chk>=1&&sep>=1)?"PASS items="+items+" chk="+chk+" sep="+sep:"FAIL role="+p.getAttribute("role")+" items="+items+" chk="+chk+" sep="+sep})()', 'a11y-roles'), 26700);
   uiStep(() => readDom(d.menuPopupView, '(()=>{document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));document.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown"}));const ad=document.getElementById("panel").getAttribute("aria-activedescendant");const sel=document.querySelector(".item.sel");return (ad&&sel&&sel.id===ad)?"PASS activedescendant="+ad:"FAIL ad="+ad+" sel="+(sel&&sel.id)})()', 'a11y-arrownav'), 27000);
   uiStep(() => readDom(d.menuPopupView, '(()=>{const before=document.querySelector(".item.sel");document.dispatchEvent(new KeyboardEvent("keydown",{key:"重"}));const after=document.querySelector(".item.sel");return (after&&after!==before&&after.textContent.includes("重"))?"PASS → "+after.textContent.trim().slice(0,10):"FAIL before="+(before&&before.textContent.trim().slice(0,10))+" after="+(after&&after.textContent.trim().slice(0,10))})()', 'a11y-typeahead'), 27300);

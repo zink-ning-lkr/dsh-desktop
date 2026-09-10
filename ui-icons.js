@@ -41,6 +41,10 @@
     'cycle-theme': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor" stroke="none"/></svg>',
     'quit': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2v5M4.5 4a5 5 0 1 0 7 0"/></svg>',
     'tray-status': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>',
+    // 菜单底部的「所有命令…」入口(v0.7.13):不是注册表里的命令,图标按 id 直接挂这里。
+    // 复用 palette 域的放大镜造型,但按 menu 族的规格(15×15、stroke 1.3)重画一份——
+    // 两族 viewBox 虽同为 16,尺寸与描边规范不同,直接复用会让这一行显得比邻居粗一号。
+    'open-palette': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14" stroke-linecap="round"/></svg>',
   };
   // 命令栏状态簇(阶段 1 S1):24px 按钮内的 15×15 线性图标,与 menu 族同一描边规范。
   // 独立成域而不复用 menu 族:menu 族按「菜单条目 id」组织,状态簇按「状态语义」组织,

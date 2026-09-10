@@ -95,7 +95,8 @@
     "groupDiagnostics": "诊断与帮助",
     "groupQuit": "退出",
     "openTasks": "任务中心",
-    "copyWorkspace": "复制工作目录路径"
+    "copyWorkspace": "复制工作目录路径",
+    "allCommands": "所有命令…"
   },
   "cmdbar": {
     "groupLabel": "状态与命令",

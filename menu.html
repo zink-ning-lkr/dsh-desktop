@@ -1,4 +1,7 @@
-<!-- 自绘深色菜单:主菜单与托盘菜单共用渲染器,支持图标/快捷键/勾选项/键盘导航 -->
+<!-- 自绘深色菜单:主菜单与托盘菜单共用渲染器,支持分组小标题/图标/快捷键/勾选项/键盘导航 -->
+<!-- 主菜单按 commands.js 的 groups 渲染成分组树(v0.7.13):每组的首行是 .sec 小标题,
+     条目挂在 role="group" 的容器里(分组名走 aria-label,可见标题对读屏器隐藏)。
+     托盘菜单没有分组,同一份渲染器照样吃得下 —— 行类型是数据驱动,不是两套分支。 -->
 <!-- 无 landmark 是有意为之(X4-3 豁免):本窗整体就是一个 role="menu" 弹出层,
      menu 自身已是读屏器可直接跳入的容器型角色,再套 <main> 只会造出"主区域里只有一个菜单"
      的误导性结构。同为单控件窗的 dialog.html(role="dialog")同理豁免。 -->
@@ -27,10 +30,17 @@
     box-shadow: var(--c-panel-shadow);
     padding: 10px 8px;
     animation: menuIn .16s cubic-bezier(.2, .9, .3, 1.1);
+    /* 溢出兜底(v0.7.13):分组小标题让菜单比"纯分隔线版"高 6×24px,矮屏上主进程会把视图
+       高度钳到工作区剩余高度,内部滚动由这里承接。屏幕够高时 max-height 大于内容高度,
+       不出现滚动条,观感与从前逐像素一致。 */
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
   @keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
   /* 行高 32px(--ctl-h + 2):菜单是纯点击目标,命中区不小于标准按钮;
-     与主进程 showMenuPopup() 的逐项高度常量严格对应(main.js:1326),改此处必须同步改那里 */
+     .item /.sec /.sep 三种行高与主进程 menuHeight() 的 MENU_ITEM_H / MENU_SEC_H / MENU_SEP_H
+     严格对应,改此处必须同步改那里(单改一处只有"菜单最后一项点不到"这一种表现,极难归因) */
   .item {
     display: flex;
     align-items: center;
@@ -53,6 +63,17 @@
   .item .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .item .accel { color: var(--c-fg2); font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); padding-left: 18px; }
   .sep { height: 1px; background: var(--c-bg2); margin: 4px 8px; }
+  /* 分组小标题(v0.7.13):字面规格直接复用 ui.css 的 .sec-label(11px / 600 / 字距 .06em)。
+     行高锁定 24px —— 与 main.js 的 MENU_SEC_H 严格对应,改这里必须同步改那里,否则菜单底部被裁。
+     它不进键盘导航:navRows 只收可交互条目,小标题既不进 navRows 也不参与 typeahead。 */
+  .sec {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 12px;
+  }
+  /* 分组之间的发丝线用 inset 阴影画:不占布局高度,高度公式不必为它多出一个加数 */
+  .grp + .grp > .sec { box-shadow: inset 0 1px 0 var(--c-bg2); }
   .item.danger:hover, .item.danger.sel { background: var(--c-danger-bg); }
   /* 只读状态行:.72 与标题栏工作目录同一「弱化但达 AA」梯度(原 .55 低于 4.5:1) */
   .item.off { opacity: .72; }
@@ -75,12 +96,35 @@
   function render(items) {
     panel.innerHTML = '';
     navRows = [];
-    items.forEach((it, i) => {
+    // 当前挂载点:分组容器(role="group")。遇到 sep 或下一个 sec 时回到 panel。
+    // 之所以真用分组容器、而不是只插一行标题 div:role="menu" 的直接子节点里只有
+    // menuitem / menuitemcheckbox / group / separator 会被读屏器认下,裸标题 div 只是
+    // "菜单里的一段静态文本",分组语义(以及分组名)进不了无障碍树。
+    let host = panel;
+    items.forEach((it) => {
+      if (it.type === 'sec') {
+        const grp = document.createElement('div');
+        grp.className = 'grp';
+        grp.setAttribute('role', 'group');
+        grp.setAttribute('aria-label', it.label); // 分组名由此进入无障碍树
+        const head = document.createElement('div');
+        head.className = 'sec';
+        head.setAttribute('aria-hidden', 'true'); // 可见标题对读屏器隐藏:aria-label 已念过,再念一遍是重复
+        const txt = document.createElement('span');
+        txt.className = 'sec-label';
+        txt.textContent = it.label;
+        head.appendChild(txt);
+        grp.appendChild(head);
+        panel.appendChild(grp);
+        host = grp;
+        return;
+      }
       if (it.type === 'sep') {
         const sep = document.createElement('div');
         sep.className = 'sep';
         sep.setAttribute('role', 'separator');
         panel.appendChild(sep);
+        host = panel; // 分隔线终止当前分组:紧随其后的条目(如底部「所有命令…」)直接挂在菜单上
         return;
       }
       // 只读条目(如托盘菜单首行状态项):不入键盘导航,不可选不可点,降透明度
@@ -97,7 +141,7 @@
         lbl.className = 'lbl';
         lbl.textContent = it.label;
         row.append(ico, lbl);
-        panel.appendChild(row);
+        host.appendChild(row);
         return;
       }
       const row = document.createElement('div');
@@ -127,7 +171,7 @@
       row.addEventListener('click', () => window.__menu.action(it.id));
       row.addEventListener('mouseenter', () => select(navRows.indexOf(row)));
       navRows.push(row);
-      panel.appendChild(row);
+      host.appendChild(row);
     });
   }
 
@@ -136,8 +180,12 @@
     sel = n;
     navRows.forEach((el, i) => el.classList.toggle('sel', i === sel));
     // aria-activedescendant:焦点留在菜单容器,选中态由后代项播报
-    if (sel >= 0 && navRows[sel]) panel.setAttribute('aria-activedescendant', navRows[sel].id);
-    else panel.removeAttribute('aria-activedescendant');
+    if (sel >= 0 && navRows[sel]) {
+      panel.setAttribute('aria-activedescendant', navRows[sel].id);
+      // 视图被钳制变矮时(矮屏 + 分组小标题),选中项要自己滚进可视区;
+      // 否则键盘导航会走到屏幕外的行上,屏幕上毫无反馈,像"按了没反应"。nearest 不留多余滚动。
+      navRows[sel].scrollIntoView({ block: 'nearest' });
+    } else panel.removeAttribute('aria-activedescendant');
   }
 
   // typeahead:500ms 缓冲内连续击键累计为前缀,从当前选中项之后循环匹配(Win32 菜单惯例)

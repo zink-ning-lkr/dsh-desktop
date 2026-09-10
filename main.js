@@ -554,9 +554,7 @@ function showTrayMenu() {
   closeTrayMenu();
   closeMenuPopup(true); // 与主菜单弹层互斥:托盘菜单弹出时收起主菜单
   const items = trayMenuItems();
-  let mh = 20; // 上下内边距(.panel padding 10px × 2)
-  // 逐项高度须与 menu.html 的 .item/.sep 实际盒高一致(.item 32px、.sep 1+8=9px),否则菜单底部被裁
-  for (const it of items) mh += it.type === 'sep' ? 9 : 32;
+  const mh = menuHeight(items); // 与主菜单同一套逐项高度(托盘菜单目前无 sec 行,但不留第三种算法)
   const W = 264 + 24, H = mh + 24; // 含阴影边距,与主菜单一致
   const cursor = screen.getCursorScreenPoint();
   const wa = screen.getDisplayNearestPoint(cursor).workArea;
@@ -1618,17 +1616,22 @@ function commandCtx() {
   };
 }
 
-// ☰ 主菜单条目(阶段 2):由 commands.js 注册表生成,不再手写第二份顺序与文案。
-// menu:false 的条目(复制路径 / 任务中心)只进命令面板,菜单留底部一行「所有命令…」引过去。
-// 分组分隔符暂用 type:'sep'(v0.7.13 换成分组小标题,届时这里改为 type:'sec')。
+// ☰ 主菜单条目(阶段 2,v0.7.13 起为分组树):由 commands.js 注册表生成,不再手写第二份顺序与文案。
+// 每个分组前插一条 type:'sec'(分组小标题,渲染层复用 .sec-label 规格,不入键盘导航/typeahead);
+// menu:false 的条目(复制路径 / 任务中心 / 显示主窗)只进命令面板,不进菜单。
+// 底部再追加一行常驻的「所有命令… Ctrl+K」:菜单是"常用入口"(18 条命令),全量清单归命令面板,
+// 这一行就是把用户从前者引向后者的桥(方案 §5.2 的可发现性闭环)。
 function menuItems() {
   const ctx = commandCtx();
   const items = [];
   let prevGroup = null;
   for (const c of commands.list) {
     if (c.menu === false) continue;
-    if (prevGroup !== null && c.group !== prevGroup) items.push({ type: 'sep' });
-    prevGroup = c.group;
+    // 分组边界即小标题(含首个分组):小标题自身承担分组间的分隔,不再另有 sep
+    if (c.group !== prevGroup) {
+      items.push({ type: 'sec', label: t(commands.groupLabelKey(c.group)) });
+      prevGroup = c.group;
+    }
     const it = { type: 'item', id: c.id, label: commands.labelOf(c, ctx) };
     const accel = commands.accelOf(c.id);
     if (accel) it.accel = accel; // 无快捷键的命令不带 accel 字段,menu.html 也就不会画空白槽位
@@ -1636,6 +1639,16 @@ function menuItems() {
     if (checked !== undefined) it.checked = checked; // 返回 undefined 才是普通 menuitem,不能写成 falsy 判断
     items.push(it);
   }
+  // 底部常驻行:它不是注册表里的命令,而是"引向命令面板"的界面入口——与命令栏中段的 Ctrl+K 按钮
+  // 同性质,故和 tb:palette 一样走专线直达 showPalette(见 m:action),不为此在注册表里造一条假命令
+  // (造了它就会自己出现在面板的搜索结果里)。
+  items.push({ type: 'sep' });
+  items.push({
+    type: 'item',
+    id: 'open-palette',
+    label: t('cmd.allCommands'),
+    accel: shortcuts.display('CmdOrCtrl+K'),
+  });
   return items;
 }
 
@@ -1653,6 +1666,18 @@ function showShortcutsDialog() {
 
 const MENU_W = 264;
 const MENU_MARGIN = 12; // 视图四周留白,容纳阴影
+// 逐项高度是主进程与渲染层唯一的耦合点:任一侧单改,菜单底部就会被裁(或留一条空白)。
+// 收敛成一个函数由主菜单与托盘菜单共用——此前两处各写一遍 for 循环,将来多一种行类型
+// 就得记着改两遍,漏一处只有"菜单最后一项点不到"这一种表现,极难归因。
+const MENU_PAD_Y = 20;  // 上下内边距(menu.html 的 .panel padding 10px × 2)
+const MENU_ITEM_H = 32; // menu.html 的 .item 行高
+const MENU_SEC_H = 24;  // menu.html 的 .sec 分组小标题行高(v0.7.13)
+const MENU_SEP_H = 9;   // menu.html 的 .sep(1px 线 + 上下各 4px 外边距)
+function menuHeight(items) {
+  let h = MENU_PAD_Y;
+  for (const it of items) h += it.type === 'sec' ? MENU_SEC_H : it.type === 'sep' ? MENU_SEP_H : MENU_ITEM_H;
+  return h;
+}
 
 // 菜单弹层懒创建(内存优化 P0-2):菜单平时不可见,点开才创建视图、关闭即销毁,
 // 避免一个 0 尺寸的渲染进程常驻(典型 50-90MB)
@@ -1691,15 +1716,19 @@ function showMenuPopup() {
   if (!mainWindow) return;
   closeTrayMenu(); // 与托盘菜单互斥
   const items = menuItems();
-  let mh = 20; // 上下内边距(.panel padding 10px × 2)
-  // 逐项高度须与 menu.html 的 .item/.sep 实际盒高一致(.item 32px、.sep 1+8=9px),否则菜单底部被裁
-  for (const it of items) mh += it.type === 'sep' ? 9 : 32;
+  const mh = menuHeight(items);
   ensureMenuPopup();
+  // 分组小标题让菜单比"纯分隔线版"高出 6×24px,1366×768 这类屏上会整块顶出屏幕底部
+  // (原版 665px 已贴着 768 屏的工作区下沿)。溢出时按工作区剩余高度钳制,由 menu.html 的
+  // .panel 内部滚动兜底:高度公式本身不变,只是视图变矮。屏幕够高时这条分支不生效,
+  // 尺寸与从前逐像素一致。
+  const wa = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+  const h = Math.min(mh, Math.max(200, wa.height - currentBarH - MENU_MARGIN * 2));
   menuPopupView.setBounds({
     x: 0,
     y: currentBarH,
     width: MENU_W + MENU_MARGIN * 2,
-    height: mh + MENU_MARGIN * 2,
+    height: h + MENU_MARGIN * 2,
   });
   const wc = menuPopupView.webContents;
   const payload = { items, w: MENU_W, margin: MENU_MARGIN };
@@ -1797,6 +1826,9 @@ ipcMain.on('m:action', (e, id) => {
   const fromTray = trayMenuWin && e.sender === trayMenuWin.webContents;
   if (fromTray) closeTrayMenu();
   else closeMenuPopup(true);
+  // 菜单底部的「所有命令…」是界面入口而非命令:与 tb:palette(命令栏中段的 Ctrl+K 按钮)同性质,
+  // 走专线直达面板,不进注册表——进了注册表它就会出现在面板自己的搜索结果里(你在面板里搜"所有命令")。
+  if (id === 'open-palette') { showPalette(); return; }
   runCommand(id);
 });
 ipcMain.on('m:close', (e) => {
