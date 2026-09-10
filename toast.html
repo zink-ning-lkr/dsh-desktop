@@ -1,0 +1,113 @@
+<!-- 应用内通知宿主(阶段 1 X1)。
+     载体是主窗右上角的一扇独立透明窗(位置/尺寸由 main.js toastBounds 计算,宽 360、最多 3 条堆叠)。
+     两条硬约束决定了它必须独立成窗而不是主窗内的 WebContentsView:
+       ① 绝不抢焦点 —— 窗口 focusable:false,滚动/输入焦点永远留在 dsh 页面;
+       ② 绝不挡点击 —— WebContentsView 作为子视图会吞掉其矩形内的鼠标事件,而 BrowserWindow
+          有 setIgnoreMouseEvents(true,{forward:true}):常态点击穿透,鼠标移动事件仍可达渲染层,
+          悬停才能"延长驻留"。仅当在屏条目带动作按钮时,主进程临时解除穿透(否则按钮点不到)。
+     条目顺序 = 到达顺序(旧上新下),新条目追加在下方,已有条目不因新条目到达而位移。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>DSH</title>
+<link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
+<script src="ui-icons.js"></script>
+<style>
+  /* 宿主：整页透明、无滚动条。条目留白与阴影都不做——透明窗会裁掉外阴影(裁完是硬边,
+     比无阴影更难看),而留白会让"点击穿透区"与实际可视区错位。浮起感由 ui.css §5
+     的 .titem 边框 + 内高光表达。 */
+  html, body { height: 100%; overflow: hidden; background: transparent; user-select: none; font: var(--font-ui); }
+</style>
+</head>
+<body>
+<div class="toast-host" id="host" role="region"></div>
+<script>
+  const NT = window.__toast;
+  const T = (k, p) => window.__i18n.t(k, p);
+  const ICO = window.UI_ICONS.toast;
+  const host = document.getElementById('host');
+  host.setAttribute('aria-label', T('toast.region'));
+
+  const TONES = { info: 'info', ok: 'ok', warn: 'warn', err: 'err' };
+  let lastH = 0; // 上次回报的高度:同值不发 IPC(高度才几个像素级抖动,没必要每帧打扰主进程)
+
+  // 单条构造:文本一律 textContent(沿用全仓 XSS 纪律,文案可能来自 dsh 侧的错误信息)
+  function build(it) {
+    const row = document.createElement('div');
+    const tone = TONES[it.tone] || 'info';
+    row.className = 'titem enter';
+    row.dataset.id = it.id;
+    row.dataset.tone = tone;
+    // 每条自带 live region:错误级用 alert(可打断),其余 polite(排队播报)
+    row.setAttribute('role', tone === 'err' ? 'alert' : 'status');
+    const ico = document.createElement('span');
+    ico.className = 'tico';
+    ico.setAttribute('aria-hidden', 'true');
+    ico.innerHTML = ICO[tone] || ICO.info;
+    const txt = document.createElement('span');
+    txt.className = 'ttext';
+    txt.textContent = it.text || '';
+    row.append(ico, txt);
+    if (it.action) {
+      const act = document.createElement('button');
+      act.className = 'tact';
+      act.textContent = it.action.label || T('toast.view');
+      act.addEventListener('click', () => NT.action(it.id));
+      row.appendChild(act);
+    }
+    // ✕ 只给"不会被自动收走"的条目:短暂提示自己会消失,再挂个关闭按钮纯属噪音
+    if (it.action || it.persistent) {
+      const x = document.createElement('button');
+      x.className = 'tclose';
+      x.title = T('toast.dismiss');
+      x.setAttribute('aria-label', T('toast.dismiss'));
+      x.innerHTML = ICO.close;
+      x.addEventListener('click', () => NT.close(it.id));
+      row.appendChild(x);
+    }
+    row.addEventListener('mouseenter', () => NT.hover(it.id, true));
+    row.addEventListener('mouseleave', () => NT.hover(it.id, false));
+    return row;
+  }
+
+  // 已存在条目的就地更新:只改变化的部分,不动节点(重建会重置悬停态与入场动画)
+  function syncRow(row, it) {
+    const tone = TONES[it.tone] || 'info';
+    if (row.dataset.tone !== tone) {
+      row.dataset.tone = tone;
+      row.setAttribute('role', tone === 'err' ? 'alert' : 'status');
+      row.querySelector('.tico').innerHTML = ICO[tone] || ICO.info;
+    }
+    const txt = row.querySelector('.ttext');
+    if (txt.textContent !== (it.text || '')) txt.textContent = it.text || '';
+  }
+
+  // keyed 复用(按 data-id):节点身份稳定 ⇒ 悬停中收到新条目时,鼠标底下那条不会被换掉,
+  // 也就不会出现"mouseleave 永远不来、计时被永久暂停"的死锁
+  function render(items) {
+    const alive = new Set(items.map((it) => it.id));
+    for (const row of [...host.children]) if (!alive.has(row.dataset.id)) row.remove();
+    items.forEach((it, i) => {
+      let row = null;
+      for (const c of host.children) if (c.dataset.id === it.id) { row = c; break; }
+      if (!row) row = build(it);
+      else syncRow(row, it);
+      if (host.children[i] !== row) host.insertBefore(row, host.children[i] || null);
+    });
+    report();
+  }
+
+  function report() {
+    const h = Math.ceil(host.getBoundingClientRect().height);
+    if (h === lastH) return;
+    lastH = h;
+    NT.height(h);
+  }
+
+  NT.onRender(render);
+</script>
+</body>
+</html>

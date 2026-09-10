@@ -176,7 +176,9 @@ function runUitest(d) {
       && sc.list.every((s) => i18n.t(s.labelKey) !== s.labelKey));
     // 主区域 landmark(X4-3):menu 是纯 role="menu" 弹出层、dialog 是 role="dialog" 模态窗,
     // 二者不套 <main> —— 单控件窗里再放主区域会造出误导性结构,属有意豁免。
-    const EXEMPT = { 'menu.html': 'role=menu 弹出层', 'dialog.html': 'role=dialog 模态' };
+    // toast.html 同理豁免:它是浮在主窗之上的通知层(role="region" 已带可访问名),
+    // 本身没有"页面主体",硬套 <main> 只会让读屏器多出一个空的主区域跳转点。
+    const EXEMPT = { 'menu.html': 'role=menu 弹出层', 'dialog.html': 'role=dialog 模态', 'toast.html': 'role=region 浮动通知层' };
     const noLm = pages.filter((f) => !/role="main"|<main[\s>]/.test(read(f)) && !EXEMPT[f]);
     t('a11y-landmark', noLm.length === 0);
     // reveal-tab 的交互宿主必须是真 <button>(X4-2):role="button" 挂在 <body> 上时,
@@ -214,6 +216,41 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST cmdbar ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2575, 'cmdbar-static');
+  // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
+  //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
+  //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const html = read('toast.html');
+    const pre = read('toast-preload.js');
+    const css = read('ui.css');
+    const status = read('status.html');
+    const files = JSON.parse(read('package.json')).build.files;
+    t('toast-focusable', /focusable:\s*false/.test(main));
+    t('toast-ignoremouse', /setIgnoreMouseEvents\(true,\s*\{\s*forward:\s*true\s*\}\)/.test(main));
+    t('toast-lazy', /function ensureToastWindow\(/.test(main) && /function destroyToastWindow\(/.test(main));
+    t('toast-ipc', ['nt:render', 'nt:hover', 'nt:action', 'nt:close', 'nt:height']
+      .every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
+    // trustedEvent 是每个新 IPC handler 的准入门槛(方案 §10 质量门槛),四个回程通道一个都不能漏
+    t('toast-trusted', (main.match(/ipcMain\.on\('nt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!trustedEvent\(e\)/g) || []).length === 4);
+    // 通知出口唯一:旧 notifyToast 若复活,说明有一条反馈绕开了路由裁决
+    t('toast-single-entry', /function notify\(text, opts\)/.test(main) && !/notifyToast\s*\(/.test(main));
+    // 常量与方案 5.4 一致:360 宽 / 最多 3 条 / 默认 2200ms
+    t('toast-consts', /TOAST_W = 360/.test(main) && /TOAST_MAX = 3/.test(main) && /TOAST_DWELL_MS = 2200/.test(main));
+    // 页面 ↔ 共享层 ↔ 打包白名单(新增文件漏进 build.files 在开发期完全无感,装机才炸)
+    const srcs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+    t('toast-page-deps', srcs.includes('ui-theme.js') && srcs.includes('ui-icons.js') && html.includes('class="toast-host"'));
+    t('toast-css', ['.toast-host', '.titem', '.tico', '.ttext', '.tact', '.tclose'].every((c) => css.includes(c)));
+    t('toast-icons', /const toast = \{/.test(read('ui-icons.js')));
+    t('toast-packed', files.includes('toast.html') && files.includes('toast-preload.js'));
+    // 状态窗必须已卸下 toast 职责:ephemeral 若残留,孤儿提示会重新落进任务列表
+    t('toast-status-retired', !/ephemeral/.test(status));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST toast ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2587, 'toast-static');
   uiStep(() => readDom(d.titlebarView, `(()=>{
     const c = document.getElementById('cluster');
     const dot = (document.getElementById('svcDot') || {}).className || '';
@@ -362,10 +399,10 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 23000);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 23150, 'install-okbtn');
   uiStep(() => d.log(`UITEST install-timeout win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 23300, 'install-okbtn-verify');
-  // ⑪ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流 + toast 瞬时条目 4s 消退
+  // ⑪ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流(瞬时提示已改由 X1 通知宿主承载)
   uiStep(() => { d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '', __origin: 'desktop' }); }, 23450, 'tc-dl');
-  uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); d.notifyToast('加速设置已保存:并发 6 段'); }, 23600, 'tc-install');
-  uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const eph=rows.filter(r=>r.classList.contains("ephemeral")).length;const t=document.getElementById("title").textContent;return (rows.length===3&&act===2&&eph===1&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" eph="+eph+" t="+t})()', 'tc-list'), 23950);
+  uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); }, 23600, 'tc-install');
+  uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const t=document.getElementById("title").textContent;return (rows.length===2&&act===2&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" t="+t})()', 'tc-list'), 23950);
   uiStep(() => { const h = d.statusWin?.getContentSize()[1] || 0; d.log(`UITEST tc-h=${h}(期望 >186 列表加高) → ${h > 186 ? 'PASS' : 'FAIL'}`); }, 24000, 'tc-h');
   // v0.6.1 Acrylic 铺开:status 窗的 .win.acrylic 类必须与 Win11 判定一致
   uiStep(() => { const want = d.isWin11(); readDom(d.statusWin, `(()=>{const m=document.querySelector(".win").classList.contains("acrylic");return (m===${want})?"PASS acrylic="+m:"FAIL acrylic="+m+" want=${want}"})()`, 'status-acrylic'); }, 24100);
@@ -376,12 +413,28 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, '(()=>{const ts=[...document.querySelectorAll("#tlist .trow .ltitle")].map(e=>e.textContent);const hasDl=ts.some(s=>s.includes("下载"));const hasDsh=ts.some(s=>s.includes("dsh 本体"));return (hasDl&&!hasDsh)?"PASS":"FAIL "+ts.join("|")})()', 'tc-narrow'), 24500);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 24700, 'tc-close');
   uiStep(() => d.log(`UITEST tc-close win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 24900, 'tc-close-verify');
-  // ⑪' 孤儿 toast(P0-2 回归锁):真实任务全部结束后仅剩一条瞬时提示——必须渲染为列表 ephemeral 行,
-  //    不得落入单任务 render() 画成"空 detail + 不定态进度条"的假进度窗;行级取消后仅剩 toast 同样走列表
-  uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 24950, 'lone-toast-prep');
-  uiStep(() => { d.notifyToast('仅一条瞬时提示'); }, 25150, 'lone-toast-add');
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('[...document.querySelectorAll("#tlist .trow:not(.done) .lx")][0].click()').catch(() => {}); }, 25300, 'lone-toast-cancel-active');
-  uiStep(() => readDom(d.statusWin, '(()=>{const list=document.getElementById("tlist");const rows=[...list.querySelectorAll(".trow")];const actEl=document.getElementById("activity");const t=document.getElementById("title").textContent;const ok=list.style.display!=="none"&&rows.length===1&&rows[0].classList.contains("ephemeral")&&actEl.style.display==="none"&&t==="任务中心";return ok?"PASS 单toast走列表行":"FAIL shown="+list.style.display+" rows="+rows.length+" eph0="+(rows[0]&&rows[0].classList.contains("ephemeral"))+" actHidden="+(actEl.style.display==="none")+" t="+t})()', 'lone-toast'), 25550);
+  // ⑪' 通知宿主(阶段 1 X1):状态窗已卸下 toast 职责,瞬时提示改由独立的透明窗承载。
+  //     这一组把三件事一起锁住:①窗口按需创建且条目渲染正确;②悬停真的延长了驻留
+  //     (600ms 的条目在 650ms 后仍活着 ⇒ forward:true 的鼠标事件确实到达了渲染层);
+  //     ③队列清空即收窗,不留常驻渲染进程(约束 8)。
+  uiStep(() => { d.notify('仅一条瞬时提示', { ms: 600 }); }, 24950, 'toast-add');
+  uiStep(() => {
+    const ok = !!d.toastWin && d.toastItems.length === 1 && !d.notifyErrPending;
+    d.log(`UITEST toast-window win=${!!d.toastWin} items=${d.toastItems.length} errPending=${d.notifyErrPending}(期望 true/1/false) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 25150, 'toast-window');
+  uiStep(() => readDom(d.toastWin, '(()=>{const rows=[...document.querySelectorAll(".titem")];const r=rows[0];const txt=r?r.querySelector(".ttext").textContent:"";const tone=r?r.dataset.tone:"";return (rows.length===1&&txt==="仅一条瞬时提示"&&tone==="info"&&r.getAttribute("role")==="status")?"PASS tone="+tone:"FAIL rows="+rows.length+" txt="+txt+" tone="+tone+" role="+(r&&r.getAttribute("role"))})()', 'toast-dom'), 25300);
+  uiStep(() => { d.toastWin?.webContents.executeJavaScript("document.querySelector(\'.titem\').dispatchEvent(new MouseEvent(\'mouseenter\'))").catch(() => {}); }, 25450, 'toast-hover');
+  // 650ms > 600ms:计时若未被悬停暂停,此刻条目早已消失、窗口已销毁 —— 一条断言同时验证两件事
+  uiStep(() => {
+    const it = d.toastItems[0];
+    const ok = !!it && it.hovered === true && !!d.toastWin;
+    d.log(`UITEST toast-hover-pause hovered=${!!(it && it.hovered)} win=${!!d.toastWin}(期望 true/true,即悬停已暂停计时) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 25650, 'toast-hover-verify');
+  uiStep(() => {
+    d.destroyToastWindow();
+    const ok = !d.toastWin && d.toastItems.length === 0;
+    d.log(`UITEST toast-destroy win=${!!d.toastWin} items=${d.toastItems.length}(期望 false/0) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 25750, 'toast-destroy');
   // ⑪'' 全部关闭语义(P0-1 回归锁):列表模式 ✕ = 逐个取消全部未完成任务再收窗——
   //    旧实现 st:close 直接清注册表,运行中的任务成为不可见且不可取消的孤儿
   uiStep(() => {
@@ -495,6 +548,20 @@ function runUitest(d) {
   uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;const det=document.getElementById("detail").textContent;return (t==="键盘快捷键"&&det.includes("Ctrl+O")&&det.includes("F11")&&det.includes("Ctrl+Shift+B"))?"PASS 速查内容同源":"FAIL t="+t+" det="+det.slice(0,40)})()', 'sc-dom'), 34700);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 34850, 'sc-close');
   uiStep(() => { const ok = d.dialogWin && !d.dialogWin.isVisible(); d.log(`UITEST sc-closed hidden=${d.dialogWin ? !d.dialogWin.isVisible() : 'win-gone'}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`); }, 35050, 'sc-closed-verify');
+  // ⑪''' 错误级通知(阶段 1 X1 路由 ③):必须常驻、带动作按钮、并点亮托盘红角标,
+  //        直到用户处理——"更新失败"不能像"已复制"那样 2.2 秒自己消失。
+  //        动作点击后条目、队列与角标要同时复位(否则红点永远亮着,用户再也分不清真假)。
+  let errActFired = false;
+  uiStep(() => { d.notify('更新失败:测试用提示', { tone: 'err', action: { label: '查看详情', run: () => { errActFired = true; } } }); }, 35100, 'toast-err-add');
+  uiStep(() => {
+    d.log(`UITEST toast-err-flag errPending=${d.notifyErrPending}(期望 true) → ${d.notifyErrPending ? 'PASS' : 'FAIL'}`);
+    readDom(d.toastWin, '(()=>{const r=document.querySelector(".titem");const a=r&&r.querySelector(".tact");const x=r&&r.querySelector(".tclose");const t=r?r.querySelector(".ttext").textContent:"";return (!!r&&r.dataset.tone==="err"&&r.getAttribute("role")==="alert"&&!!a&&a.textContent==="查看详情"&&!!x&&t.indexOf("更新失败")===0)?"PASS 常驻+动作+关闭":"FAIL tone="+(r&&r.dataset.tone)+" act="+(a?a.textContent:"none")+" x="+!!x+" t="+t})()', 'toast-err-dom');
+  }, 35250, 'toast-err-pair');
+  uiStep(() => { d.toastWin?.webContents.executeJavaScript('document.querySelector(".titem .tact").click()').catch(() => {}); }, 35350, 'toast-err-click');
+  uiStep(() => {
+    const ok = errActFired && !d.toastWin && d.toastItems.length === 0 && d.notifyErrPending === false;
+    d.log(`UITEST toast-err-verify fired=${errActFired} win=${!!d.toastWin} items=${d.toastItems.length} errPending=${d.notifyErrPending}(期望 true/false/0/false) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 35470, 'toast-err-verify');
   // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {

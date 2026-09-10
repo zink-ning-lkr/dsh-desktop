@@ -94,6 +94,12 @@
     "copyWs": "复制工作目录路径",
     "wsCopied": "已复制工作目录路径"
   },
+  "toast": {
+    "region": "通知",
+    "dismiss": "关闭通知",
+    "view": "查看",
+    "viewDetail": "查看详情"
+  },
   "dlg": {
     "ok": "好的",
     "cancel": "取消",

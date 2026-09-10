@@ -79,7 +79,6 @@
   .hist:hover { background: color-mix(in srgb, var(--c-fg2) 12%, transparent); color: var(--c-fg1); }
   .hist .tri { width: 8px; height: 8px; flex: none; transition: transform var(--dur-mid); }
   .hist.open .tri { transform: rotate(90deg); }
-  .trow.ephemeral { opacity: .8; border-style: dashed; }
   /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
   .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
   /* 进度条动效的 reduced-motion 分支随样式一并上移至 ui.css */
@@ -202,7 +201,7 @@
   /* -------- 多任务列表(任务中心) -------- */
   function taskRow(t) {
     const row = document.createElement('div');
-    row.className = 'trow' + (t.done ? ' done' : '') + (t.ephemeral ? ' ephemeral' : '');
+    row.className = 'trow' + (t.done ? ' done' : '');
     row.dataset.taskId = t.id;
     row.setAttribute('role', 'listitem');
     const ico = document.createElement('span');
@@ -232,7 +231,7 @@
       size.textContent = t.size || '';
       meta.append(pct, size);
       body.appendChild(meta);
-    } else if (!t.ephemeral && (t.buttons || []).length) {
+    } else if ((t.buttons || []).length) {
       body.appendChild(fillButtons(document.createElement('div'), t, 'lbtns'));
     }
     const x = document.createElement('button');
@@ -248,8 +247,7 @@
   function renderList(tasks) {
     cur = null;
     const act = tasks.filter((t) => !t.done);
-    const done = tasks.filter((t) => t.done && !t.ephemeral);
-    const eph = tasks.filter((t) => t.done && t.ephemeral);
+    const done = tasks.filter((t) => t.done);
     document.getElementById('activity').style.display = 'none';
     document.getElementById('activity').setAttribute('aria-busy', 'false');
     document.getElementById('result').style.display = 'none';
@@ -261,9 +259,8 @@
     document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
     document.getElementById('xBtn').title = T('status.closeAll');
     document.getElementById('xBtn').setAttribute('aria-label', T('status.closeAll'));
-    // 进行中任务置顶;短暂提示紧随其后;完成项有进行中任务时折叠进历史
+    // 进行中任务置顶;完成项有进行中任务时折叠进历史
     act.forEach((t) => list.appendChild(taskRow(t)));
-    eph.forEach((t) => list.appendChild(taskRow(t)));
     if (done.length && act.length) {
       const h = document.createElement('button');
       h.className = 'hist' + (histOpen ? ' open' : '');
@@ -289,9 +286,10 @@
 
   function renderTasks(tasks) {
     if (!tasks.length) return; // 主进程随即关窗,忽略空帧
-    // 仅「单任务且非瞬时提示」走旧单视图(像素兼容);瞬时 toast 永远渲染为列表中的一行——
-    // 否则单条 toast 会落入 render() 被当成活动任务,画成"空 detail + 不定态进度条"的假进度窗
-    if (tasks.length === 1 && !tasks[0].ephemeral) { listMode = false; render(tasks[0]); }
+    // 单任务走旧单视图(像素级兼容 186/250 两档),多任务走列表。
+    // 阶段 1 X1 起本窗不再兼任 toast 宿主:瞬时提示由独立的通知宿主(toast.html)承载,
+    // 因此这里不必再为"孤儿 toast"单开一条列表路径——列表里出现的每一行都是真实任务。
+    if (tasks.length === 1) { listMode = false; render(tasks[0]); }
     else { listMode = true; renderList(tasks); S.rendered(); } // 渲染完成回报:主进程按真实内容高度微调窗口(P1-1)
     // 视图切换帧(ST-1):把焦点交给安全默认控件。进度帧 150ms 一次全量重渲染,
     // 必须凭 viewKey 变化判帧,否则焦点被钉死在 bgBtn 上,用户 Tab 不出去

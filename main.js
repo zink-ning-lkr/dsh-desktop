@@ -178,6 +178,9 @@ function layoutViews() {
   dshView.setBounds({ x: 0, y: currentBarH, width: w, height: Math.max(0, h - currentBarH) });
   // 把手默认隐藏,由 handlePoll 检测到鼠标靠近顶部中央时再浮现
   revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  // 通知宿主贴主窗右上角,主窗尺寸/命令栏高度一变就必须跟着走(X1)。
+  // 挂在这里而不是各处 resize 分支:layoutViews 已是"任何几何变化都要调一次"的汇合点
+  syncToastBounds();
 }
 
 // 强制视图 surface 与逻辑尺寸同步。首次显示时,窗口的实际显示尺寸(高 DPI 下的
@@ -335,6 +338,10 @@ function showMainWindow() {
 // 收托盘后用户一眼可知 dsh 死活,崩溃不再无感知(参照 Discord presence 的状态外显)
 let trayState = 'boot';  // 应用启动即进入 boot,bootDsh 成功加载服务页后转 ok
 let trayStartedAt = 0;   // 最近一次进入 ok 的时间戳(菜单运行时长)
+// 错误级通知未处理标志(阶段 1 X1):与 trayState(服务真值)分开表达——
+// 一次「更新失败」不该让托盘 tooltip 谎报「服务已停止」,但红角标必须亮到用户处理为止。
+// 只影响托盘图标,trayState 本身不动 ⇒ 命令栏状态点仍如实反映服务状态。
+let notifyErrPending = false;
 
 function trayStatusText() {
   const st = trayState === 'ok' ? t('tray.running') : trayState === 'boot' ? t('tray.booting') : t('tray.stopped');
@@ -363,8 +370,10 @@ function refreshTray() {
   if (!tray) return;
   const tip = trayStatusText();
   if (tip !== trayLastTip) { trayLastTip = tip; tray.setToolTip(tip); }
-  // 角标图标为构建期预生成资产;缺失(旧包升级)时回退基础图标,不阻断状态文字
-  const p = path.join(__dirname, 'assets', trayState === 'ok' ? 'icon-ok.ico' : trayState === 'boot' ? 'icon-warn.ico' : 'icon-err.ico');
+  // 角标图标为构建期预生成资产;缺失(旧包升级)时回退基础图标,不阻断状态文字。
+  // 未处理的错误级通知优先压红角标(见 notifyErrPending):它比服务运行状态更紧急
+  const iconState = notifyErrPending ? 'err' : trayState;
+  const p = path.join(__dirname, 'assets', iconState === 'ok' ? 'icon-ok.ico' : iconState === 'boot' ? 'icon-warn.ico' : 'icon-err.ico');
   if (p !== trayLastIcon) {
     trayLastIcon = p;
     tray.setImage(fs.existsSync(p) ? p : path.join(__dirname, 'assets', 'icon.ico'));
@@ -389,9 +398,9 @@ function pushTitlebarStatus() {
   try {
     const wc = titlebarView && !titlebarView.webContents.isDestroyed() ? titlebarView.webContents : null;
     if (!wc) return;
-    // 「进行中」不含 ephemeral(状态窗的瞬时 toast 行不是任务,不该计入徽标)
+    // 「进行中」= 未完成的任务。瞬时提示不再是任务(状态窗已卸下 toast 宿主职责,X1)
     let tasks = 0;
-    for (const task of statusTasks.values()) if (!task.done && !task.ephemeral) tasks++;
+    for (const task of statusTasks.values()) if (!task.done) tasks++;
     const payload = {
       svc: trayState,                 // ok / boot / err → 服务点颜色
       svcText: trayStatusText(),      // 含运行时长与工作目录,与托盘 tooltip 同源
@@ -419,14 +428,14 @@ function focusStatusWindow() {
   statusWin.focus();
 }
 
-// 命令栏工作目录点击 → 复制完整路径(S1)。反馈走 toast 统一出口(阶段 1 X1);
-// 该出口未接通前由 notifyToast 兜底,故此处只表达"要说什么",不关心说在哪。
+// 命令栏工作目录点击 → 复制完整路径(S1)。反馈走通知统一出口(阶段 1 X1):
+// 此处只表达"要说什么",落点(应用内 toast / 系统通知)由 notify() 按主窗是否在屏裁决。
 function copyWorkspacePath() {
   const ws = loadConfig().workspace || '';
   if (!ws) return;
   clipboard.writeText(ws);
   log(`已复制工作目录路径: ${ws}`);
-  notifyToast(t('cmdbar.wsCopied'));
+  notify(t('cmdbar.wsCopied'), { tone: 'ok' });
 }
 
 function trayMenuStatusLabel() {
@@ -512,7 +521,7 @@ let statusPayload = null;    // 最近活动任务载荷(updates.js 兼容读取
 // 双流各有独立任务槽,幂等 upsert,多任务并存,完成项保留为历史折叠。
 // 旧 API(showStatus/updateStatus/showStatusResult/closeStatus)签名不变、内部映射注册表——
 // updates.js 无需感知模型变化;otherFlowActive 双更新流互斥链随之删除(任务不再互相顶掉)。
-const statusTasks = new Map();   // id → task { id, mode, title, detail, pct, size, spin, progress, type, buttons, done, ephemeral, ts }
+const statusTasks = new Map();   // id → task { id, mode, title, detail, pct, size, spin, progress, type, buttons, done, ts }
 const statusActions = new Map(); // 任务 id → 结果按钮回调(按任务隔离,替代全局单槽)
 
 function taskIdOf(p) { return (p && p.__origin) || 'default'; }
@@ -540,16 +549,14 @@ function statusHeight() {
   const n = statusTasks.size;
   if (n <= 1) {
     const t = statusTasks.values().next().value;
-    // 瞬时 toast 单条时按列表一行的高度,不套结果视图的 250——否则孤儿 toast 是一扇大半空白的窗
-    if (t && t.done) return t.ephemeral ? 176 : 250;
+    if (t && t.done) return 250; // 结果视图固定档(UITEST 锁定);瞬时提示已不在此窗渲染(X1)
     return 186;
   }
   const vals = [...statusTasks.values()];
   const act = vals.filter((t) => !t.done).length;
-  const done = vals.filter((t) => t.done && !t.ephemeral).length; // 瞬时 toast 不占历史位
-  const eph = n - act - done;
+  const done = n - act;
   const collapsed = act > 0 && done > 0; // 有进行中任务时完成项折叠进历史条
-  const rows = act + (collapsed ? 0 : done) + eph;
+  const rows = act + (collapsed ? 0 : done);
   return Math.min(46 + rows * 118 + (collapsed ? 30 : 0) + 12, 460);
 }
 
@@ -625,7 +632,7 @@ function resetQuitConfirm() {
 function showStatus(p) {
   const id = taskIdOf(p);
   // 幂等 upsert:同一任务源重复 show(如重新检查)只更新自己的槽位,不影响另一流任务
-  statusTasks.set(id, { ...statusTasks.get(id), ...p, id, done: false, ephemeral: false, ts: Date.now() });
+  statusTasks.set(id, { ...statusTasks.get(id), ...p, id, done: false, ts: Date.now() });
   if (!ensureStatusWindow()) return; // 窗口加载中:did-finish-load 统一补发
   pushTasks({ focus: true });
 }
@@ -657,22 +664,221 @@ function closeStatus() {
   refreshTray(); // 状态窗关闭,tooltip 去掉"下载中"段
 }
 
-// 无就地 UI 的瞬时确认(P0-3 收窄):仅服务"反馈无处安放"的调用方(如菜单换肤确认)。
-// accel 保存 / report 导出复制等有可见窗口的操作,一律由该窗口就地反馈(.inline-feedback),
-// 不再跨窗进任务中心——状态窗未开时这里是空操作,跨窗路径会造成"有时零处/有时两处"的不确定反馈。
-// 窗口未开时不强拉窗口(不打扰),只在已有窗口内追加;4s 自动消退,不留历史
-let toastTimer = null;
-function notifyToast(text) {
-  if (!statusWin) return;
-  statusTasks.set('toast', { id: 'toast', mode: 'toast', title: String(text), done: true, ephemeral: true, ts: Date.now() });
-  pushTasks();
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastTimer = null;
-    if (!statusTasks.delete('toast')) return;
-    if (!statusTasks.size) closeStatus(); else pushTasks();
-  }, 4000);
+// ---------- 通知统一出口(阶段 1 X1) ----------
+// 背景:"已复制""已切换外观"这类零成本确认,此前在三种载体间摇摆——就地闪一下、挤进状态窗
+// (而状态窗只在有任务时才存在)、或直接走系统通知(打断性过强)。本批把三处收成一个出口。
+//
+// 载体是主窗右上角的一扇独立透明窗,而不是主窗内的 WebContentsView:
+// WebContentsView 作为子视图会吞掉其矩形内的鼠标事件,"绝不挡点击"做不到;
+// BrowserWindow 有 setIgnoreMouseEvents(true, { forward: true })——常态点击穿透,
+// 鼠标移动事件仍可达渲染层,悬停才能"延长驻留"。代价是位置须随主窗同步(见 syncToastBounds)。
+const TOAST_W = 360;         // 条目宽(方案 5.4)
+const TOAST_MAX = 3;         // 同屏上限,超出排队
+const TOAST_DWELL_MS = 2200; // 默认驻留:统一 X1 里 2600/1800 的分歧
+const TOAST_EDGE_X = 12;     // 距内容区右缘
+const TOAST_EDGE_Y = 8;      // 距命令栏下缘
+const TOAST_H_MIN = 28;      // 首帧高度占位(随即由渲染层实测回报覆盖)
+
+let toastWin = null;
+let toastQueued = false;   // 窗口加载中:渲染载荷待发(did-finish-load 统一补发)
+let toastSeq = 0;
+let toastLastH = TOAST_H_MIN;
+const toastItems = [];     // 权威队列:到达顺序 = 屏幕上从上到下的顺序
+
+// 主窗内容区右上角。无边框窗的 contentBounds 即窗口矩形,x/y 直接用屏幕坐标。
+// 每次移动/缩放/条目增删后重算——位置不接受累计估算,漂移一次就再也贴不回边。
+function toastBounds(h) {
+  const b = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.getContentBounds()
+    : screen.getPrimaryDisplay().workArea;
+  const width = Math.max(160, Math.min(TOAST_W, b.width - 2 * TOAST_EDGE_X));
+  return {
+    x: Math.round(b.x + b.width - width - TOAST_EDGE_X),
+    y: Math.round(b.y + currentBarH + TOAST_EDGE_Y),
+    width,
+    height: Math.max(1, Math.round(h || TOAST_H_MIN)),
+  };
 }
+
+function ensureToastWindow() {
+  if (toastWin) return;
+  toastWin = new BrowserWindow({
+    ...toastBounds(TOAST_H_MIN), frame: false, transparent: true, hasShadow: false, resizable: false,
+    movable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    skipTaskbar: true, focusable: false, show: false,
+    parent: mainWindow || undefined, // 子窗:恒在主窗之上,不参与 Alt+Tab,随主窗一起收起
+    webPreferences: {
+      sandbox: true, spellcheck: false, backgroundThrottling: false, // 计时与渲染不受后台降频影响
+      preload: path.join(__dirname, 'toast-preload.js'),
+    },
+  });
+  toastWin.setMenuBarVisibility(false);
+  // 常态点击穿透。forward:true 让鼠标移动事件仍到达渲染层——这是"悬停延长驻留"的前提
+  toastWin.setIgnoreMouseEvents(true, { forward: true });
+  toastWin.loadFile(path.join(__dirname, 'toast.html')).catch(() => {});
+  toastWin.webContents.once('did-finish-load', () => {
+    toastQueued = false;
+    renderToasts();
+  });
+  toastWin.on('closed', () => { toastWin = null; toastQueued = false; });
+  toastQueued = true;
+}
+
+function destroyToastWindow() {
+  const w = toastWin;
+  toastWin = null;
+  toastQueued = false;
+  for (const it of toastItems) { clearTimeout(it.timer); it.timer = null; }
+  toastItems.length = 0;
+  setNotifyErrPending(false); // 队列清空 ⇒ 已无待处理的错误通知
+  try { w?.destroy(); } catch { /* 已销毁 */ }
+}
+
+function syncToastBounds() {
+  if (!toastWin || toastWin.isDestroyed()) return;
+  try { toastWin.setBounds(toastBounds(toastLastH)); } catch { /* 窗口销毁竞态等,忽略 */ }
+}
+
+function setNotifyErrPending(v) {
+  if (notifyErrPending === !!v) return;
+  notifyErrPending = !!v;
+  refreshTray();
+}
+
+function visibleToasts() { return toastItems.slice(0, TOAST_MAX); }
+
+function toastPayload() {
+  return visibleToasts().map((it) => ({
+    id: it.id, text: it.text, tone: it.tone, persistent: it.persistent,
+    action: it.action ? { label: it.action.label || t('toast.view') } : null,
+  }));
+}
+
+// 计时只给"在屏 + 不常驻 + 未被悬停"的条目;排队中的条目轮到自己才开始起算
+function syncToastTimers() {
+  const vis = new Set(visibleToasts());
+  for (const it of toastItems) {
+    const run = vis.has(it) && !it.persistent && !it.hovered;
+    if (run && !it.timer) {
+      it.timer = setTimeout(() => { it.timer = null; dropToast(it.id); }, it.ms || TOAST_DWELL_MS);
+    } else if (!run && it.timer) {
+      clearTimeout(it.timer);
+      it.timer = null;
+    }
+  }
+}
+
+// 点击穿透策略:仅当在屏条目带动作按钮时才解除穿透(否则按钮点不到)。
+// 错误级常驻条目因此会占住右上角一小块矩形——这是"必须被处理"的代价,且只在该条在屏期间成立。
+function applyToastMousePolicy() {
+  if (!toastWin || toastWin.isDestroyed()) return;
+  const blocking = visibleToasts().some((it) => it.action);
+  try { toastWin.setIgnoreMouseEvents(!blocking, { forward: true }); } catch { /* 忽略 */ }
+}
+
+function renderToasts() {
+  if (!toastWin || toastWin.isDestroyed()) return;
+  syncToastTimers();
+  applyToastMousePolicy();
+  if (!toastQueued) {
+    try { toastWin.webContents.send('nt:render', toastPayload()); } catch { /* 窗口销毁竞态 */ }
+  }
+}
+
+function dropToast(id) {
+  const i = toastItems.findIndex((it) => it.id === id);
+  if (i < 0) return;
+  const [it] = toastItems.splice(i, 1);
+  clearTimeout(it.timer);
+  if (it.tone === 'err') setNotifyErrPending(false);
+  if (!toastItems.length) { destroyToastWindow(); return; } // 空队列即收窗:不常驻渲染进程(约束 8)
+  renderToasts();
+}
+
+function pushToast(o) {
+  // 同文同色连发合并(连点两次「复制路径」不该堆出两条一模一样的提示):在屏那条重新起算,
+  // 即 syncToastTimers 会以完整驻留时长重挂计时(所以这里必须先清掉旧 timer,否则剩余时间是旧的)
+  const dup = toastItems.find((it) => it.text === o.text && it.tone === o.tone && !it.action);
+  if (dup) {
+    dup.ts = Date.now();
+    clearTimeout(dup.timer);
+    dup.timer = null;
+    renderToasts();
+    return;
+  }
+  toastItems.push({
+    id: `n${++toastSeq}`, text: o.text, tone: o.tone, action: o.action || null,
+    persistent: !!o.persistent, ms: o.ms, hovered: false, timer: null, ts: Date.now(),
+  });
+  ensureToastWindow();
+  if (toastQueued) return; // 首帧:did-finish-load 后统一补发(避免打到尚未加载完成的 webContents)
+  renderToasts();
+}
+
+// 统一出口:调用方只说"要说什么",落点由这里裁决(方案 5.4)
+//   ① 主窗在屏(可见且未最小化) → 应用内 toast,永不抢焦点
+//   ② 主窗收进托盘 / 最小化    → 系统通知(窗口不在前台,不刷屏)
+//   ③ 错误级(tone:'err')      → 应用内常驻 toast + 托盘红角标,直到用户处理
+// 与方案的唯一偏差:① 不额外要求 mainWindow.isFocused()。通知宿主按构造就不抢焦点,
+// 而"窗口明明在眼前,却因为焦点落在别处(比如刚点完托盘菜单)就改弹系统通知"是更差的行为。
+function notify(text, opts) {
+  const o = opts || {};
+  const msg = String(text == null ? '' : text).trim();
+  if (!msg) return;
+  const tone = o.tone || 'info';
+  const persistent = o.persistent != null ? !!o.persistent : (tone === 'err' || !!o.action);
+  const onScreen = !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized();
+
+  if (tone === 'err') setNotifyErrPending(true); // ③ 红角标亮到用户处理(dropToast 里复位)
+
+  if (onScreen) {
+    pushToast({ text: msg, tone, persistent, ms: o.ms, action: o.action || null });
+    return;
+  }
+  // ② 主窗不在屏上:系统通知取代 toast。图标固定用基础图标——系统通知的图标语义是"谁在说话",
+  // 级别已由正文表达,再按 tone 换图标只会让通知中心更花
+  try {
+    const n = new Notification({ title: app.getName(), body: msg, icon: path.join(__dirname, 'assets', 'icon.ico') });
+    if (o.action && typeof o.action.run === 'function') {
+      n.on('click', () => { try { o.action.run(); } catch (e) { log(`通知动作失败: ${e.message}`); } });
+    }
+    trackNotification(n);
+    n.show();
+  } catch (e) { log(`通知失败: ${e.message}`); }
+}
+
+// 渲染层回程:悬停 / 动作 / 关闭 / 高度。每条首行 trustedEvent + 发送方身份双验
+ipcMain.on('nt:hover', (e, p) => {
+  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents || !p) return;
+  const it = toastItems.find((x) => x.id === String(p.id));
+  if (!it) return;
+  it.hovered = !!p.over;
+  syncToastTimers(); // 悬停只影响计时,不重建 DOM(重建会把鼠标底下那条换掉)
+});
+
+ipcMain.on('nt:action', (e, id) => {
+  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  const it = toastItems.find((x) => x.id === String(id));
+  if (!it || !it.action) return;
+  const run = it.action.run;
+  dropToast(it.id); // 先收条目:动作本身可能再开窗/再通知,顺序反了会出现"点了没反应"的错觉
+  try { if (typeof run === 'function') run(); } catch (err) { log(`通知动作失败: ${err.message}`); }
+});
+
+ipcMain.on('nt:close', (e, id) => {
+  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  dropToast(String(id));
+});
+
+ipcMain.on('nt:height', (e, h) => {
+  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  toastLastH = Math.max(1, Math.min(600, Math.round(Number(h) || 0)));
+  syncToastBounds();
+  // 首次实测高度到达才显示:先量后亮,避免"占位高度 → 真实高度"的一帧抖动
+  if (toastItems.length && !toastWin.isVisible()) {
+    try { toastWin.showInactive(); } catch { /* 窗口销毁竞态等 */ }
+  }
+});
 
 // 更新流程占用时的菜单反馈:有状态窗则回到进度窗;否则弹提示(用户点了菜单不能静默无响应)
 function noticeFlowBusy(message, statusFallback) {
@@ -708,7 +914,7 @@ function showStatusResult(p, onAction, nonIntrusive) {
   const id = taskIdOf(p);
   const asResult = () => {
     if (onAction) statusActions.set(id, onAction); else statusActions.delete(id);
-    statusTasks.set(id, { ...statusTasks.get(id), ...p, id, mode: 'result', done: true, ephemeral: false, ts: Date.now() });
+    statusTasks.set(id, { ...statusTasks.get(id), ...p, id, mode: 'result', done: true, ts: Date.now() });
   };
   if (nonIntrusive && (updates.state.downloadInProgress || updates.state.dshInstallChild || updates.state.dshStoppedForInstall || [...statusTasks.values()].some((t) => !t.done))) {
     if (!statusWin) { log(`跳过被动结果(无状态窗,更新流程进行中): ${p.title}`); return; }
@@ -791,12 +997,12 @@ ipcMain.on('st:cancel-all', (e) => {
 });
 
 // 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
-// 单任务固定档(活动 186 / 结果 250)与结果视图保持旧尺寸不动(UITEST 锁定);孤儿 toast 单行除外
+// 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
+// 单任务固定档(活动 186 / 结果 250)保持旧尺寸不动(UITEST 锁定)——渲染层只在列表模式下回报
 ipcMain.on('st:rendered', (e) => {
   if (!trustedEvent(e) || !statusWin || e.sender !== statusWin.webContents) return;
   const tasks = [...statusTasks.values()];
-  const loneToast = tasks.length === 1 && tasks[0].ephemeral;
-  if (tasks.length <= 1 && !loneToast) return;
+  if (tasks.length <= 1) return;
   fitWindowToContent(statusWin,
     '(()=>{const l=document.querySelector(".tlist");const cs=getComputedStyle(l);const gap=parseFloat(cs.rowGap)||0;'
     + 'const pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);const seq=[];'
@@ -1489,7 +1695,7 @@ function runCommand(id) {
       applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
       const label = t({ auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' }[cfg.theme]);
       log(`外观已切换为: ${label}`);
-      notifyToast(t('menu.appearance', { mode: label }));
+      notify(t('menu.appearance', { mode: label }));
       pushTitlebarStatus(); // 命令栏主题钮的提示文案随模式变(阶段 1 S1);此路径不走 refreshTray
       break;
     }
@@ -1693,6 +1899,8 @@ function createWindow() {
   layoutViews();
   applyWindowState(); // 恢复上次的位置/大小/最大化(校验仍落在某屏幕工作区内)
   mainWindow.on('resize', layoutViews);
+  // 移动不改变视图尺寸,但通知宿主用的是屏幕坐标:必须与 resize 分开监听(X1)
+  mainWindow.on('move', syncToastBounds);
   mainWindow.on('maximize', () => { layoutViews(); titlebarView?.webContents.send('tb:maximized', true); });
   mainWindow.on('unmaximize', () => { layoutViews(); titlebarView?.webContents.send('tb:maximized', false); });
   // 全屏:标题栏自动收起;退出全屏恢复进入前的状态(用户手动隐藏标题栏后全屏,退出时不应被强制显示)
@@ -2088,7 +2296,12 @@ if (!gotLock) {
           try { welcomeWin?.destroy(); } catch { /* 已销毁 */ }
         },
         showStatus, showStatusResult, updateStatus, showDialog, showReport,
-        notifyToast,
+        notify, // X1 通知统一出口(旧 notifyToast 已并入)
+        // 通知宿主断言面:窗口会随队列清空即销毁,故 toastWin 走 getter;toastItems 是稳定引用的权威队列
+        get toastWin() { return toastWin; },
+        toastItems,
+        get notifyErrPending() { return notifyErrPending; },
+        destroyToastWindow, // 测试收尾:清队列并收窗,避免残留渲染进程影响后续断言
         getThemeSource: () => nativeTheme.themeSource,
         applyTheme,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,

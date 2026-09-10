@@ -2,8 +2,8 @@
    用法:<script src="ui-icons.js"></script> 置于页面自身脚本之前(CSP script-src 'self' 已允许),
    经 window.UI_ICONS 访问:UI_ICONS.result.info / UI_ICONS.activity.download / UI_ICONS.menu['open-workspace']。
    域:result / activity(结果与活动态,viewBox 24)· menu(菜单条目,viewBox 16、固定 15×15)
-      · cmdbar(命令栏状态簇,viewBox 16、固定 15×15)。
-   描边规范:result/activity 族 viewBox 24(线性图标);menu/cmdbar 族 viewBox 16、固定 15×15。
+      · cmdbar(命令栏状态簇,viewBox 16、固定 15×15)· toast(通知条目,viewBox 16、固定 15×15)。
+   描边规范:result/activity 族 viewBox 24(线性图标);menu/cmdbar/toast 族 viewBox 16、固定 15×15。
    原三份逐字符重复的定义(status RES / dialog ICONS / menu ICONS)已收编至此,改图标只改这一处。 */
 (function () {
   const result = {
@@ -49,5 +49,16 @@
     update: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11"/></svg>',
     theme: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor" stroke="none"/></svg>',
   };
-  window.UI_ICONS = { result, activity, menu, cmdbar };
+  // 通知宿主(阶段 1 X1):360px 宽的一行提示,图标只做级别提示,不做视觉主体。
+  // 独立成域而不复用 result(24px 大圆标):通知条目塞 24px 圆标会喧宾夺主,
+  // 且 result 族按「结果视图」语义组织(成功/失败大字),与「一条提示」的密度诉求不同。
+  // close 一并放这里:toast.html 是它唯一的消费者(其余页面的 ✕ 走 ui.css .win-close)。
+  const toast = {
+    info: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 6.9v4.1M8 4.7v.2" stroke-linecap="round"/></svg>',
+    ok: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M5.3 8.2l1.9 1.9 3.5-3.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warn: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2.6 14.6 13.6H1.4z"/><path d="M8 6.6v3M8 11.4v.2" stroke-linecap="round"/></svg>',
+    err: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9L5.9 10.1" stroke-linecap="round"/></svg>',
+    close: '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  };
+  window.UI_ICONS = { result, activity, menu, cmdbar, toast };
 })();

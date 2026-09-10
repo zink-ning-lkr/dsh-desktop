@@ -3,7 +3,7 @@
 // 回退 key 本身,保证功能不受文案表影响。
 // 渲染层收编状态(阶段 0 收尾 X5):全部页面已完成接入,渲染层不再有中文硬编码。
 // 页面经各自 preload 的 sendSync('i18n:table') 同步拉取 snapshot() 后本地 t()
-// (accel / loading / report / status / titlebar / reveal-tab / welcome / menu);
+// (accel / loading / report / status / titlebar / reveal-tab / welcome / menu / toast);
 // dialog.html 是唯一例外——它的标题/正文/按钮文案全部由主进程 payload 逐条下发,
 // 页面自身没有面向用户的固定文案,故不接文案表。
 'use strict';

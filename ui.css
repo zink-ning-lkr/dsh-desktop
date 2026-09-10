@@ -367,8 +367,49 @@
 @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 
+/* ---- 公共:应用内通知条目(阶段 1 X1) ----
+   宿主是主窗右上角的独立透明窗(toast.html,位置见 main.js toastBounds),但条目样式属复合层:
+   它和就地反馈是同一种语义(一句确认)的两种载体,将来就地反馈若升级为卡片形态可直接复用。
+   不用 box-shadow:透明窗会把外阴影裁成硬边,比无阴影更难看;改用 1px 边框 + 内高光表达浮起。
+   左缘 3px 状态色带是级别标识的唯一载体——图标同为 15px,不靠它区分 info/ok/warn/err 太吃力。 */
+.toast-host { display: flex; flex-direction: column; gap: var(--sp-2); }
+.titem {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 9px 10px 9px 11px;
+  border: 1px solid var(--c-border); border-left: 3px solid var(--tc, var(--c-brand-hi));
+  border-radius: var(--radius-card);
+  background: var(--c-panel-bg); color: var(--c-fg1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-fg0) 6%, transparent);
+}
+.titem[data-tone="info"] { --tc: var(--c-brand-hi); }
+.titem[data-tone="ok"] { --tc: var(--c-ok); }
+.titem[data-tone="warn"] { --tc: var(--c-warn); }
+.titem[data-tone="err"] { --tc: var(--c-err); }
+.titem .tico { width: 15px; height: 15px; flex: none; color: var(--tc); display: flex; align-items: center; justify-content: center; }
+/* 单行截断:提示语可能来自 dsh 侧的错误信息(长度不可控),换行会让窗口高度跳变 */
+.titem .ttext { flex: 1; min-width: 0; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titem .tact {
+  flex: none; border: none; border-radius: var(--radius-ctl); background: transparent;
+  color: var(--tc); font-family: inherit; font-size: var(--fs-micro); font-weight: 600; line-height: 1;
+  min-height: var(--ctl-h-xs); padding: 0 var(--sp-2); cursor: default;
+  transition: background var(--dur-mid), color var(--dur-mid);
+}
+.titem .tact:hover { background: color-mix(in srgb, var(--tc) 14%, transparent); }
+.titem .tclose {
+  flex: none; width: var(--ctl-h-xs); height: var(--ctl-h-xs); border: none; border-radius: var(--radius-ctl);
+  background: transparent; color: var(--c-fg2); cursor: default;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-mid), color var(--dur-mid);
+}
+.titem .tclose:hover { background: var(--c-hover); color: var(--c-fg0); }
+.titem .tclose svg { width: 11px; height: 11px; }
+/* 入场动画只挂在新增条目上(toast.html 按 data-id 复用节点),已存在的条目不重播 */
+.titem.enter { animation: toastIn var(--dur-win) var(--ease-out); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .win, .big { animation: none; }
   /* 进度条动效随状态下移一并收编(原为 status 页内联的一份) */
   .fill.indet, .fill::after { animation: none; }
+  .titem.enter { animation: none; }
 }
