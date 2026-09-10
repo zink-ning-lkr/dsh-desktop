@@ -7,6 +7,7 @@
 <title>DSH 错误报告</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
@@ -81,6 +82,8 @@
 </div>
 <script>
   const R = window.__report;
+  // 复合构件走共享层(阶段 0):按钮行 / 就地反馈 / 聚焦主操作
+  const K = window.UI_KIT;
   // 文案表(X-2 第二批):渲染层 t(),静态文案 JS 填充
   const T = (k, p) => window.__i18n.t(k, p);
   let payload = null;
@@ -121,27 +124,17 @@
     if (p.reportPath) { np.textContent = p.reportPath; np.title = p.reportPath; } // 直接在底部显示完整保存路径(悬停/可选中复制)
     else np.textContent = '';
     const actions = document.getElementById('actions');
-    actions.innerHTML = '';
-    (p.actions || []).forEach((a) => {
-      const el = document.createElement('button');
-      el.textContent = a.label;
-      el.className = 'btn' + (a.style ? ' ' + a.style : '');
-      el.addEventListener('click', () => R.action(a.id));
-      actions.appendChild(el);
-    });
+    // 按钮行走共享构件(原为 dialog/status/report 三份同构实现中的一份)。
+    // style 契约原样传入:'primary'/'danger'/'success'(RPT-1),ui-kit 内统一归到对应类名
+    K.buttonRow(actions, p.actions || [], (a) => R.action(a.id));
     // 打开即聚焦主操作(重试;无动作时回落 ✕):键盘 Enter 直达修复动线(RPT-2)。
-    // rAF 等一帧布局稳定后再聚焦,避免测量期焦点被重排吞掉
-    requestAnimationFrame(() => {
-      const target = actions.querySelector('.primary') || actions.querySelector('button') || document.getElementById('xBtn');
-      if (target) target.focus();
-    });
+    // raf:等一帧布局稳定后再聚焦,避免测量期焦点被重排吞掉(沿用原实现的做法)
+    K.focusPrimary(actions, { raf: true, fallback: document.getElementById('xBtn') });
   }
 
   function flash(msg) {
-    const f = document.getElementById('flash');
-    f.textContent = msg;
-    f.classList.add('on');
-    setTimeout(() => f.classList.remove('on'), 1800);
+    // 就地反馈走共享构件:时长统一为 2200ms(原为本地 1800ms,与 accel 的 2600ms 并存)
+    K.feedback(document.getElementById('flash'), msg);
   }
 
   document.getElementById('xBtn').addEventListener('click', () => R.action('_close'));

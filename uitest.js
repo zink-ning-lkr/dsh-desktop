@@ -106,10 +106,12 @@ function runUitest(d) {
     t('i18n-miss', i18n.t('nope.missing') === 'nope.missing');
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
-  // ⓠ ui-kit 复合组件层(阶段 0):公开面 + 无 module + 打包白名单。
-  // 最后一项专防"开发期正常、装机缺文件"——build.files 是白名单,新增文件漏加不报错。
+  // ⓠ ui-kit 复合组件层(阶段 0):公开面 + 无 module + 打包白名单 + 页面静态一致性。
+  // 最后两项专防两类静默故障:①build.files 是白名单,新增文件漏加不报错,装机才暴露;
+  // ②页面用了 window.UI_KIT 却忘了 <script src>,开发期页面直接抛错但只在对应窗口可见。
   uiStep(() => {
     const src = fs.readFileSync(path.join(__dirname, 'ui-kit.js'), 'utf8');
+    const files = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).build.files;
     const ck = [];
     const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
     const exported = (src.match(/window\.UI_KIT\s*=\s*\{([^}]*)\}/) || [, ''])[1];
@@ -119,8 +121,21 @@ function runUitest(d) {
     // 禁用 ES module 的回归锁:页面走 file://,type="module" 会被 Chromium 按 CORS 拒绝
     t('uikit-nomodule', !/^\s*(import|export)\s/m.test(src));
     t('uikit-iife', /^\(function\s*\(\)\s*\{/m.test(src));
-    t('uikit-packed', require('./package.json').build.files.includes('ui-kit.js'));
-    d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
+    t('uikit-packed', files.includes('ui-kit.js'));
+    // 页面 ↔ 共享层一致性
+    const miss = [];
+    for (const f of fs.readdirSync(__dirname).filter((x) => x.endsWith('.html'))) {
+      const html = fs.readFileSync(path.join(__dirname, f), 'utf8');
+      const srcs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+      if (/window\.UI_KIT\b/.test(html) && !srcs.includes('ui-kit.js')) miss.push(`${f}:未加载ui-kit.js`);
+      if (/window\.UI_ICONS\b/.test(html) && !srcs.includes('ui-icons.js')) miss.push(`${f}:未加载ui-icons.js`);
+      for (const s of srcs) {
+        if (!fs.existsSync(path.join(__dirname, s))) miss.push(`${f}:缺文件${s}`);
+        else if (!files.includes(s)) miss.push(`${f}:未打包${s}`);
+      }
+    }
+    t('ui-consistent', miss.length === 0);
+    d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${miss.length ? ` 问题:${miss.join(' ')}` : ''}`);
   }, 2500, 'uikit');
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
   uiStep(() => {
@@ -178,6 +193,10 @@ function runUitest(d) {
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
   // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
   uiStep(() => readDom(d.dialogWin, '(()=>{const ae=document.activeElement;return (ae&&ae.classList.contains("primary")&&ae.closest("#foot"))?"PASS focus=主按钮":"FAIL ae="+(ae?ae.className:"none")})()', 'd1-focus'), 10500);
+  // 阶段 0 修复 X3:对话框必须是真模态(parent + modal),此前只有 parent(仅置顶不阻断输入),
+  // 而渲染层一直声明 aria-modal="true" —— 声明与事实不符。mainEnabled 一并打出:模态期间
+  // 主窗应被平台禁用;该值同时是 dialog-unmodal 断言的基线。
+  uiStep(() => d.log(`UITEST dialog-modal isModal=${d.dialogWin?.isModal?.()}(期望 true) → ${d.dialogWin?.isModal?.() === true ? 'PASS' : 'FAIL'} mainEnabled=${d.mainWindow?.isEnabled?.()}`), 10650, 'dialog-modal');
   uiStep(() => d.showDialog({ type: 'warning', title: 'D2', message: '第二个对话框(排队)', buttons: [{ label: '好', primary: true }] }), 10800, 'd2');
   uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;return t==="D1"?"PASS D2已入队不顶掉在屏D1":"FAIL 在屏="+t})()', 'd2-queued'), 11100);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11250, 'd1-choose');
@@ -185,6 +204,10 @@ function runUitest(d) {
   // v0.6.1 Acrylic 铺开:dialog 的 .win.acrylic 类必须与 Win11 判定一致
   uiStep(() => { const want = d.isWin11(); readDom(d.dialogWin, `(()=>{const m=document.querySelector(".win").classList.contains("acrylic");return (m===${want})?"PASS acrylic="+m:"FAIL acrylic="+m+" want=${want}"})()`, 'dialog-acrylic'); }, 11620);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 11700, 'd2-choose');
+  // 阶段 0 修复 X3 配套:对话框走「隐藏复用」而非销毁,modal 子窗在平台上解除父窗禁用的
+  // 时机不一,主进程已显式 releaseDialogModal 兜底。本断言防的正是"对话框关掉、主窗永久点不动"
+  // 这类不可自愈状态(禁用则本项 FAIL)。
+  uiStep(() => d.log(`UITEST dialog-unmodal mainEnabled=${d.mainWindow?.isEnabled?.()}(期望 true) → ${d.mainWindow?.isEnabled?.() === true ? 'PASS' : 'FAIL'}`), 11750, 'dialog-unmodal');
   // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
   uiStep(() => d.showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
   // P2-3 Mica 试点:reportWin 的 .win.mica 类必须与 Win11 判定一致(Win10 回落实色)

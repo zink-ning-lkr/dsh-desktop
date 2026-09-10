@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
 <script src="ui-icons.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
@@ -25,26 +26,9 @@
   .activity { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 14px; }
   .detail { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere;
     max-height: 60px; min-height: 0; overflow-y: auto; user-select: text; }
-  .bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
-  .fill {
-    height: 100%; width: 0%; border-radius: 3px; position: relative;
-    background: linear-gradient(90deg, var(--c-brand), var(--c-progress-accent));
-    transition: width .18s ease-out;
-  }
-  .fill::after {
-    content: ""; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
-    transform: translateX(-100%); animation: sheen 1.6s ease-in-out infinite;
-  }
-  @keyframes sheen { 55%, 100% { transform: translateX(100%); } }
-  .fill.indet {
-    width: 100%; transition: none;
-    background-size: 200% 100%;
-    background-image: linear-gradient(90deg, var(--c-bg2) 0%, var(--c-brand) 35%, var(--c-progress-accent) 50%, var(--c-brand) 65%, var(--c-bg2) 100%);
-    animation: indet 1.3s linear infinite;
-  }
-  .fill.indet::after { display: none; }
-  @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
+  /* 进度条样式(.bar/.fill/.fill.indet 及 sheen/indet 关键帧与 reduced-motion 分支)
+     已上移至 ui.css §5:进度条现由 ui-kit.js 的共享构件构造,样式必须与构件同源,
+     留在页面内联会让别的页面复用构件时画出裸条。类名与取值逐字未改。 */
   .meta { display: flex; justify-content: space-between; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2);
     font-variant-numeric: tabular-nums; /* 进度帧 150ms 刷新:数字等宽,零横跳 */ }
   /* -------- 结果视图(单任务) -------- */
@@ -98,7 +82,7 @@
   .trow.ephemeral { opacity: .8; border-style: dashed; }
   /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
   .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
-  @media (prefers-reduced-motion: reduce) { .fill.indet, .fill::after { animation: none; } }
+  /* 进度条动效的 reduced-motion 分支随样式一并上移至 ui.css */
 </style>
 </head>
 <body>
@@ -129,6 +113,8 @@
   if (S.env && S.env.acrylic) document.querySelector('.win')?.classList.add('acrylic'); // Win11 材质透出(v0.6.1)
   // 图标走 ui-icons.js 共享层(与 dialog 结果图标同源,P1-2):activity=进行中五态,result=结果四态
   const { activity: ACT, result: RES } = window.UI_ICONS;
+  // 复合构件走共享层(阶段 0):按钮行 / 进度条 / 结果圆标 / 聚焦主按钮不再各页自写
+  const K = window.UI_KIT;
   // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key
   const T = (k, p) => window.__i18n.t(k, p);
   // 「后台」按钮文案/提示入表(ST-3):tooltip 精确到行为(最小化到任务栏,非"dsh 转后台")
@@ -144,39 +130,17 @@
   let histOpen = false;
   let lastViewKey = ''; // 上帧视图键(result/act/list):仅视图切换帧聚焦安全控件,进度帧不打扰焦点
 
-  /* -------- 共享语义构件(P1-3):进度条/进度文案/结果按钮只此一份实现,
-     单任务视图与列表行分别组合;DOM 形态各自保持像素契约(UITEST 锁定 186/250) -------- */
+  /* -------- 共享语义构件:实现已上移至 ui-kit.js --------
+     进度条/按钮行/结果圆标/聚焦主按钮原先是"9 个页面各写一份"中的一份,现统一走 L3 构件;
+     本页只保留 status 特有两件事:①容器的类名(单视图 btns btn-row 与列表行 lbtns 密度不同,
+     不强行统一,否则像素契约会变);②把任务 id 绑进回调(动作全部携带 taskId 是状态窗的语义)。
+     DOM 形态保持不变,UITEST 锁定的 186/250 高度不受影响。 */
   function fmtPct(t, has) {
     return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? T('status.wait') : ''));
   }
-  function makeBar(t, ariaLabel) {
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    bar.setAttribute('role', 'progressbar');
-    bar.setAttribute('aria-valuemin', '0');
-    bar.setAttribute('aria-valuemax', '100');
-    bar.setAttribute('aria-label', ariaLabel || T('status.progress'));
-    const fill = document.createElement('div');
-    const has = typeof t.progress === 'number';
-    fill.className = 'fill' + (has ? '' : ' indet');
-    if (has) {
-      fill.style.width = Math.max(0, Math.min(100, t.progress)) + '%';
-      bar.setAttribute('aria-valuenow', String(Math.round(Math.max(0, Math.min(100, t.progress)))));
-    } else bar.removeAttribute('aria-valuenow'); // 不定态进度条按 ARIA 规范不携带 valuenow
-    bar.appendChild(fill);
-    return bar;
-  }
   function fillButtons(container, t, cls) {
     container.className = cls;
-    container.innerHTML = '';
-    (t.buttons || []).forEach((b) => {
-      const el = document.createElement('button');
-      el.textContent = b.label;
-      el.className = 'btn' + (b.primary ? ' primary' : '');
-      el.addEventListener('click', () => S.action(t.id, b.id));
-      container.appendChild(el);
-    });
-    return container;
+    return K.buttonRow(container, t.buttons || [], (b) => S.action(t.id, b.id));
   }
 
   // 视图打开时聚焦安全默认控件(ST-1):活动/列表视图聚焦「后台」(与 Esc 梯度对齐,Enter=安全离开),
@@ -208,25 +172,20 @@
     if (isRes) {
       const type = p.type || 'info';
       document.getElementById('result').className = 'result';
-      // 类型配色走 ui.css 公共 .big.<type>(与对话框同一套)
-      const big = document.getElementById('big');
-      big.className = 'big ' + type;
-      big.innerHTML = RES[type] || RES.info;
+      // 类型配色走 ui.css 公共 .big.<type>(与对话框同一套);构造走 ui-kit 共享构件
+      K.bigBadge(document.getElementById('big'), type, RES);
       document.getElementById('rtitle').textContent = p.title || '';
       document.getElementById('rdetail').textContent = p.detail || '';
       fillButtons(document.getElementById('btns'), p, 'btns btn-row');
-      // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮
-      window.setTimeout(() => {
-        const btns = document.getElementById('btns');
-        const main = btns.querySelector('.primary') || btns.querySelector('button');
-        if (main && document.getElementById('result').style.display !== 'none') main.focus();
-      }, 30);
+      // 结果到达即聚焦主按钮:键盘用户 Enter 直达,无需先 Tab 到按钮。
+      // guard 传 #result:视图已被下一帧切走时放弃聚焦,不抢焦点(原为 style.display 手判)
+      K.focusPrimary(document.getElementById('btns'), { delay: 30, guard: document.getElementById('result') });
       return;
     }
     document.getElementById('detail').textContent = p.detail || '';
     const barWrap = document.getElementById('bar');
     barWrap.innerHTML = '';
-    barWrap.appendChild(makeBar(p, p.title || T('status.progress')));
+    barWrap.appendChild(K.progressBar(p, p.title || T('status.progress')));
     const has = typeof p.progress === 'number';
     document.getElementById('pct').textContent = fmtPct(p, has);
     document.getElementById('size').textContent = p.size || '';
@@ -255,8 +214,8 @@
       body.appendChild(det);
     }
     if (!t.done) {
-      // 进行中:进度条 + pct/size(与单视图同一套共享构件,P1-3)
-      body.appendChild(makeBar(t, t.title || T('status.progress')));
+      // 进行中:进度条 + pct/size(与单视图同一套 ui-kit 共享构件)
+      body.appendChild(K.progressBar(t, t.title || T('status.progress')));
       const meta = document.createElement('div');
       meta.className = 'meta';
       const pct = document.createElement('span');

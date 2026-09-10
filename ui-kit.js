@@ -83,7 +83,10 @@
      收编三份同构实现:status.html fillButtons / dialog.html foot / report.html actions。
      container 的 className 由调用方决定(btn-row / lbtns / btns btn-row),本函数只清空子节点,
      因为三处的容器类名语义不同(决策行等宽 vs 行内小按钮不等宽),不强行统一。
-     buttons 元素:{ label, id?, primary?, style?: 'danger'|'success', disabled?, title? }
+     buttons 元素:{ label, id?, primary?, style?: 'primary'|'danger'|'success', disabled?, title? }
+     强调样式的两种既有契约都收:①primary: true(status/dialog);②style: 'primary'
+     (report 的动作按钮把整类名塞在 style 里)。二者等价,统一归到 primary 类,
+     避免调用方为了适配构件去改数据形状。
      onPick(button, index) —— 下标会随按钮排列漂移,语义分发请用 button.id(既有约定)。 */
   function buttonRow(container, buttons, onPick, opts) {
     const o = opts || {};
@@ -91,12 +94,10 @@
     const list = buttons || [];
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
-      const variant = (b.style === 'danger' || b.style === 'success') ? ' ' + b.style : '';
-      const btn = el('button', {
-        class: 'btn' + (b.primary ? ' primary' : '') + variant,
-        text: b.label,
-        type: 'button',
-      });
+      const cls = ['btn'];
+      if (b.primary || b.style === 'primary') cls.push('primary');
+      if (b.style === 'danger' || b.style === 'success') cls.push(b.style);
+      const btn = el('button', { class: cls.join(' '), text: b.label, type: 'button' });
       if (b.id) btn.dataset.id = b.id; // 主进程按 id 分发语义
       if (b.disabled) btn.disabled = true; // 禁用态样式见 ui.css .btn:disabled
       if (b.title) btn.title = b.title;

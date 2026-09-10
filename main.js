@@ -835,6 +835,20 @@ function fitWindowToContent(win, expr, { min = 0, max = Infinity, tolerance = 8,
   }).catch(() => {});
 }
 
+// 解除对话框模态(阶段 0 修复 X3 的配套兜底)。
+// 对话框窗口是「隐藏复用」而非一次性销毁(P2-1 队列化的刻意设计),而 modal 子窗在平台上
+// 解除父窗禁用的时机并不完全一致(销毁必解除,hide 的解除时机依平台而异)。此处显式恢复
+// 主窗可交互,避免出现「对话框已关、主窗却永久点不动」这类不可自愈的状态。
+// 默认只在确认没有下一个待展示对话框、且窗口确已隐藏时生效——队列换页期间恢复可交互
+// 会短暂击穿模态;窗口 destroyed 路径传 force=true(此时 helper 的可见性判据已不适用)。
+function releaseDialogModal(force) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!force) {
+    if (!dialogWin || dialogWin.isDestroyed() || dialogBusy || dialogWin.isVisible()) return;
+  }
+  try { mainWindow.setEnabled(true); } catch { /* 平台无此能力或窗口销毁中,静默 */ }
+}
+
 function flushDialog() {
   if (!dialogWin || dialogBusy || !dialogQueue.length) return;
   cancelDialogRecycle();
@@ -867,6 +881,10 @@ function showDialog(opts, cb) {
     dialogWin = new BrowserWindow({
       width: 460, height: 220, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
+      // 模态语义(阶段 0 修复 X3):此前只给 parent —— 那只保证「置顶于父窗」,不阻断父窗输入,
+      // 而渲染层一直声明 aria-modal="true",声明与事实不符;退出确认/破坏性操作确认弹着时
+      // 用户仍可继续操作主窗。modal 仅在存在 parent 时生效,与本窗一致。
+      modal: true,
       // Win11 Acrylic 轻量层(P2-3 铺开,v0.6.1):同 status 窗
       backgroundMaterial: isWin11() ? 'acrylic' : undefined,
       webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'dialog-preload.js') },
@@ -877,6 +895,7 @@ function showDialog(opts, cb) {
     // 确认框本身加载失败(did-finish-load 永不触发,框不可见):按「取消」复位,避免退出状态卡死且无任何可见入口
     dialogWin.webContents.on('did-fail-load', () => resetQuitConfirm());
     dialogWin.on('closed', () => {
+      releaseDialogModal(true); // 必须先于置空:模态解除需要主窗仍可寻址(销毁路径强制解除)
       dialogWin = null;
       dialogCb = null;
       dialogBusy = false;
@@ -899,7 +918,8 @@ ipcMain.on('dl:choose', (e, i, id) => {
   dialogWin?.hide();
   if (cb) cb(i, id);
   flushDialog(); // 队列还有下一个:同一窗口接续展示(P2-1)
-  if (!dialogBusy) scheduleDialogRecycle(); // 没有后续:隐藏即开始闲置计时(P0-3)
+  // 无后续对话框才解除模态(P0-3 闲置回收同时启动)
+  if (!dialogBusy) { releaseDialogModal(); scheduleDialogRecycle(); }
 });
 
 // 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 36/20 + 边框 2)

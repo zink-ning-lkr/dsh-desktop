@@ -7,6 +7,7 @@
 <title>下载加速设置</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
@@ -115,6 +116,8 @@
 </div>
 <script>
   const A = window.__accel;
+  // 复合构件走共享层(阶段 0):就地反馈
+  const K = window.UI_KIT;
   // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <strong> 标签),用 innerHTML
   const T = (k, p) => window.__i18n.t(k, p);
   {
@@ -147,14 +150,12 @@
     xEl.setAttribute('aria-label', T('common.close'));
   }
   let cur = null;
-  let toastTimer = null;
 
   function toast(msg, ok) {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.className = 'inline-feedback ' + (ok ? '' : 'bad ') + 'on';
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.className = 'inline-feedback'; }, 2600);
+    // 就地反馈走共享构件(.inline-feedback + 统一 2200ms)。
+    // 原实现在本页自维护一个反馈计时器与 2600ms 时长,与 report 的 1800ms 并存——
+    // 同一交互两种时长,收编后由 ui-kit 一处决定;连点不叠加由构件内的 WeakMap 计时器保证
+    K.feedback(document.getElementById('toast'), msg, { ok });
   }
 
   const seg = document.getElementById('seg');
