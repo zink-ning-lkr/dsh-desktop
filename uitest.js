@@ -106,6 +106,22 @@ function runUitest(d) {
     t('i18n-miss', i18n.t('nope.missing') === 'nope.missing');
     d.log(`UITEST unit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
   }, 2400, 'unit');
+  // ⓠ ui-kit 复合组件层(阶段 0):公开面 + 无 module + 打包白名单。
+  // 最后一项专防"开发期正常、装机缺文件"——build.files 是白名单,新增文件漏加不报错。
+  uiStep(() => {
+    const src = fs.readFileSync(path.join(__dirname, 'ui-kit.js'), 'utf8');
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const exported = (src.match(/window\.UI_KIT\s*=\s*\{([^}]*)\}/) || [, ''])[1];
+    t('uikit-global', /window\.UI_KIT\s*=/.test(src));
+    t('uikit-apis', ['el', 'buttonRow', 'progressBar', 'bigBadge', 'feedback', 'focusPrimary', 'focusTrap', 'srOnly']
+      .every((k) => new RegExp(`\\b${k}\\b`).test(exported)));
+    // 禁用 ES module 的回归锁:页面走 file://,type="module" 会被 Chromium 按 CORS 拒绝
+    t('uikit-nomodule', !/^\s*(import|export)\s/m.test(src));
+    t('uikit-iife', /^\(function\s*\(\)\s*\{/m.test(src));
+    t('uikit-packed', require('./package.json').build.files.includes('ui-kit.js'));
+    d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}`);
+  }, 2500, 'uikit');
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
   uiStep(() => {
     const t = d.trayStatusText();

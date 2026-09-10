@@ -289,6 +289,32 @@
 
 /* ============================ §5 复合层 ============================ */
 
+/* ---- 公共:进度条(第六轮从 status.html 上移) ----
+   上移原因:进度条要成为 ui-kit.js 的共享构件,样式必须与构件同源;
+   原先样式只在 status 页内联,构件一旦被别的页面复用就会画出裸条。
+   结构与类名保持原样(.bar > .fill[.indet]),status 页的像素契约不受影响。 */
+.bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
+.fill {
+  height: 100%; width: 0%; border-radius: 3px; position: relative;
+  background: linear-gradient(90deg, var(--c-brand), var(--c-progress-accent));
+  transition: width .18s ease-out;
+}
+.fill::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .35), transparent);
+  transform: translateX(-100%); animation: sheen 1.6s ease-in-out infinite;
+}
+@keyframes sheen { 55%, 100% { transform: translateX(100%); } }
+/* 不定态:无 progress 数值时用(宽度拉满 + 双品牌色流光平移) */
+.fill.indet {
+  width: 100%; transition: none;
+  background-size: 200% 100%;
+  background-image: linear-gradient(90deg, var(--c-bg2) 0%, var(--c-brand) 35%, var(--c-progress-accent) 50%, var(--c-brand) 65%, var(--c-bg2) 100%);
+  animation: indet 1.3s linear infinite;
+}
+.fill.indet::after { display: none; }
+@keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
+
 /* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
    头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
    关闭按钮悬停统一红底(原 report 红、status/accel 灰,同一应用两种"关闭"语义不一致) */
@@ -343,4 +369,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .win, .big { animation: none; }
+  /* 进度条动效随状态下移一并收编(原为 status 页内联的一份) */
+  .fill.indet, .fill::after { animation: none; }
 }
