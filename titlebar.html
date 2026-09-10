@@ -45,54 +45,56 @@
   #menuBtn svg { width: 13px; height: 13px; }
   #menuBtn:hover { background: var(--c-hover); }
   #menuBtn:hover svg { color: var(--c-brand-hi); }
-  #menuBtn.active, #menuBtn.active:hover { background: var(--c-hover-strong); }
-  #menuBtn.active svg { color: var(--c-brand-hi); }
+  /* 深澜:菜单展开态 = 品牌渐变底 + 白图标(从灰底升级为「光源点亮」) */
+  #menuBtn.active, #menuBtn.active:hover { background: linear-gradient(180deg, var(--c-brand-vio), var(--c-brand)); }
+  #menuBtn.active svg { color: #fff; }
   #collapseBtn { width: 34px; }
   #collapseBtn svg { width: 11px; height: 11px; transition: transform var(--dur-mid) ease; }
   #collapseBtn:hover svg { color: var(--c-fg1); transform: translateY(-1px); }
   .title { display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; }
   .logo {
-    width: 16px; height: 16px; flex: none;
-    /* 白鲸 logo,透明底 */
-    opacity: .9;
+    width: 18px; height: 18px; flex: none;
+    /* 深澜:彩色品牌鲸鱼(assets/deepseek-whale-color.svg,品牌蓝);
+       采样浅底时由 JS 换黑版(见 setLogo) */
+    opacity: .95;
   }
   .name { white-space: nowrap; opacity: .85; }
-  /* 工作目录:由只读文本升级为「点击复制路径」(阶段 1 S1)。
-     与其余按钮不同,这里是文本行内块 —— 必须显式还原 span 时代的盒模型:
-     display:block + overflow:hidden + text-overflow:ellipsis 三者齐备截断才成立,
-     照抄通用 button 复位的 display:flex 会让 text-overflow 作用在匿名 flex 项上而失效。
-     [hidden] 需单独兜:作者样式 .workspace{display:block} 会盖掉 UA 的 [hidden]{display:none}。 */
+  /* 工作目录:由只读文本升级为「点击复制路径」(S1)。
+     深澜:前加 folder 图标,hover 变澜光色 + 图标微动。文本必须包 span:
+     text-overflow 只对块级盒生效,flex 容器上的匿名文本节点无法截断。 */
   .workspace {
-    display: block;
-    min-width: 0;
-    padding: 0;
-    opacity: .72;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 46vw;
+    display: flex; align-items: center; gap: 5px;
+    min-width: 0; max-width: 46vw;
+    padding: 0; border: none; background: transparent;
+    opacity: .72; white-space: nowrap;
+    color: inherit; font: inherit; cursor: default;
+    transition: opacity var(--dur-fast) ease, color var(--dur-fast) ease;
   }
-  .workspace:hover { opacity: 1; }
+  .workspace svg { flex: none; width: 12px; height: 12px; transition: transform var(--dur-fast) ease; }
+  .workspace span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .workspace:hover { opacity: 1; color: var(--c-brand-hi); }
+  .workspace:hover svg { transform: translateX(1px); }
   .workspace[hidden] { display: none; }
   /* ---- 中 · 命令入口(阶段 2) ----
-     胶囊按钮:高度 20px,在 30px 栏内上下各留 5px。用 --radius-pill 拿到真正的胶囊形,
-     而不是拿 6px 圆角冒充。发丝线颜色由 --fg 派生(与状态簇同一取法)——采样底色浅深都可见。 */
+     胶囊按钮:深澜升级为 22px 高 + 澜光描边 + 放大镜澜光色,hover 微上浮 1px。
+     发丝线颜色由 --fg 派生(与状态簇同一取法)——采样底色浅深都可见。 */
   .cmdentry {
-    gap: 6px; height: 20px; padding: 0 8px; flex: none;
-    border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    gap: 6px; height: 22px; padding: 0 10px; flex: none;
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 42%, transparent);
     border-radius: var(--radius-pill);
-    color: var(--fg); opacity: .8;
+    color: var(--fg); opacity: .92;
     font-size: var(--fs-micro); line-height: 1;
+    transition: background var(--dur-fast) ease, opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
   }
-  .cmdentry:hover { background: var(--c-hover); opacity: 1; }
-  .cmdentry:active { background: var(--c-hover-strong); }
+  .cmdentry:hover { background: var(--c-hover); opacity: 1; transform: translateY(-1px); }
+  .cmdentry:active { background: var(--c-hover-strong); transform: none; }
   .cmdentry[hidden] { display: none; }
-  .cmdentry .ceico { display: flex; align-items: center; }
+  .cmdentry .ceico { display: flex; align-items: center; color: var(--c-brand-hi); }
   .cmdentry .cekbd { padding: 1px 5px; border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--fg) 12%, transparent); opacity: .9; }
   /* 三级断点(方案 §5.1 / §7.2):≥1200px 全称 + 徽标;960–1200px 收为纯图标;
-     <960px 整钮隐藏(主窗 minWidth 即 960,此处是边框吃宽后的兜底),此时仅 Ctrl+K 可用 */
+     深澜(v1.0.0):<960 不再整钮隐藏(主窗 minWidth 即 960,原隐藏规则是边框吃宽后的死代码)——图标钮常显,窄窗仍有可视入口,不依赖 Ctrl+K 记忆 */
   @media (max-width: 1199px) { .cmdentry .celbl, .cmdentry .cekbd { display: none; } }
-  @media (max-width: 959px) { .cmdentry { display: none; } }
+  @media (max-width: 959px) { .cmdentry { padding: 0 8px; } }
   .spacer { flex: 1; }
   /* ---- 状态簇(阶段 1 S1)· 主题边界(X2) ----
      栏内有且只有一处跟随 dsh 页面采样色:body 的背景(--bg)与前景(--fg,由主进程按采样
@@ -118,20 +120,31 @@
   .cbtn[hidden] { display: none; } /* 无内容的状态钮整钮隐藏,不留空位(见 S1) */
   /* 服务点:与按钮同尺寸的盒,但不可交互、无 hover 底(它不是按钮) */
   .cstat { position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
-  /* 圆点:颜色即状态(默认灰=未判定,启动瞬间才可能短暂出现) */
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c-fg3); }
-  .dot.ok { background: var(--c-ok); }
-  .dot.boot { background: var(--c-warn); }
-  .dot.err { background: var(--c-err); }
-  /* 角标:数字 / 纯圆点两种形态,压在按钮右上角 */
+  /* 圆点:颜色即状态(默认灰=未判定,启动瞬间才可能短暂出现)。
+     深澜:9px 圆点 + 同色 3px 光晕 ring(色弱/远视下第一眼可读);err 态呼吸脉冲(崩溃可察觉) */
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c-fg3); }
+  .dot.ok { background: var(--c-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-ok) 20%, transparent); }
+  .dot.boot { background: var(--c-warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-warn) 20%, transparent); }
+  .dot.err {
+    background: var(--c-err);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-err) 18%, transparent);
+    animation: dotErr 1.6s ease-in-out infinite;
+  }
+  @keyframes dotErr {
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-err) 18%, transparent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c-err) 5%, transparent); }
+  }
+  /* 角标:数字 / 纯圆点两种形态,压在按钮右上角。深澜:品牌渐变底 + 光晕(从纯色升级) */
   .cbtn .sup {
     position: absolute; top: -2px; right: -2px;
     min-width: 15px; height: 14px; padding: 0 3px;
     border-radius: 7px;
-    background: var(--c-brand); color: #fff;
-    font-size: var(--fs-micro); line-height: 14px; font-weight: 600; text-align: center;
+    background: linear-gradient(180deg, var(--c-brand-vio), var(--c-brand));
+    color: #fff;
+    font-size: 10.5px; line-height: 14px; font-weight: 600; text-align: center;
+    box-shadow: 0 1px 4px rgba(77, 107, 254, .45);
   }
-  .cbtn .sup.dot-only { min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; }
+  .cbtn .sup.dot-only { min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-brand) 22%, transparent); }
   .cap { display: flex; height: 100%; flex: none; }
   .cap button { width: 44px; }
   .cap button:hover { background: var(--c-hover); }
@@ -139,7 +152,7 @@
   .cap button:hover svg { transform: scale(1.12); }
   #closeBtn:hover { background: var(--c-close-hover); color: #fff; }
   #closeBtn:hover svg { transform: scale(1.08); }
-  @media (prefers-reduced-motion: reduce) { button, .cap svg { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { button, .cap svg, .dot.err { transition: none; animation: none; } }
 </style>
 </head>
 <body>
@@ -150,10 +163,12 @@
     </svg>
   </button>
   <div class="title">
-    <img class="logo" src="assets/whale-white.png" alt="DSH"><span class="name">DSH</span>
-    <!-- 工作目录:点击复制完整路径(S1)。<button> 而非 span+role:上一轮已把 reveal-tab 的
-         "role=button 挂在非控件元素上" 修掉,这里不重蹈覆辙。 -->
-    <button class="workspace" id="workspace" type="button"></button>
+    <img class="logo" src="assets/deepseek-whale-color.svg" alt="DSH"><span class="name">DSH</span>
+    <!-- 工作目录:点击复制完整路径(S1)。深澜:folder 图标 + 文本(文本包 span 以便截断) -->
+    <button class="workspace" id="workspace" type="button" hidden>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5c0-.8.7-1.5 1.5-1.5h2.4L7.3 4h4.2c.8 0 1.5.7 1.5 1.5V6H2v-1.5z"/><path d="M2 6h12v5.5c0 .8-.7 1.5-1.5 1.5h-9C2.7 13 2 12.3 2 11.5V6z"/></svg>
+      <span id="wsTxt"></span>
+    </button>
   </div>
   <!-- 中 · 命令入口(阶段 2):胶囊按钮 + Ctrl+K 徽标。两个 .spacer 把入口夹在标识区与状态簇之间,
        使其落在二者中间——面板也从命令栏中段向下展开,点击位置与面板位置对齐。
@@ -266,11 +281,12 @@
   $('themeBtn').onclick = () => t.cycleTheme();
   $('workspace').onclick = () => t.copyWorkspace();
 
-  // 鲸鱼 logo 黑白版:标题栏底色跟 dsh 页面采样色(而非主题),logo 也随之切换,
-  // 否则浅色页面背景上白鲸不可见。采样到达前(加载页阶段)底色是令牌色,跟随 data-theme。
+  // 鲸鱼 logo:标题栏底色跟 dsh 页面采样色(而非主题),logo 也随之切换:
+  // 深底用彩色品牌鲸鱼(deepseek-whale-color.svg),浅底换黑版(否则浅色页面上蓝鲸对比不足)。
+  // 采样到达前(加载页阶段)底色是令牌色,跟随 data-theme。
   const logo = document.querySelector('.logo');
   let sampled = false; // 已收到页面采样:此后 logo 完全由采样亮度决定,不再跟随主题属性
-  const setLogo = (light) => { logo.src = 'assets/whale-' + (light ? 'black' : 'white') + '.png'; };
+  const setLogo = (light) => { logo.src = 'assets/' + (light ? 'whale-black.png' : 'deepseek-whale-color.svg'); };
   setLogo(document.documentElement.hasAttribute('data-theme'));
   new MutationObserver(() => { if (!sampled) setLogo(document.documentElement.hasAttribute('data-theme')); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -302,10 +318,11 @@
   });
   t.onWorkspace((ws) => {
     const el = $('workspace');
-    el.textContent = ws ? `— ${ws}` : '';
+    const txt = $('wsTxt');
+    txt.textContent = ws ? ws : '';
     // 无工作目录时整钮隐藏:空按钮仍会被 Tab 命中,是个没有名字的焦点停靠点
     el.hidden = !ws;
-    if (ws) setTip('workspace', T('cmdbar.copyWs'));
+    if (ws) { setTip('workspace', T('cmdbar.copyWs')); }
   });
   // 关闭按钮语义随设置联动:「最小化到托盘」提示用户窗口并未退出(否则点 ✕ 后窗口消失易误以为退出了)
   t.onCloseTip((tip) => { if (tip) setTip('closeBtn', tip); });

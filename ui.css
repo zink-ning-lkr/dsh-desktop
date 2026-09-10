@@ -4,50 +4,42 @@
    各页面经 <link rel="stylesheet" href="ui.css"> 引入(CSP 已允许 style-src 'self');
    页面内联 <style> 在其后声明,需要微调时用更高优先级或 --win-* 变量覆写。
 
-   第五轮(统一排版/按钮/视觉层级)新增三条硬约束:
-   ① 字号只能用 --fs-* 六级(display/title/head/body/ctrl/micro),行距只能用 --lh-*;
-      页面不得再出现 12.5 / 11.5 / 19 这类离群值。
-   ② 间距一律取 --sp-*(4 基准);控件高度取 --ctl-*(30 / 26 / 40)。
-   ③ 层叠与焦点:卡片走 --c-elev-1,主操作带品牌辉光,强调色按钮的焦点环用反色。
+   深澜(DEEP TIDE)视觉体系(v1.0.0):色板由 GitHub 灰黑转向深海冷调蓝黑,
+   品牌蓝紫 #4d6bfe→#7aa1ff 为唯一强调色;浅色主题为「晨澜」海面冷白。
+   令牌名一个不改(全仓页面引用零改动),只换值 + 新增 --font-display 与 --c-glow-* 光晕令牌。
 
    ---- 分区地图(第六轮整理:单文件保留,靠分区而非拆文件维持单一事实源) ----
    §1 令牌 :root           色板 / 排版 / 间距 / 控件 / 层级 / 状态 / 圆角 / 密度 / 动效 / 字栈
    §2 浅色主题              仅覆写令牌,组件零改动
    §3 基础层                重置 / 滚动条 / 焦点环 / 窗口外壳 / 工具类
    §4 原语层                按钮 / 输入 / 分段器 / 开关 / 徽标 / 键帽 / 芯片
-   §5 复合层                窗口三件套 / 头部 / 结果圆标 / 分区标签 / 就地反馈
-   §6 页面私有              各页内联 <style>,只允许布局与尺寸微调,颜色/字号/间距一律引令牌
-
-   第六轮(前端界面重构 阶段 0)新增:
-   ① 层级序列 --c-elev-0..3 与 z-index 表 --z-*(此前全仓仅有 elev-1 一处、无叠序约定);
-   ② 状态令牌 --c-active / --c-selected(-fg) / --c-disabled-*(此前 .btn 无 :disabled);
-   ③ 圆角语义化 --radius-ctl/card/panel/pill/win;旧名 s/m/l 保留为别名(m 由 7px 归一到 8px);
-   ④ 密度 --density-row/-gap(菜单项 32px 与 main.js 逐项高度常量强耦合,改需同步);
-   ⑤ 动效三档 --dur-fast/mid/slow 拉开可感知差距(mid .15→.18s);
-   ⑥ 控件档 --ctl-h-xs(24px) / --ctl-icon(-lg) / 焦点环显式令牌。 */
+   §5 复合层                窗口三件套 / 头部 / 结果圆标 / 分区标签 / 就地反馈 / 通知条目
+   §6 页面私有              各页内联 <style>,只允许布局与尺寸微调,颜色/字号/间距一律引令牌 */
 :root {
-  /* 色板:GitHub Dark 系,与 dsh 生态视觉一致 */
-  --c-bg0: #0d1117;
-  --c-bg1: #161b22;
-  --c-bg2: #21262d;
-  --c-border: #30363d;
-  --c-border-hover: #3d444d;
-  --c-fg0: #e6edf3;
-  --c-fg1: #c9d1d9;
-  --c-fg2: #8b949e;
-  --c-fg3: #6e7681; /* 仅装饰性文字;正文最低用 --c-fg2(对比度 ≥4.5:1) */
-  --c-placeholder: #484f58; /* 输入框占位符(浅色主题下换浅灰) */
-  --c-brand: #4d6bfe;
-  --c-brand-hi: #79b8ff;
-  --c-brand-deep: #3b5bdb; /* 品牌渐变下端(primary 按钮底) */
-  --c-ok: #3fb950;
-  --c-ok-strong: #2ea043; /* success 渐变上端 */
-  --c-ok-deep: #238636;   /* success 渐变下端 */
-  --c-warn: #d29922;
-  --c-err: #f85149;
-  --c-err-strong: #da3633; /* danger 渐变上端 */
-  --c-err-deep: #b62324;   /* danger 渐变下端 */
-  --c-progress-accent: #8b5cf6; /* 进度条渐变副色(品牌紫) */
+  /* ---- 色板:深海冷调(原 GitHub Dark 系,值全换,名全留) ---- */
+  --c-bg0: #0b0f1d;          /* 海底 */
+  --c-bg1: #111628;          /* 礁岩 */
+  --c-bg2: #1a2138;          /* 暗礁 */
+  --c-border: #262f4d;       /* 深水线 */
+  --c-border-hover: #35406b; /* 水光线 */
+  --c-fg0: #e8ecf8;          /* 月光 */
+  --c-fg1: #c6cde0;          /* 天光 */
+  --c-fg2: #8b95b0;          /* 波光 */
+  --c-fg3: #5f6884;          /* 深波(仅装饰性文字;正文最低用 --c-fg2,对比度 ≥4.5:1) */
+  --c-placeholder: #4b5470;  /* 输入框占位符(浅色主题下换浅灰) */
+  --c-brand: #4d6bfe;        /* 深澜蓝 */
+  --c-brand-hi: #7aa1ff;     /* 澜光 */
+  --c-brand-deep: #3b5bdb;   /* 品牌渐变下端(primary 按钮底) */
+  --c-brand-vio: #7b5cff;    /* 澜紫:品牌渐变副端(primary 按钮顶) */
+  --c-ok: #34d399;           /* 磷光绿 */
+  --c-ok-strong: #2cc98f;    /* success 渐变上端 */
+  --c-ok-deep: #1f9e6c;      /* success 渐变下端 */
+  --c-warn: #fbbf24;         /* 珊瑚金 */
+  --c-err: #f87171;          /* 赤潮红 */
+  --c-err-strong: #ef5a5a;   /* danger 渐变上端 */
+  --c-err-deep: #d43434;     /* danger 渐变下端 */
+  --c-progress-accent: #8b5cf6; /* 进度条渐变副色(品牌紫,保留) */
+  --c-close-hover: #c42b1c;  /* 窗口关闭按钮悬停红:Windows 标题栏规范色,深浅主题同值 */
 
   /* ---- 排版尺度(第五轮):字号/行距单一来源 ---- */
   --fs-display: 20px; /* 首启欢迎主标题(唯一展示级) */
@@ -85,50 +77,45 @@
   --btn-pad-x: 16px;
 
   /* ---- 层级:分隔线 / 阴影 / 焦点环 / 主操作辉光 ----
-     color-mix 派生:浅色主题下随 --c-border / --c-brand 自动成立,无需另写一套 */
+     冷调投影:带深海蓝而非纯黑;color-mix 派生,浅色主题自动成立 */
   --c-hairline: color-mix(in srgb, var(--c-border) 72%, transparent);
-  /* 层级序列:0 平面 / 1 卡片 / 2 浮层 / 3 模态。此前全仓只有 elev-1 一处,
-     浮层靠窗口自身的 --c-win-shadow/--c-panel-shadow 表达,无统一序列可依 */
   --c-elev-0: none;
-  --c-elev-1: 0 1px 2px rgba(0, 0, 0, .30); /* 卡片与窗底分层(任务行) */
-  --c-elev-2: 0 10px 32px rgba(0, 0, 0, .50); /* 浮层(与 --c-panel-shadow 同值,归入序列) */
-  --c-elev-3: 0 18px 48px rgba(0, 0, 0, .60); /* 模态(浮层之上再加一层) */
-  /* z-index 层级表:此前无任何叠序约定,浮层前后全凭 DOM 添加顺序隐式决定。
-     同一页面内一律取用本表,不得再出现字面量 */
+  --c-elev-1: 0 1px 2px rgba(8, 14, 40, .45);   /* 卡片与窗底分层(任务行) */
+  --c-elev-2: 0 14px 44px rgba(8, 14, 40, .55); /* 浮层 */
+  --c-elev-3: 0 20px 60px rgba(8, 14, 40, .65); /* 模态 */
   --z-base: 0;
   --z-sticky: 10;
   --z-popup: 100;
   --z-toast: 1000;
   --z-modal: 2000;
-  --c-accent-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-brand) 70%, transparent);
-  --c-ok-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-ok) 70%, transparent);
-  --c-danger-glow: 0 2px 10px -3px color-mix(in srgb, var(--c-err) 70%, transparent);
+  --c-accent-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-brand) 80%, transparent);
+  --c-ok-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-ok) 80%, transparent);
+  --c-danger-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-err) 80%, transparent);
   --c-focus: var(--c-brand);
-  --c-focus-on-accent: #ffffff; /* 实心强调按钮上的焦点环:品牌色环压在品牌色底上不可辨 */
-  /* 中性悬停底(标题栏/状态窗头部/行内 ✕ 原本各写一份 .18/.22/.25/.30 灰度,同一应用四种悬停) */
-  --c-hover: rgba(127, 127, 127, .22);
-  --c-hover-strong: rgba(127, 127, 127, .30);
-  --c-active: rgba(127, 127, 127, .36); /* 按下态:此前只靠 transform:scale(.97) 单打 */
-  /* 选中态:复用既有语义令牌(浅色主题覆写 sel-bg/sel-fg 时自动跟随) */
+  --c-focus-on-accent: #ffffff;
+  /* 光晕令牌(深澜):关键元素带品牌光晕 ring(状态点/圆标/聚焦态) */
+  --c-glow-brand: 0 0 0 3px color-mix(in srgb, var(--c-brand) 22%, transparent);
+  --c-glow-ok: 0 0 0 3px color-mix(in srgb, var(--c-ok) 22%, transparent);
+  --c-glow-warn: 0 0 0 3px color-mix(in srgb, var(--c-warn) 22%, transparent);
+  --c-glow-err: 0 0 0 3px color-mix(in srgb, var(--c-err) 22%, transparent);
+  /* 悬停/按下:澜光蓝(原中性灰)。浅色主题下自动派生 */
+  --c-hover: rgba(122, 161, 255, .16);
+  --c-hover-strong: rgba(122, 161, 255, .26);
+  --c-active: rgba(122, 161, 255, .30);
   --c-selected: var(--c-sel-bg);
   --c-selected-fg: var(--c-sel-fg);
-  /* 禁用态:此前 .btn 完全没有 :disabled 规则,禁用只靠调用方不加事件监听,
-     视觉上与可用按钮无从区分 */
   --c-disabled-bg: var(--c-bg2);
   --c-disabled-fg: var(--c-fg3);
   --c-disabled-border: var(--c-border);
 
-  /* ---- 圆角:语义化命名(第六轮) ----
-     原 s/m/l 三档命名与语义脱节,且 s=6 与 m=7 仅差 1px、视觉不可辨(属命名事故)。
-     新名按用途命名;旧名保留为别名,页面无需改动。注意 m 由 7px 归一到 8px,
-     是所有 .btn 的 1px 视觉变化(有意的归一,非回归)。 */
-  --radius-ctl: 6px;   /* 按钮 / 输入 / 键帽 / 行内小方块 */
-  --radius-card: 8px;  /* 卡片 / 任务行 / 面板内块 */
-  --radius-panel: 10px;/* 浮层 / 窗口外壳 */
-  --radius-pill: 999px;/* 胶囊:徽标 / 标签 / 圆角标签 */
-  --radius-win: 10px;  /* 无边框窗口圆角(与 --radius-panel 同值,独立命名便于将来分道) */
+  /* ---- 圆角:语义化命名。深澜整体上浮 +2~6px,浮层/窗口 16px 形成「深海气泡」语言 ---- */
+  --radius-ctl: 8px;    /* 按钮 / 输入 / 键帽 / 行内小方块 */
+  --radius-card: 12px;  /* 卡片 / 任务行 / 面板内块 */
+  --radius-panel: 16px; /* 浮层 / 窗口外壳 */
+  --radius-pill: 999px; /* 胶囊:徽标 / 标签 / 圆角标签 */
+  --radius-win: 16px;   /* 无边框窗口圆角 */
   --radius-s: var(--radius-ctl);    /* 旧名别名 */
-  --radius-m: var(--radius-card);   /* 旧名别名(取值 7px → 8px) */
+  --radius-m: var(--radius-card);   /* 旧名别名 */
   --radius-l: var(--radius-panel);  /* 旧名别名 */
 
   /* ---- 密度:列表/菜单行高与行间距(第六轮) ----
@@ -139,67 +126,71 @@
   --density-row-compact: 26px; /* 紧凑 */
   --density-gap-compact: 4px;
 
-  /* ---- 动效:三档语义(第六轮拉开可感知差距) ---- */
-  --dur-fast: .12s;  /* 悬停/焦点等即时反馈 */
-  --dur-mid: .18s;   /* 状态过渡(原 .15s 与 fast 差 30ms,无感知差异) */
-  --dur-slow: .24s;  /* 浮层入场/内容切换 */
+  /* ---- 动效:三档语义。深澜略放慢,给光晕动效留出感知窗口 ---- */
+  --dur-fast: .14s;  /* 悬停/焦点等即时反馈 */
+  --dur-mid: .2s;    /* 状态过渡 */
+  --dur-slow: .28s;  /* 浮层入场/内容切换 */
   --dur-win: .22s;   /* 窗口入场(保留) */
-  --ease-std: cubic-bezier(.4, 0, .2, 1);   /* 标准:悬停/展开 */
-  --ease-out: cubic-bezier(.2, .9, .3, 1);  /* 减速:浮层入场 */
-  --ease-win: cubic-bezier(.2, .9, .3, 1.15); /* 窗口入场(带轻微回弹,保留) */
-  /* 字栈:行距 1.6 为正文基线(原 1 会让所有未显式声明行距的文本挤在一起) */
+  --ease-std: cubic-bezier(.4, 0, .2, 1);       /* 标准:悬停/展开 */
+  --ease-out: cubic-bezier(.16, 1, .3, 1);      /* 减速:浮层入场(更强的落定感) */
+  --ease-win: cubic-bezier(.2, .9, .3, 1.15);   /* 窗口入场(带轻微回弹,保留) */
+  /* 字栈:行距 1.6 为正文基线 */
   --font-ui: 13px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-display: "Bahnschrift", "Segoe UI", "Microsoft YaHei", sans-serif; /* 标题/品牌展示(Bahnschrift 为 Win10+ 内置几何无衬线,中文回落 YaHei) */
   --font-mono: "Cascadia Mono", Consolas, monospace;
   /* 语义令牌:窗口壳/浮层/选中态(浅色主题整体覆写,页面不得再硬编码这些值) */
-  --c-win-bg: rgba(22, 27, 34, .98);
-  --c-win-shadow: 0 12px 40px rgba(0, 0, 0, .55);
-  --c-panel-bg: rgba(22, 27, 34, .97);
-  --c-panel-shadow: 0 10px 32px rgba(0, 0, 0, .5);
-  --c-sel-bg: #1f6feb2e;
+  --c-win-bg: rgba(17, 22, 40, .92);
+  --c-win-shadow: 0 14px 44px rgba(8, 14, 40, .6);
+  --c-panel-bg: rgba(17, 22, 40, .9);
+  --c-panel-shadow: 0 14px 44px rgba(8, 14, 40, .55);
+  --c-sel-bg: #4d6bfe33;
   --c-sel-fg: #ffffff;
-  --c-danger-bg: #da363433;
-  --c-reveal-bg: rgba(13, 17, 23, .78);
-  --c-reveal-bg-hover: rgba(38, 44, 56, .95);
-  --c-close-hover: #c42b1c; /* 窗口关闭按钮悬停红:Windows 标题栏规范色,深浅主题同值 */
+  --c-danger-bg: #f871711f;
+  --c-reveal-bg: rgba(17, 22, 40, .88);
+  --c-reveal-bg-hover: rgba(35, 44, 74, .96);
   color-scheme: dark;
 }
 
-/* ---- 浅色主题(GitHub Light 系):仅覆写令牌,组件零改动 ----
-   激活方式:ui-theme.js 按 prefers-color-scheme 在 <html> 上写 data-theme="light"。
-   主题来源链:config.theme(auto/dark/light) → nativeTheme.themeSource → matchMedia。 */
+/* ---- 浅色主题(晨澜,海面冷白):仅覆写令牌,组件零改动 ----
+   激活方式:ui-theme.js 按 prefers-color-scheme 在 <html> 上写 data-theme="light"。 */
 [data-theme="light"] {
-  --c-bg0: #ffffff;
-  --c-bg1: #f6f8fa;
-  --c-bg2: #eff1f3;
-  --c-border: #d1d9e0;
-  --c-border-hover: #b7c0c9;
-  --c-fg0: #1f2328;
-  --c-fg1: #24292f;
-  --c-fg2: #59636e;
-  --c-fg3: #8c959f;
-  --c-placeholder: #8c959f;
-  /* 品牌色加深以满足对比度:白字压在 #4d6bfe 上仅 4.33:1,12px 按钮文字未达 4.5:1;
-     #3b5bdb 为既有 --c-brand-deep 取值(不新增色板),白字对比度 5.67:1。
-     渐变下端按比例派生,避免再增字面色 */
+  --c-bg0: #f5f7fc;   /* 海面雾 */
+  --c-bg1: #ffffff;   /* 晨光 */
+  --c-bg2: #e9edf6;   /* 浅浪 */
+  --c-border: #d7deef;/* 岸线 */
+  --c-border-hover: #c2cce6;
+  --c-fg0: #1a2138;   /* 墨蓝 */
+  --c-fg1: #2c3552;
+  --c-fg2: #5a6584;
+  --c-fg3: #8b95b0;
+  --c-placeholder: #8b95b0;
+  /* 品牌色加深满足对比度(白字压 #3b5bdb 达 5.67:1) */
   --c-brand: #3b5bdb;
   --c-brand-deep: color-mix(in srgb, var(--c-brand) 82%, #000);
   --c-brand-hi: #0969da;
+  --c-brand-vio: #5b4bd4;
   --c-ok: #1a7f37;
+  --c-ok-strong: #1f9e6c;
+  --c-ok-deep: #157347;
   --c-warn: #9a6700;
   --c-err: #d1242f;
-  --c-win-bg: rgba(255, 255, 255, .97);
-  --c-win-shadow: 0 12px 40px rgba(0, 0, 0, .28);
-  --c-panel-bg: rgba(255, 255, 255, .98);
-  --c-panel-shadow: 0 10px 32px rgba(0, 0, 0, .22);
-  --c-sel-bg: rgba(31, 111, 235, .14);
+  --c-err-strong: #c01f2a;
+  --c-err-deep: #a81b25;
+  --c-win-bg: rgba(255, 255, 255, .94);
+  --c-win-shadow: 0 14px 44px rgba(26, 33, 56, .2);
+  --c-panel-bg: rgba(255, 255, 255, .95);
+  --c-panel-shadow: 0 14px 44px rgba(26, 33, 56, .18);
+  --c-sel-bg: rgba(59, 91, 219, .14);
   --c-sel-fg: #0a3069;
   --c-danger-bg: rgba(209, 36, 47, .12);
-  --c-reveal-bg: rgba(255, 255, 255, .85);
-  --c-reveal-bg-hover: rgba(240, 243, 246, .98);
-  --c-elev-1: 0 1px 2px rgba(31, 35, 40, .12);
-  --c-elev-2: 0 10px 32px rgba(0, 0, 0, .22); /* 与 --c-panel-shadow 同值:归入层级序列 */
-  --c-elev-3: 0 18px 48px rgba(0, 0, 0, .28);
-  --c-active: rgba(31, 35, 40, .18); /* 深色底用 .36,浅色底下需更轻 */
+  --c-reveal-bg: rgba(255, 255, 255, .88);
+  --c-reveal-bg-hover: rgba(233, 237, 246, .98);
+  --c-elev-1: 0 1px 2px rgba(26, 33, 56, .10);
+  --c-elev-2: 0 14px 44px rgba(26, 33, 56, .18);
+  --c-elev-3: 0 20px 60px rgba(26, 33, 56, .24);
+  --c-hover: rgba(9, 105, 218, .08);
+  --c-hover-strong: rgba(9, 105, 218, .14);
+  --c-active: rgba(9, 105, 218, .18);
   color-scheme: light;
 }
 
@@ -214,21 +205,19 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
 
 /* ---- 公共:键盘焦点环(all:unset/透明背景按钮后必须有可见焦点,a11y) ----
-   实心强调按钮(primary/success/danger)换反色环:同色环压在同色底上等于没有焦点提示 */
+   实心强调按钮(primary/success/danger)换反色环;幽灵钮用澜光环 */
 :where(button, input, [tabindex]):focus-visible {
   outline: var(--focus-ring-w) solid var(--c-focus);
   outline-offset: var(--focus-ring-offset);
 }
 .btn.primary:focus-visible, .btn.success:focus-visible, .btn.danger:focus-visible { outline-color: var(--c-focus-on-accent); }
+.btn.ghost:focus-visible { outline-color: var(--c-brand-hi); }
 
-/* ---- 公共:工具类(第六轮) ----
-   .sr-only:视觉隐藏但读屏可读。此前各页把提示文字直接塞进 title/aria-label,
-            需要“可见文案 + 独立读屏补语”时无处安放(如列表行的复合动作名) */
+/* ---- 公共:工具类(第六轮) ---- */
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
-/* .num:等宽数字。进度/百分比/计时/内存等会随帧刷新的数值必须用它,防数字宽度抖动 */
 .num { font-variant-numeric: tabular-nums; }
 
 /* ---- 公共:无边框窗口外壳(页面可用 --win-bg/--win-radius/--win-shadow 微调) ---- */
@@ -245,9 +234,10 @@
 
 /* ============================ §4 原语层 ============================ */
 
-/* ---- 公共:按钮(status/dialog/accel/report 原本各自重复 4 份) ----
-   规格:高 30px(--ctl-h)、横向内距 16px、字号 12px、行距 1(高度由 min-height 锁定,
-   不受根行距 1.6 影响);点击区域 30px 起,与 WinUI 控件高度同级 */
+/* ---- 公共:按钮(五档规格:v1.0 深澜)
+   ① .btn 次级:bg2 底 + 1px 边框  ② .primary 主操作:品牌渐变+光晕
+   ③ .success/.danger 语义渐变    ④ .danger-ghost 红描边幽灵
+   ⑤ .ghost 幽灵文字钮(新增):透明底 + 状态色文字,hover 同色 12% 淡底 */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: var(--ctl-h); padding: 0 var(--btn-pad-x);
@@ -260,26 +250,29 @@
 }
 .btn:hover { background: var(--c-border); border-color: var(--c-border-hover); color: var(--c-fg0); }
 .btn:active { transform: scale(.97); }
-.btn.primary { background: linear-gradient(180deg, var(--c-brand), var(--c-brand-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-accent-glow); }
-.btn.primary:hover { filter: brightness(1.12); color: #fff; }
+.btn.primary { background: linear-gradient(180deg, var(--c-brand-vio), var(--c-brand) 55%, var(--c-brand-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-accent-glow); }
+.btn.primary:hover { filter: brightness(1.1); color: #fff; }
+.btn.primary:active { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-brand) 30%, transparent); }
 .btn.success { background: linear-gradient(180deg, var(--c-ok-strong), var(--c-ok-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-ok-glow); }
-.btn.success:hover { filter: brightness(1.12); color: #fff; }
+.btn.success:hover { filter: brightness(1.1); color: #fff; }
 .btn.danger { background: linear-gradient(180deg, var(--c-err-strong), var(--c-err-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-danger-glow); }
-.btn.danger:hover { filter: brightness(1.12); color: #fff; }
+.btn.danger:hover { filter: brightness(1.1); color: #fff; }
+.btn.danger:active { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-err) 30%, transparent); }
+/* 幽灵文字钮(深澜新增):透明底 + 状态色文字;aria-pressed=true = 按下态(澜光描边) */
+.btn.ghost { background: transparent; border-color: transparent; color: var(--c-brand-hi); box-shadow: none; }
+.btn.ghost:hover { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); color: var(--c-brand-hi); }
+.btn.ghost[aria-pressed="true"] { border-color: color-mix(in srgb, var(--c-brand-hi) 55%, transparent); background: color-mix(in srgb, var(--c-brand-hi) 10%, transparent); color: var(--c-brand-hi); }
+.btn.ghost[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--c-brand-hi) 16%, transparent); }
 /* 幽灵危险按钮(accel「清除」原样式):描边半透明,悬停才填充;color-mix 派生使浅色主题自动成立 */
 .btn.danger-ghost { background: transparent; border-color: color-mix(in srgb, var(--c-err) 33%, transparent); color: var(--c-err); box-shadow: none; }
 .btn.danger-ghost:hover { background: color-mix(in srgb, var(--c-err) 12%, transparent); border-color: var(--c-err); color: var(--c-err); }
-/* 禁用态(第六轮):此前 .btn 完全没有 :disabled 规则——禁用只靠调用方不加监听,
-   视觉上与可用按钮无从区分。禁用一律中性化,剥离各变体的品牌辉光与渐变:
-   “不可用”不应携带任何强调视觉 */
+/* 禁用态:一律中性化,剥离渐变/光晕/幽灵色 */
 .btn:disabled, .btn[aria-disabled="true"] {
   background: var(--c-disabled-bg); border-color: var(--c-disabled-border); color: var(--c-disabled-fg);
   box-shadow: none; filter: none;
 }
 .btn:disabled:hover, .btn[aria-disabled="true"]:hover {
   background: var(--c-disabled-bg); border-color: var(--c-disabled-border); color: var(--c-disabled-fg);
-  /* 必须同时压掉 filter/box-shadow:变体悬停规则(.btn.primary:hover 等)特异性为 0,3,0,
-     与本条同级且更靠前声明,故本条同时承担“覆盖变体悬停”的职责 */
   box-shadow: none; filter: none;
 }
 .btn:disabled:active, .btn[aria-disabled="true"]:active { transform: none; }
@@ -290,9 +283,7 @@
 /* ============================ §5 复合层 ============================ */
 
 /* ---- 公共:进度条(第六轮从 status.html 上移) ----
-   上移原因:进度条要成为 ui-kit.js 的共享构件,样式必须与构件同源;
-   原先样式只在 status 页内联,构件一旦被别的页面复用就会画出裸条。
-   结构与类名保持原样(.bar > .fill[.indet]),status 页的像素契约不受影响。 */
+   品牌蓝紫渐变 + 波光 sheen 是深澜的签名动效,类名与结构不动 */
 .bar { height: 6px; border-radius: 3px; background: var(--c-bg2); overflow: hidden; }
 .fill {
   height: 100%; width: 0%; border-radius: 3px; position: relative;
@@ -315,9 +306,7 @@
 .fill.indet::after { display: none; }
 @keyframes indet { from { background-position: 0% 0; } to { background-position: -200% 0; } }
 
-/* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ----
-   头部 = 拖拽区 + 图标槽(.ico)+ 标题(.t)+ 动作按钮;内边距可经 --head-pad 覆写。
-   关闭按钮悬停统一红底(原 report 红、status/accel 灰,同一应用两种"关闭"语义不一致) */
+/* ---- 公共:窗口头部 + 关闭按钮(status/report/accel 原本各自重复 3 份) ---- */
 .win-head {
   display: flex; align-items: center; gap: 10px; flex: none;
   padding: var(--head-pad, 14px 16px 10px);
@@ -325,7 +314,7 @@
 }
 .win-head .ico { width: 20px; height: 20px; flex: none; color: var(--c-brand-hi); display: flex; align-items: center; justify-content: center; }
 .win-head .ico svg { width: 20px; height: 20px; }
-.win-head .ico img { width: 18px; height: 18px; } /* 位图 logo(welcome):与 svg 图标槽同槽同对齐 */
+.win-head .ico img { width: 18px; height: 18px; }
 .win-head .t { flex: 1; font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .win-close {
   -webkit-app-region: no-drag; width: 30px; height: 24px; flex: none;
@@ -336,8 +325,7 @@
 .win-close:hover { background: var(--c-close-hover); color: #fff; }
 .win-close svg { width: 12px; height: 12px; }
 
-/* ---- 公共:就地瞬时反馈(accel 保存 / report 复制导出;取代各页私有的 .toast/.flash) ----
-   用法:<span class="inline-feedback"> + JS 切换 .on 显示、.ok/.bad 定色(默认随 --c-ok) */
+/* ---- 公共:就地瞬时反馈(accel 保存 / report 复制导出) ---- */
 .inline-feedback {
   flex: none; font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl); opacity: 0;
   transition: opacity .2s; white-space: nowrap; color: var(--c-ok);
@@ -345,38 +333,33 @@
 .inline-feedback.on { opacity: 1; }
 .inline-feedback.bad { color: var(--c-err); }
 
-/* ---- 公共:分区小标题(错误报告「关键日志预览」/加速设置区间名等) ----
-   统一 11px / 600 / 字距 .06em,避免各页自造一套弱化标签 */
+/* ---- 公共:分区小标题(错误报告「关键日志预览」/设置区间名等) ---- */
 .sec-label {
   font-size: var(--fs-micro); font-weight: 600; color: var(--c-fg2);
   line-height: var(--lh-micro); letter-spacing: .06em;
 }
 
 /* ---- 公共:类型圆标(status 结果视图与 dialog 原本逐字符重复 2 份) ----
-   用法:class="big info|success|warning|error"(与图标同元素携带类型) */
+   深澜:四态底色 + 同色 8px 光晕 ring */
 .big {
   width: 40px; height: 40px; flex: none; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
 .big svg { width: 21px; height: 21px; }
-/* 彩底走 color-mix 派生:浅色主题下自动跟随对应令牌(深色值与原 rgba 逐位一致) */
-.big.info { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); color: var(--c-brand-hi); }
-.big.success { background: color-mix(in srgb, var(--c-ok) 14%, transparent); color: var(--c-ok); animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
-.big.warning { background: color-mix(in srgb, var(--c-warn) 14%, transparent); color: var(--c-warn); }
-.big.error { background: color-mix(in srgb, var(--c-err) 14%, transparent); color: var(--c-err); animation: shake .34s ease; }
+.big.info { background: color-mix(in srgb, var(--c-brand-hi) 14%, transparent); color: var(--c-brand-hi); box-shadow: var(--c-glow-brand); }
+.big.success { background: color-mix(in srgb, var(--c-ok) 16%, transparent); color: var(--c-ok); box-shadow: var(--c-glow-ok); animation: pop .34s cubic-bezier(.2, 1.6, .4, 1); }
+.big.warning { background: color-mix(in srgb, var(--c-warn) 16%, transparent); color: var(--c-warn); box-shadow: var(--c-glow-warn); }
+.big.error { background: color-mix(in srgb, var(--c-err) 16%, transparent); color: var(--c-err); box-shadow: var(--c-glow-err); animation: shake .34s ease; }
 @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 
 /* ---- 公共:应用内通知条目(阶段 1 X1) ----
-   宿主是主窗右上角的独立透明窗(toast.html,位置见 main.js toastBounds),但条目样式属复合层:
-   它和就地反馈是同一种语义(一句确认)的两种载体,将来就地反馈若升级为卡片形态可直接复用。
-   不用 box-shadow:透明窗会把外阴影裁成硬边,比无阴影更难看;改用 1px 边框 + 内高光表达浮起。
-   左缘 3px 状态色带是级别标识的唯一载体——图标同为 15px,不靠它区分 info/ok/warn/err 太吃力。 */
+   深澜:左缘色带 3px→4px(圆角处被自动裁成圆头),冷调面板底,保留内高光 */
 .toast-host { display: flex; flex-direction: column; gap: var(--sp-2); }
 .titem {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: 9px 10px 9px 11px;
-  border: 1px solid var(--c-border); border-left: 3px solid var(--tc, var(--c-brand-hi));
+  border: 1px solid var(--c-border); border-left: 4px solid var(--tc, var(--c-brand-hi));
   border-radius: var(--radius-card);
   background: var(--c-panel-bg); color: var(--c-fg1);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-fg0) 6%, transparent);
@@ -386,7 +369,6 @@
 .titem[data-tone="warn"] { --tc: var(--c-warn); }
 .titem[data-tone="err"] { --tc: var(--c-err); }
 .titem .tico { width: 15px; height: 15px; flex: none; color: var(--tc); display: flex; align-items: center; justify-content: center; }
-/* 单行截断:提示语可能来自 dsh 侧的错误信息(长度不可控),换行会让窗口高度跳变 */
 .titem .ttext { flex: 1; min-width: 0; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .titem .tact {
   flex: none; border: none; border-radius: var(--radius-ctl); background: transparent;
@@ -403,13 +385,11 @@
 }
 .titem .tclose:hover { background: var(--c-hover); color: var(--c-fg0); }
 .titem .tclose svg { width: 11px; height: 11px; }
-/* 入场动画只挂在新增条目上(toast.html 按 data-id 复用节点),已存在的条目不重播 */
 .titem.enter { animation: toastIn var(--dur-win) var(--ease-out); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .win, .big { animation: none; }
-  /* 进度条动效随状态下移一并收编(原为 status 页内联的一份) */
   .fill.indet, .fill::after { animation: none; }
   .titem.enter { animation: none; }
 }

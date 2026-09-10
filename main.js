@@ -1078,6 +1078,15 @@ ipcMain.on('st:cancel-all', (e) => {
   }
   closeStatus(); // 未完成任务已取消,结果历史随窗一并丢弃(与「全部关闭」语义一致)
 });
+// 深澜(v1.0.0):「清空历史」——只清完成项,进行中任务不受影响(任务中心历史堆积的出口)
+ipcMain.on('st:clear-done', (e) => {
+  if (!trustedEvent(e)) return;
+  for (const [id, t] of [...statusTasks]) {
+    if (t.done) { statusTasks.delete(id); statusActions.delete(id); }
+  }
+  if (!statusTasks.size) closeStatus();
+  else pushTasks();
+});
 
 // 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
 // 单任务固定档(活动 186 / 结果 250)保持旧尺寸不动(UITEST 锁定)——渲染层只在列表模式下回报
@@ -1785,7 +1794,7 @@ function showShortcutsDialog() {
   });
 }
 
-const MENU_W = 264;
+const MENU_W = 288; // 深澜(v1.0.0):264→288,图标+标签+快捷键更舒展(托盘菜单保持 264,见 showTrayMenu)
 const MENU_MARGIN = 12; // 视图四周留白,容纳阴影
 // 逐项高度是主进程与渲染层唯一的耦合点:任一侧单改,菜单底部就会被裁(或留一条空白)。
 // 收敛成一个函数由主菜单与托盘菜单共用——此前两处各写一遍 for 循环,将来多一种行类型

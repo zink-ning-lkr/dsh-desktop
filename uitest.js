@@ -943,7 +943,7 @@ function runUitest(d) {
     d.log(`UITEST theme-2 dark→light clicked="${label}" → ${ok ? 'PASS' : 'FAIL'}`);
     // 已开窗的渲染器应实时换肤(reportWin 自 11.8s 起一直开着,未重建)
     const dom = await domPoll(d.reportWin,
-      `(()=>{const attr=document.documentElement.getAttribute("data-theme");const bg0=getComputedStyle(document.documentElement).getPropertyValue("--c-bg0").trim();const logo=document.querySelector(".logo").src;return (attr==="light"&&bg0==="#ffffff"&&logo.includes("whale-black"))?"PASS attr="+attr+" bg0="+bg0:"FAIL attr="+attr+" bg0="+bg0+" logo="+logo})()`);
+      `(()=>{const attr=document.documentElement.getAttribute("data-theme");const bg0=getComputedStyle(document.documentElement).getPropertyValue("--c-bg0").trim();const logo=document.querySelector(".logo").src;return (attr==="light"&&bg0==="#f5f7fc"&&logo.includes("whale-black"))?"PASS attr="+attr+" bg0="+bg0:"FAIL attr="+attr+" bg0="+bg0+" logo="+logo})()`);
     d.log(`UITEST dom theme-light-dom ${dom || 'FAIL 超时'}`);
   }, 29800, 'theme-2');
   uiStep(() => { d.showMenuPopup(); }, 31200, 'theme-menu-open3');

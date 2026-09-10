@@ -11,17 +11,24 @@
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  .win { display: flex; flex-direction: column; }
-  /* 头部走 ui.css 公共 .win-head(拖拽区 + 图标槽 + 标题规格),
-     替代原本地 .head:横向内距与 .foot 同为 16px,标题 14/1.4 与其余窗口同一规格 */
+  /* 深澜:全窗品牌渐变 —— 中心澜光蓝 12% → 深海黑;浅色主题自动换晨光(见 ui.css [data-theme] 下覆写) */
+  .win { display: flex; flex-direction: column;
+    background: radial-gradient(560px 420px at 50% 18%, color-mix(in srgb, var(--c-brand) 16%, transparent), transparent 70%),
+      var(--win-bg, var(--c-win-bg)); }
+  [data-theme="light"] .win { background: radial-gradient(560px 420px at 50% 18%, color-mix(in srgb, var(--c-brand) 8%, transparent), transparent 70%), var(--win-bg, var(--c-win-bg)); }
+  /* 头部走 ui.css 公共 .win-head(拖拽区 + 图标槽 + 标题规格) */
   .win-head { --head-pad: 12px var(--sp-4); }
-  /* .hero 仍是 flex:1(窗口被下限撑高时保持垂直居中);内容高度由主进程量 .hero-in 得到
-     (阶段 3 S2:窗口尺寸改内容自适应,量被拉伸的外层会得到窗口高度而非内容高度) */
+  /* .hero 仍是 flex:1(窗口被下限撑高时保持垂直居中);内容高度由主进程量 .hero-in 得到 */
   .hero { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
     padding: var(--sp-2) calc(var(--sp-5) * 2); text-align: center; }
   .hero-in { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
-  .hero img { width: 72px; height: 72px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--c-brand) 30%, transparent)); }
-  .hero h1 { margin: 0; font-size: var(--fs-display); font-weight: 600; line-height: var(--lh-display); color: var(--c-fg0); }
+  /* 深澜:96px 彩色品牌鲸鱼 + 澜光光晕呼吸(替代 72px 白鲸) */
+  .hero img { width: 96px; height: 96px; animation: whaleBreathe 2.6s ease-in-out infinite; }
+  @keyframes whaleBreathe {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 18px color-mix(in srgb, var(--c-brand) 30%, transparent)); }
+    50% { transform: scale(1.04); filter: drop-shadow(0 0 34px color-mix(in srgb, var(--c-brand) 50%, transparent)); }
+  }
+  .hero h1 { margin: 0; font-family: var(--font-display); font-size: var(--fs-display); font-weight: 650; line-height: var(--lh-display); color: var(--c-fg0); }
   .hero .sub { font-size: var(--fs-body); color: var(--c-fg1); line-height: var(--lh-body); }
   .hero .sub b { color: var(--c-fg0); font-weight: 600; }
   .act { flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3);
@@ -30,21 +37,22 @@
   #wlChoose { width: 100%; min-height: var(--ctl-h-lg); padding: 0 var(--btn-pad-x); font-size: var(--fs-body); }
   .hint { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-body); text-align: center; }
   .foot { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4);
-    border-top: 1px solid var(--c-bg2); }
+    border-top: 1px solid color-mix(in srgb, var(--c-brand-hi) 18%, transparent); }
   .foot .tray-note { flex: 1; min-width: 0; font-size: var(--fs-micro); color: var(--c-fg2); line-height: var(--lh-micro);
     display: flex; align-items: center; gap: 6px; }
   .foot .tray-note svg { width: 13px; height: 13px; flex: none; color: var(--c-brand-hi); }
+  @media (prefers-reduced-motion: reduce) { .hero img { animation: none; } }
 </style>
 </head>
 <body>
 <div class="win" role="main">
   <div class="win-head">
-    <span class="ico"><img src="assets/whale-white.png" alt="" data-logo></span>
+    <span class="ico"><img src="assets/deepseek-whale-color.svg" alt=""></span>
     <span class="t">DSH Desktop</span>
   </div>
   <div class="hero">
     <div class="hero-in">
-      <img src="assets/whale-white.png" alt="DSH" data-logo>
+      <img src="assets/deepseek-whale-color.svg" alt="DSH">
       <h1 id="h1"></h1>
       <p class="sub" id="sub"></p>
     </div>

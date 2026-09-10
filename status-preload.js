@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('__status', {
   action: (taskId, btnId) => ipcRenderer.send('st:action', { taskId, btnId }),
   dismiss: (taskId) => ipcRenderer.send('st:dismiss', String(taskId)),   // 关闭某个已完成任务
   cancelOne: (taskId) => ipcRenderer.send('st:cancel-one', String(taskId)), // 取消某个进行中任务
+  clearDone: () => ipcRenderer.send('st:clear-done'), // 深澜:清空全部已完成历史(进行中不受影响)
 });
 
 // 渲染层 t():与主进程 i18n.js 同一取值/占位符约定,表缺失回退 key

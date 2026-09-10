@@ -19,19 +19,43 @@
     --win-shadow: none;
   }
   .body { flex: 1; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); min-height: 0; }
-  .cls { display: flex; align-items: center; gap: var(--sp-3); }
+  /* 状态横幅(深澜):badge 胶囊 + 结论名合一 —— 渐变底 + 左缘 4px 语义色线。
+     boot(启动失败)=赤潮红;exit(进程退出)=珊瑚金(由渲染层按 phase 加 .exit) */
+  .cls {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--c-err) 25%, transparent);
+    border-left: 4px solid var(--c-err);
+    border-radius: var(--radius-m);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c-err) 10%, transparent), color-mix(in srgb, var(--c-err) 3%, transparent));
+  }
+  .cls.exit {
+    border-color: color-mix(in srgb, var(--c-warn) 28%, transparent);
+    border-left-color: var(--c-warn);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c-warn) 10%, transparent), color-mix(in srgb, var(--c-warn) 3%, transparent));
+  }
   .badge {
     flex: none; padding: 4px var(--sp-3); border-radius: 999px; font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl);
     background: color-mix(in srgb, var(--c-err) 15%, transparent); color: var(--c-err); border: 1px solid color-mix(in srgb, var(--c-err) 35%, transparent);
   }
+  .cls.exit .badge { background: color-mix(in srgb, var(--c-warn) 15%, transparent); color: var(--c-warn); border-color: color-mix(in srgb, var(--c-warn) 35%, transparent); }
   .cls .name { font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* 结论块:正文级 13/1.6(原 12.5/1.55),下沉底色与窗底分层——它是全窗的第一信息块 */
+  /* 结论块:正文级 13/1.6,下沉底色与窗底分层——它是全窗的第一信息块。
+     深澜:左缘 3px 赤潮色线(报告窗即错误场景) */
   .cause { font-size: var(--fs-body); color: var(--c-fg1); line-height: var(--lh-body); background: var(--c-bg1); border: 1px solid var(--c-bg2);
+    border-left: 3px solid var(--c-err);
     border-radius: var(--radius-m); padding: 10px var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 88px; overflow-y: auto; user-select: text; }
   /* .sec-label 走 ui.css 公共规格(原为本地复制的一份) */
   .advice { display: flex; flex-direction: column; gap: var(--sp-2); }
   .advice .row { display: flex; gap: var(--sp-2); align-items: flex-start; font-size: var(--fs-body); color: var(--c-fg2); line-height: var(--lh-body); }
-  .advice .row::before { content: "•"; color: var(--c-brand); flex: none; }
+  /* 深澜:建议项前置 6px 澜光圆点 + 光晕(替代文本 •) */
+  .advice .row::before {
+    content: ""; flex: none;
+    width: 6px; height: 6px; margin-top: 7px;
+    border-radius: 50%;
+    background: var(--c-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-brand) 18%, transparent);
+  }
   .log-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
   /* 日志区头部(阶段 3 S4-RPT-3):sec-label 居左、计数居中、错误筛选 toggle 居右
      —— 把「行号 / 仅错误行 / 命中数」三个辅助件与日志本身同处一束,避免挤脚区破坏 RPT-1 */
@@ -39,8 +63,8 @@
   .log-head .sec-label { margin: 0; }
   .log-meta { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); font-variant-numeric: tabular-nums; }
   .log-head .spacer { flex: 1; }
-  /* toggle:与 .btn 同底,但 aria-pressed=true 时切换为「按下」视觉(主色细边框),
-     让用户在不依赖对比度的前提下也能看出筛选开关状态 */
+  /* toggle:幽灵文字钮(深澜),aria-pressed=true 时切澜光描边 + 澜光文字(文案即状态,色弱无碍) */
+  .log-toggle { min-height: var(--ctl-h-sm); }
   .log-toggle[aria-pressed="true"] { border-color: var(--c-brand); color: var(--c-brand); }
   .log {
     flex: 1; min-height: 0; overflow: auto; background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
@@ -91,7 +115,7 @@
         <span class="sec-label" id="logLabel"></span>
         <span class="log-meta" id="logMeta" aria-live="polite"></span>
         <span class="spacer"></span>
-        <button class="btn log-toggle" id="errOnlyBtn" type="button" aria-pressed="false"></button>
+        <button class="btn ghost log-toggle" id="errOnlyBtn" type="button" aria-pressed="false"></button>
       </div>
       <div class="log" id="log" role="log" aria-labelledby="logLabel"></div>
     </div>
@@ -194,6 +218,8 @@
     document.getElementById('badge').textContent = badge;
     document.getElementById('name').textContent = p.name || '';
     document.getElementById('cause').textContent = p.cause || '';
+    // 深澜:状态横幅按阶段着色(启动失败=赤潮 / 进程退出=珊瑚金)
+    document.querySelector('.cls')?.classList.toggle('exit', p.phase === 'exit');
     const advice = document.getElementById('advice');
     advice.innerHTML = '';
     (p.suggestions || []).forEach((s) => {

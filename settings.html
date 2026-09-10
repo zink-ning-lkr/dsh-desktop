@@ -43,10 +43,32 @@
     border: 1px solid color-mix(in srgb, var(--c-warn) 30%, transparent); border-radius: var(--radius-m); padding: 7px 10px;
   }
   .seg-row { display: flex; align-items: center; gap: 14px; }
-  input[type=range] { flex: 1; accent-color: var(--c-brand); height: 4px; cursor: default; }
+  /* 滑杆:深澜全自定义(替代原生 accent-color)——渐变 track + 澜光圆钮 thumb + hover 光晕 */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    flex: 1; height: 24px; margin: 0; background: transparent; cursor: default;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--c-brand) 0%, var(--c-progress-accent) var(--pct, 30%), var(--c-bg2) var(--pct, 30%));
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; margin-top: -5px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, var(--c-brand-hi), var(--c-brand));
+    border: 2px solid #fff;
+    box-shadow: 0 1px 5px rgba(8, 14, 40, .5);
+    transition: box-shadow var(--dur-fast) ease, transform var(--dur-fast) ease;
+  }
+  input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c-brand) 22%, transparent); }
+  input[type=range]:active::-webkit-slider-thumb { transform: scale(1.1); }
+  input[type=range]:focus-visible { outline: none; }
+  input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-brand) 30%, transparent); }
   .seg-n {
     flex: none; min-width: 58px; text-align: center; font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-dense); color: var(--c-fg0);
     font-variant-numeric: tabular-nums; /* 拖动滑杆时数字等宽,数值框内容零横跳 */
+    font-family: var(--font-display); /* 深澜:展示字栈 */
     background: var(--c-bg2); border: 1px solid var(--c-border); border-radius: var(--radius-m); padding: 5px 0;
   }
   .seg-n b { color: var(--c-brand-hi); }
@@ -63,19 +85,28 @@
   /* flex:1 + min-width:0:长校验文案占按钮行剩余宽度折行,不被按钮挤压或横向截断 */
   .err { flex: 1; min-width: 0; min-height: 0; font-size: var(--fs-ctrl); color: var(--c-err); line-height: var(--lh-ctrl); }
   .cmd {
-    display: flex; align-items: center; gap: var(--sp-2); background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m);
+    display: flex; align-items: center; gap: var(--sp-2); background: var(--c-bg0); border: 1px solid var(--c-bg2);
+    border-left: 3px solid var(--c-brand); /* 深澜:代码卡左缘澜光线,与路径行同一「代码卡」规范 */
+    border-radius: var(--radius-m);
     padding: 9px 11px; font: var(--fs-ctrl)/var(--lh-micro) var(--font-mono); color: var(--c-brand-hi);
     word-break: break-all; user-select: text;
   }
-  /* 档位选择:一组按钮里当前档高亮,读屏靠 aria-pressed(比 radio 组更贴合"扁平设置条") */
+  /* 档位选择:一组按钮里当前档高亮,读屏靠 aria-pressed(比 radio 组更贴合"扁平设置条")。
+     深澜:选中态品牌渐变底 14% + 澜光描边 + 内高光(从纯色升级) */
   .choice { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
   .choice .btn { min-height: var(--ctl-h); }
-  .choice .btn[aria-pressed="true"] { border-color: var(--c-brand); color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand) 12%, transparent); }
-  /* 路径行:路径文本等宽可截断,复制按钮不随长度跑偏 */
+  .choice .btn[aria-pressed="true"] {
+    border-color: var(--c-brand);
+    color: var(--c-brand-hi);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c-brand) 20%, transparent), color-mix(in srgb, var(--c-brand-vio) 8%, transparent));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-brand-hi) 25%, transparent), 0 1px 6px -2px color-mix(in srgb, var(--c-brand) 45%, transparent);
+  }
+  /* 路径行:路径文本等宽可截断,复制按钮不随长度跑偏。深澜:代码卡统一左缘澜光线 */
   .path { display: flex; align-items: center; gap: var(--sp-2); }
   .path code {
     flex: 1; min-width: 0; font: var(--fs-ctrl)/var(--lh-micro) var(--font-mono); color: var(--c-fg1);
-    background: var(--c-bg0); border: 1px solid var(--c-bg2); border-radius: var(--radius-m); padding: 6px 9px;
+    background: var(--c-bg0); border: 1px solid var(--c-bg2); border-left: 3px solid var(--c-brand);
+    border-radius: var(--radius-m); padding: 6px 9px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text;
   }
   .mem { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); align-items: baseline; margin: 0; }
@@ -366,6 +397,9 @@
   function setSegText(n) {
     segN.textContent = n;
     seg.setAttribute('aria-valuetext', T('settings.segAriaVal', { n }));
+    // 深澜:track 已选区渐变按 (n-min)/(max-min) 推进(--pct 由 CSS 消费)
+    const pct = ((Number(n) - 2) / 14) * 100;
+    seg.style.setProperty('--pct', Math.max(0, Math.min(100, pct)) + '%');
   }
   seg.addEventListener('input', () => setSegText(seg.value));
   seg.addEventListener('change', async () => {

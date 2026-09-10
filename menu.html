@@ -65,16 +65,45 @@
   .sep { height: 1px; background: var(--c-bg2); margin: 4px 8px; }
   /* 分组小标题(v0.7.13):字面规格直接复用 ui.css 的 .sec-label(11px / 600 / 字距 .06em)。
      行高锁定 24px —— 与 main.js 的 MENU_SEC_H 严格对应,改这里必须同步改那里,否则菜单底部被裁。
-     它不进键盘导航:navRows 只收可交互条目,小标题既不进 navRows 也不参与 typeahead。 */
+     它不进键盘导航:navRows 只收可交互条目,小标题既不进 navRows 也不参与 typeahead。
+     深澜:左侧加 3px 品牌渐变竖线(圆头),分组可读性第一眼成立 */
   .sec {
     display: flex;
     align-items: center;
+    gap: 7px;
     height: 24px;
     padding: 0 12px;
   }
+  .sec::before {
+    content: "";
+    flex: none; width: 3px; height: 10px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--c-brand-vio), var(--c-brand));
+  }
+  .sec .sec-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* 分组之间的发丝线用 inset 阴影画:不占布局高度,高度公式不必为它多出一个加数 */
   .grp + .grp > .sec { box-shadow: inset 0 1px 0 var(--c-bg2); }
+  /* 危险项(退出):hover 红底 + 图标变红 + 左缘 3px 红条(色弱可辨,不再只靠文字颜色) */
+  .item.danger { position: relative; }
+  .item.danger::before {
+    content: ""; position: absolute; left: 0; top: 9px; bottom: 9px;
+    width: 3px; border-radius: 2px;
+    background: color-mix(in srgb, var(--c-err) 40%, transparent);
+  }
   .item.danger:hover, .item.danger.sel { background: var(--c-danger-bg); }
+  .item.danger:hover .ico, .item.danger.sel .ico { color: var(--c-err); }
+  /* 勾选项 ✓:深澜升级为澜光圆底徽标(替代裸文本字符) */
+  .item .accel.chk {
+    display: flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--c-brand-hi) 18%, transparent);
+    color: var(--c-brand-hi);
+  }
+  /* 底部「所有命令…」:hover 用澜光渐变底,与普通条目区分(它是「引向面板」的桥) */
+  .item.palette:hover, .item.palette.sel {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--c-brand) 18%, transparent), color-mix(in srgb, var(--c-brand-vio) 8%, transparent));
+  }
   /* 只读状态行:.72 与标题栏工作目录同一「弱化但达 AA」梯度(原 .55 低于 4.5:1) */
   .item.off { opacity: .72; }
   @media (prefers-reduced-motion: reduce) { .panel, .item { animation: none; } }
@@ -145,7 +174,7 @@
         return;
       }
       const row = document.createElement('div');
-      row.className = 'item' + (it.id === 'quit' ? ' danger' : '');
+      row.className = 'item' + (it.id === 'quit' ? ' danger' : '') + (it.id === 'open-palette' ? ' palette' : '');
       row.style.setProperty('--i', navRows.length);
       row.id = 'mi-' + navRows.length;
       // 勾选项(checked 布尔)语义为 menuitemcheckbox,读屏器可报"选中/未选中"
@@ -163,7 +192,7 @@
       lbl.className = 'lbl';
       lbl.textContent = it.label; // 文本一律 textContent:label 中拼接的版本号/路径等不经 HTML 解析
       const accel = document.createElement('span');
-      if (it.checked) { accel.className = 'accel'; accel.title = T('menu.enabled'); accel.textContent = '✓'; }
+      if (it.checked) { accel.className = 'accel chk'; accel.title = T('menu.enabled'); accel.innerHTML = '<svg viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.2l2 2 4-4.4"/></svg>'; }
       else if (it.accel) { accel.className = 'accel'; accel.textContent = it.accel; }
       accel.setAttribute('aria-hidden', 'true'); // 快捷键文本并入 aria-label,避免读屏器拆读
       row.setAttribute('aria-label', it.label + (it.accel ? ' ' + it.accel : ''));

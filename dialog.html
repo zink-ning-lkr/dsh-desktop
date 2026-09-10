@@ -24,11 +24,17 @@
   .title { font-size: var(--fs-title); font-weight: 600; color: var(--c-fg0); line-height: var(--lh-title); }
   .message { font-size: var(--fs-body); color: var(--c-fg1); line-height: var(--lh-body); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
     -webkit-app-region: no-drag; }
-  /* 详情降为「附属材料」:独立下沉面板 + 次级色,与正文形成层级差(原与正文同为裸文本,仅靠字号区分) */
+  /* 详情降为「附属材料」:独立下沉面板 + 次级色,与正文形成层级差(原与正文同为裸文本,仅靠字号区分)。
+     深澜:左缘 3px 语义色线(信息=澜光/警告=珊瑚/错误=赤潮),色弱下也可辨类型 */
   .detail { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-ctrl); white-space: pre-wrap; overflow-wrap: anywhere;
     background: color-mix(in srgb, var(--c-bg1) 70%, transparent); border: 1px solid var(--c-hairline);
+    border-left: 3px solid var(--c-brand-hi);
     border-radius: var(--radius-m); padding: var(--sp-2) var(--sp-3);
     max-height: 140px; min-height: 0; overflow-y: auto; user-select: text; -webkit-app-region: no-drag; }
+  .detail.info { border-left-color: var(--c-brand-hi); }
+  .detail.success { border-left-color: var(--c-ok); }
+  .detail.warning { border-left-color: var(--c-warn); }
+  .detail.error { border-left-color: var(--c-err); }
   .foot { flex: none; display: flex; justify-content: flex-end; gap: var(--sp-2); padding: 2px var(--sp-5) 18px; }
   /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
   .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
@@ -71,8 +77,10 @@
     K.bigBadge(document.getElementById('big'), type, ICONS);
     document.getElementById('title').textContent = p.title || '';
     document.getElementById('message').textContent = p.message || '';
-    document.getElementById('detail').textContent = p.detail || '';
-    document.getElementById('detail').style.display = p.detail ? '' : 'none';
+    const det = document.getElementById('detail');
+    det.className = 'detail ' + type; // 深澜:detail 面板左缘色线随类型
+    det.textContent = p.detail || '';
+    det.style.display = p.detail ? '' : 'none';
     const foot = document.getElementById('foot');
     // 按钮行走共享构件(原为 dialog/status/report 三份同构实现中的一份)。
     // 回传「下标 + 按钮 id」:主进程按 id 分发语义(下标会随按钮排列漂移,不可作为契约)

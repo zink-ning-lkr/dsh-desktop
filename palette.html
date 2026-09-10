@@ -27,29 +27,36 @@
     animation: palIn .16s cubic-bezier(.2, .9, .3, 1.1);
   }
   @keyframes palIn { from { opacity: 0; transform: translateY(-6px) scale(.99); } to { opacity: 1; transform: none; } }
-  /* 输入行 56px:与主进程 PALETTE_INPUT_H 严格对应(高度公式的加数,改一处必须同改另一处) */
-  .pin { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 14px; flex: none; border-bottom: 1px solid var(--c-border); }
-  .pin .pico { width: 16px; height: 16px; flex: none; color: var(--c-fg2); display: flex; align-items: center; justify-content: center; }
+  /* 输入行 56px:与主进程 PALETTE_INPUT_H 严格对应(高度公式的加数,改一处必须同改另一处)。
+     深澜:聚焦时 1px 澜光描边 + 4px 光晕 ring */
+  .pin { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 14px; flex: none; border-bottom: 1px solid var(--c-border);
+    box-shadow: inset 0 0 0 0 transparent; transition: box-shadow var(--dur-mid) ease, background var(--dur-mid) ease; }
+  .pin:focus-within { box-shadow: inset 0 0 0 1px var(--c-brand), 0 0 0 3px color-mix(in srgb, var(--c-brand) 16%, transparent); }
+  .pin .pico { width: 16px; height: 16px; flex: none; color: var(--c-brand-hi); display: flex; align-items: center; justify-content: center; }
   #q {
     all: unset;
     flex: 1; min-width: 0;
     font-family: inherit; font-size: var(--fs-body); line-height: var(--lh-ctrl); color: var(--c-fg0);
   }
   #q::placeholder { color: var(--c-fg3); }
-  /* Ctrl+K 徽标:文字由主进程按平台下发(CmdOrCtrl 前缀规则同 shortcuts.js),渲染层不判断平台 */
+  /* Ctrl+K 徽标:文字由主进程按平台下发(CmdOrCtrl 前缀规则同 shortcuts.js),渲染层不判断平台。
+     深澜:hover 澜光描边 */
   .pkbd {
     flex: none; padding: 2px 6px; border: 1px solid var(--c-border); border-radius: var(--radius-ctl);
     font-size: var(--fs-micro); line-height: 1.4; color: var(--c-fg2);
+    transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease;
   }
+  .pkbd:hover { border-color: color-mix(in srgb, var(--c-brand-hi) 50%, transparent); color: var(--c-fg1); }
   .plist { flex: none; padding: 0 6px; }
-  /* 结果行 36px:与主进程 PALETTE_ROW_H 严格对应(高度公式的乘数) */
+  /* 结果行 36px:与主进程 PALETTE_ROW_H 严格对应(高度公式的乘数)。
+     深澜:选中态高亮底 + 左侧 3px 澜光圆头竖线 */
   .prow {
     display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px;
     border-radius: var(--radius-s); cursor: default; white-space: nowrap;
     font-size: var(--fs-body); line-height: var(--lh-ctrl);
     transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
-  .prow:hover, .prow.sel { background: var(--c-sel-bg); color: var(--c-sel-fg); }
+  .prow:hover, .prow.sel { background: var(--c-sel-bg); color: var(--c-sel-fg); box-shadow: inset 3px 0 0 var(--c-brand); }
   .prow .pico { width: 16px; height: 16px; flex: none; color: var(--c-fg2); display: flex; align-items: center; justify-content: center; }
   .prow:hover .pico, .prow.sel .pico { color: var(--c-brand-hi); }
   .prow .plbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -63,8 +70,10 @@
     font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2);
   }
   .pempty { height: 36px; display: flex; align-items: center; padding: 0 8px; font-size: var(--fs-body); color: var(--c-fg2); }
-  /* 底部提示行 30px:方向键/Enter/Esc 的用法不写在界面某处就没人知道 */
-  .phint { flex: none; height: 30px; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2); }
+  /* 底部提示行 30px:方向键/Enter/Esc 的用法不写在界面某处就没人知道。
+     深澜:上缘品牌渐变发丝线,与输入行/结果区形成层级 */
+  .phint { flex: none; height: 30px; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2);
+    border-top: 1px solid color-mix(in srgb, var(--c-brand-hi) 18%, transparent); }
   .phint.hide { display: none; }
   @media (prefers-reduced-motion: reduce) { .pal { animation: none; } }
 </style>

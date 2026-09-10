@@ -48,7 +48,13 @@
     display: flex; gap: var(--sp-3); align-items: flex-start; padding: 10px var(--sp-3);
     border: 1px solid var(--c-border); border-radius: var(--radius-l); background: var(--c-bg1);
     box-shadow: var(--c-elev-1); /* 卡片与窗底分层:列表滚动时行边界可辨 */
+    /* 深澜:左缘 4px 状态色带(进行中=澜光,完成按 type 变色)——列表第一眼按色可扫 */
+    border-left: 4px solid var(--c-brand);
   }
+  .trow.done.info { border-left-color: var(--c-brand-hi); }
+  .trow.done.success { border-left-color: var(--c-ok); }
+  .trow.done.warning { border-left-color: var(--c-warn); }
+  .trow.done.error { border-left-color: var(--c-err); }
   .trow .lico { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--c-brand-hi); }
   .trow .lico svg { width: 18px; height: 18px; }
   .trow.done .lico.info { color: var(--c-brand-hi); }
@@ -69,8 +75,12 @@
   }
   .trow .lx:hover { background: var(--c-hover); color: var(--c-fg0); }
   .trow .lx svg { width: 11px; height: 11px; }
-  /* 历史折叠行:整行可点,补圆角与悬停底色(原仅文字变色,可点性不可辨) */
+  /* 历史折叠行:整行可点,补圆角与悬停底色(原仅文字变色,可点性不可辨)。
+     深澜:计数升级为澜光胶囊;右侧新增「清空」小按钮(hist-clear)。
+     hist 行本身是 button,不能再嵌 button,故外层包 .hist-row 容器 */
+  .hist-row { display: flex; align-items: center; gap: 6px; }
   .hist {
+    flex: 1; min-width: 0;
     display: flex; align-items: center; gap: 6px; padding: 6px var(--sp-2); border-radius: var(--radius-s);
     font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2);
     cursor: default; border: none; background: transparent; width: 100%; text-align: left;
@@ -79,6 +89,22 @@
   .hist:hover { background: color-mix(in srgb, var(--c-fg2) 12%, transparent); color: var(--c-fg1); }
   .hist .tri { width: 8px; height: 8px; flex: none; transition: transform var(--dur-mid); }
   .hist.open .tri { transform: rotate(90deg); }
+  .hist span {
+    flex: none; padding: 1px 8px; border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 30%, transparent);
+    color: var(--c-brand-hi); font-size: var(--fs-micro); font-weight: 600; line-height: 1.5;
+  }
+  .hist-clear {
+    flex: none; min-height: 24px; padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 30%, transparent);
+    border-radius: var(--radius-ctl);
+    background: transparent; color: var(--c-brand-hi);
+    font-family: inherit; font-size: var(--fs-micro); cursor: default;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  }
+  .hist-clear:hover { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); border-color: color-mix(in srgb, var(--c-brand-hi) 55%, transparent); }
+  .hist-clear:active { background: color-mix(in srgb, var(--c-brand-hi) 18%, transparent); }
   /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
   .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
   /* 进度条动效的 reduced-motion 分支随样式一并上移至 ui.css */
@@ -375,13 +401,22 @@
     K.keyedList(list, listSpecs(tasks), (spec) => {
       if (spec.kind === 'row') return buildRow(spec.t);
       if (spec.kind === 'hist') {
+        // 历史行 = 容器(.hist-row):左侧展开折叠按钮 + 右侧「清空」按钮。
+        // button 不能嵌 button,故拆两层;「清空」走 st:clear-done(主进程清掉全部完成项)
+        const wrap = document.createElement('div');
+        wrap.className = 'hist-row';
         const h = document.createElement('button');
         h.className = 'hist';
         h.setAttribute('aria-controls', 'histWrap');
         // 折叠三角用 SVG(原文本 ▶ 字形随字体渲染漂移):aria-expanded 语义不变
         h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span></span>';
         h.addEventListener('click', () => setHist(!histOpen));
-        return h;
+        const clear = document.createElement('button');
+        clear.className = 'hist-clear';
+        clear.textContent = T('status.clearDone');
+        clear.addEventListener('click', () => S.clearDone());
+        wrap.append(h, clear);
+        return wrap;
       }
       const wrap = document.createElement('div');
       wrap.id = 'histWrap';
@@ -389,9 +424,10 @@
     }, (node, spec) => {
       if (spec.kind === 'row') return updateRow(node, spec.t);
       if (spec.kind === 'hist') {
-        node.classList.toggle('open', histOpen);
-        node.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
-        setText(node.querySelector('span'), T('status.done', { n: spec.n }));
+        const h = node.querySelector('.hist');
+        h.classList.toggle('open', histOpen);
+        h.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
+        setText(h.querySelector('span'), T('status.done', { n: spec.n }));
         return;
       }
       node.style.display = spec.expanded ? 'contents' : 'none';

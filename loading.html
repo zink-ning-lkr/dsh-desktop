@@ -11,9 +11,12 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: var(--c-bg0);
+    /* 深澜:全屏品牌渐变(中心澜光 → 深海黑)+ 底部海平线;浅色主题自动换晨光 */
+    background:
+      radial-gradient(720px 420px at 50% 30%, color-mix(in srgb, var(--c-brand) 15%, transparent), transparent 70%),
+      linear-gradient(180deg, color-mix(in srgb, var(--c-brand) 7%, transparent), transparent 40%),
+      var(--c-bg0);
     color: var(--c-fg2);
-    /* 字栈走 ui.css 公共 --font-ui(原为本地重复的一份硬编码字栈) */
     font: var(--font-ui);
     user-select: none;
     overflow: hidden;
@@ -30,14 +33,14 @@
     justify-content: center;
     gap: 24px;
   }
+  /* 深澜:72px 彩色品牌鲸鱼 + 澜光光晕呼吸 */
   .logo {
-    width: 56px; height: 56px;
-    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--c-brand) 35%, transparent));
+    width: 72px; height: 72px;
     animation: breathe 2.6s ease-in-out infinite;
   }
   @keyframes breathe {
-    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px color-mix(in srgb, var(--c-brand) 28%, transparent)); }
-    50% { transform: scale(1.05); filter: drop-shadow(0 0 20px color-mix(in srgb, var(--c-brand) 50%, transparent)); }
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 12px color-mix(in srgb, var(--c-brand) 32%, transparent)); }
+    50% { transform: scale(1.05); filter: drop-shadow(0 0 24px color-mix(in srgb, var(--c-brand) 55%, transparent)); }
   }
   .ring {
     position: relative; width: 40px; height: 40px;
@@ -59,17 +62,28 @@
   .stage { margin: 0; font-size: var(--fs-body); line-height: var(--lh-title); color: var(--c-fg1); min-height: 20px; animation: fadeUp .3s ease; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   .dots { display: flex; gap: 7px; height: 6px; }
+  /* 深澜:已完成光点 = 澜光实心 + 光晕 + 微脉冲(替代灰底) */
   .dots i {
     width: 6px; height: 6px; border-radius: 50%; background: var(--c-bg2);
-    transition: background .3s, transform .3s;
+    transition: background .3s, transform .3s, box-shadow .3s;
   }
-  .dots i.on { background: var(--c-brand); transform: scale(1.15); animation: dotPulse 1.4s ease-in-out infinite; }
-  @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .dots i.on {
+    background: var(--c-brand-hi);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-brand) 24%, transparent);
+    transform: scale(1.15);
+    animation: dotPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  /* 深澜:logtail 升级为玻璃条(冷调底 + 澜光 1px 描边 + 圆角) */
   .logtail {
-    position: absolute; left: 16px; right: 16px; bottom: 14px;
+    position: absolute; left: 24px; right: 24px; bottom: 14px;
     font: var(--fs-micro)/var(--lh-micro) "Cascadia Mono", Consolas, monospace;
     color: var(--c-fg2); text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: color-mix(in srgb, var(--c-bg1) 78%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 24%, transparent);
+    border-radius: var(--radius-ctl);
+    padding: 6px 10px;
   }
   .hint { margin: 0; font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); color: var(--c-fg2); }
   /* 慢启动自助行(P0-2):默认隐藏,主进程 15s 未就绪时经 showSlowActions() 亮出 */
@@ -86,7 +100,7 @@
 </head>
 <body>
 <main>
-  <img class="logo" src="assets/whale-white.png" alt="" data-logo>
+  <img class="logo" src="assets/deepseek-whale-color.svg" alt="">
   <div class="ring" aria-hidden="true"></div>
   <p class="stage" id="stage" role="status" aria-live="polite"></p>
   <div class="dots" id="dots" aria-hidden="true"></div>

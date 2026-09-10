@@ -43,6 +43,8 @@
     "closeRow": "关闭此条:",
     "cancelRow": "取消此项:",
     "done": "已完成 {n} 项",
+    "clearDone": "清空",
+    "clearDoneTip": "清空已完成的历史记录(进行中任务不受影响)",
     "progress": "进度",
     "background": "后台",
     "backgroundTip": "最小化到任务栏,完成时通知",
