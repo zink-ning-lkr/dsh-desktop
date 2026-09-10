@@ -311,6 +311,25 @@ function runUitest(d) {
       ? 'PASS 徽标=' + num + ' label="' + label + '"'
       : 'FAIL shown=' + shown + ' n=' + num + ' label=' + label;
   })()`, 'cmdbar-badge'), 3700);
+  // 阶段 1 出口标准:窗口收进后台再回来,徽标数字必须仍然正确。
+  // 徽标由 pushTitlebarStatus 从 refreshTray 推出,与主窗前后台无关 —— 但"无关"这件事
+  // 只有真收一次才能证明;顺带覆盖 minimize/restore 往返后 titlebar 视图未被重载丢失状态。
+  uiStep(() => { d.mainWindow.minimize(); }, 3800, 'badge-min');
+  uiStep(() => {
+    const min = !!d.mainWindow && d.mainWindow.isMinimized();
+    d.titlebarView?.webContents.executeJavaScript(
+      "(()=>{const tb=document.getElementById('taskBtn'),n=document.getElementById('taskN');return (tb&&!tb.hidden&&n)?n.textContent:'none'})()"
+    ).then((v) => d.log(`UITEST badge-minimized minimized=${min} badge=${v}(期望 true/1) → ${min && v === '1' ? 'PASS' : 'FAIL'}`))
+      .catch((e) => d.log(`UITEST badge-minimized ✗ ${e.message}`));
+  }, 3900, 'badge-minimized');
+  uiStep(() => { d.showMainWindow(); }, 4020, 'badge-restore');
+  uiStep(() => {
+    const back = !!d.mainWindow && !d.mainWindow.isMinimized() && d.mainWindow.isVisible();
+    d.titlebarView?.webContents.executeJavaScript(
+      "(()=>{const tb=document.getElementById('taskBtn'),n=document.getElementById('taskN');return (tb&&!tb.hidden&&n)?n.textContent:'none'})()"
+    ).then((v) => d.log(`UITEST badge-restored visible=${back} badge=${v}(期望 true/1) → ${back && v === '1' ? 'PASS' : 'FAIL'}`))
+      .catch((e) => d.log(`UITEST badge-restored ✗ ${e.message}`));
+  }, 4120, 'badge-restored');
   // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
   //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
   uiStep(() => {
