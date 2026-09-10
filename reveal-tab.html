@@ -46,7 +46,12 @@
     cursor: default;
     -webkit-app-region: no-drag;
   }
-  @media (prefers-reduced-motion: reduce) { body { animation: none; } }
+  /* S3 首次收起演示:把手自浮出并呼吸 3s(主进程经 tb:handle-hint 切换 .hint)。
+     呼吸只动 opacity,不动 transform —— 缩放会让下方 96×26 的命中区看起来在动,
+     而这段动画要传达的是"我在这儿",不是"我变大了"。 */
+  body.hint { animation: breathe 1.2s ease-in-out 3; }
+  @keyframes breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { body, body.hint { animation: none; } }
 </style>
 </head>
 <body>
@@ -64,6 +69,9 @@
     btn.setAttribute('aria-label', tip);
     // Enter/Space 由 <button> 原生处理,不再需要自建 keydown 分支
     btn.addEventListener('click', () => window.__titlebar && window.__titlebar.showTitlebar());
+    // 首次收起演示(S3):只切一个类名。把手的显隐始终由主进程的 bounds 决定,
+    // 渲染层不持有可见性真相 —— 视图在演示期间本来就已被主进程放大到 96×26
+    window.__titlebar?.onHandleHint?.((on) => document.body.classList.toggle('hint', !!on));
   }
 </script>
 </body>

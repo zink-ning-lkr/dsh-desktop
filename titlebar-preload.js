@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('__titlebar', {
   onWorkspace: (cb) => ipcRenderer.on('tb:workspace', (_e, v) => cb(v)),
   onMenuState: (cb) => ipcRenderer.on('tb:menu-state', (_e, v) => cb(v)),
   onCloseTip: (cb) => ipcRenderer.on('tb:close-tip', (_e, v) => cb(v)),
+  // 首次收起的把手演示(S3):主进程在 3s 驻留期间置 true,结束或还原时置 false。
+  // 只切换一个视觉状态 —— 把手的显隐始终由主进程的 bounds 决定,渲染层不持有可见性真相
+  onHandleHint: (cb) => ipcRenderer.on('tb:handle-hint', (_e, v) => cb(v)),
   // 状态簇载荷(tb:status):主进程在托盘态/任务数/更新可用性/主题变化时整体推送一次,
   // 渲染层不做增量合并——载荷小(5 个字段),整推更容易保证与主进程一致
   onStatus: (cb) => ipcRenderer.on('tb:status', (_e, v) => cb(v)),

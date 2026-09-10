@@ -203,6 +203,49 @@ const HANDLE_W = 96, HANDLE_H = 26; // 把手本体尺寸(高 ≥24px 最小点�
 let handlePoll = null;
 let handleShown = false; // 迟滞状态记忆:已上浮后扩大判定区再收,避免边界抖动
 
+// ---------- 首次收起的把手演示(S3) ----------
+// 问题:收起标题栏后,恢复入口只在鼠标进入顶部中央感应区时才浮现。这个机制本身很扎实
+// (防闪烁、防空转、1.5× 迟滞),但没有任何视觉线索告诉用户"把手在这儿" —— 新用户收起
+// 标题栏后极可能以为窗口坏了(此前只在 README 里用文字说明覆盖)。
+// 做法:首次收起时让把手自己浮出来、呼吸 3s 再隐去,用一次演示替代文字说明;
+// 之后完全交回"悬停才浮现"的既有机制。靠配置项 handleHintShown 保证只演示一次。
+const HANDLE_HINT_MS = 3000;
+let handleHintActive = false;
+let handleHintTimer = null;
+
+function markHandleHintSeen() {
+  // 写失败不阻断:最坏结果是下次再演示一遍,属无害
+  try {
+    const cfg = loadConfig();
+    if (!cfg.handleHintShown) { cfg.handleHintShown = true; saveConfig(cfg); }
+  } catch { /* 配置不可写 */ }
+}
+
+function beginHandleHint() {
+  if (handleHintActive || !mainWindow || !revealTabView) return;
+  handleHintActive = true;
+  handleShown = true; // 与轮询共用同一份"已上浮"记忆:演示结束交回轮询时不会先闪一下
+  const [w] = mainWindow.getContentSize();
+  // 演示期间由本函数独占 bounds:轮询看到 handleHintActive 会直接跳过(见 startHandlePolling),
+  // 否则鼠标一移开就会被 80ms 轮询收走,3s 驻留根本走不完
+  revealTabView.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
+  const wc = revealTabView.webContents;
+  // 视图可能仍在加载(document 未就绪时 send 会被丢弃):加载完成钩子里补发一次
+  if (!wc.isLoading()) { try { wc.send('tb:handle-hint', true); } catch { /* 竞态 */ } }
+  handleHintTimer = setTimeout(endHandleHint, HANDLE_HINT_MS);
+}
+
+function endHandleHint() {
+  if (!handleHintActive) return;
+  handleHintActive = false;
+  clearTimeout(handleHintTimer);
+  handleHintTimer = null;
+  try { revealTabView?.webContents.send('tb:handle-hint', false); } catch { /* 竞态 */ }
+  revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  handleShown = false;
+  markHandleHintSeen();
+}
+
 // 下拉把手懒创建(内存优化 P0-1):只有标题栏收起时才需要这个 96×26 的视图,
 // 展开时销毁——避免一个几乎空白的渲染进程常驻(典型 50-90MB)
 function ensureRevealTab() {
@@ -213,6 +256,13 @@ function ensureRevealTab() {
   });
   revealTabView.setBackgroundColor('#00000000'); // 圆角处的透明角落不露白
   revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html')).catch(() => {});
+  // S3:首次收起与把手视图创建是同一时刻发生的,提示可能在 document 就绪前就置位了 ——
+  // 加载完成补发一次(捕获局部引用:此间视图可能已被销毁重建)
+  const v = revealTabView;
+  v.webContents.once('did-finish-load', () => {
+    if (!handleHintActive || !v.webContents || v.webContents.isDestroyed()) return;
+    try { v.webContents.send('tb:handle-hint', true); } catch { /* 竞态 */ }
+  });
   mainWindow.contentView.addChildView(revealTabView);
   layoutViews();
 }
@@ -228,8 +278,11 @@ function startHandlePolling() {
   if (handlePoll) return;
   handleShown = false;
   ensureRevealTab(); // 收起态:确保把手视图存在(可见性由轮询中的 bounds 控制)
+  // S3:仅首次收起时演示一次;之后完全交回"悬停才浮现"
+  if (!loadConfig().handleHintShown) beginHandleHint();
   handlePoll = setInterval(() => {
     if (!mainWindow || !mainWindow.isVisible() || !revealTabView || barVisible || currentBarH > 0) return; // 收托盘后台时不空转
+    if (handleHintActive) return; // 演示期间 bounds 归提示独占,轮询不得插手
     try {
       const p = screen.getCursorScreenPoint();
       const b = mainWindow.getBounds(); // 无边框窗口,bounds 即内容区
@@ -255,6 +308,14 @@ function stopHandlePolling() {
   clearInterval(handlePoll);
   handlePoll = null;
   handleShown = false;
+  // S3:演示进行中被还原(用户点了把手 / 快捷键 / 菜单还原标题栏):演示已达成目的,
+  // 落盘记忆并清计时 —— 但不能走 endHandleHint,它会对即将销毁的视图 setBounds
+  if (handleHintActive) {
+    handleHintActive = false;
+    clearTimeout(handleHintTimer);
+    handleHintTimer = null;
+    markHandleHintSeen();
+  }
   destroyRevealTab(); // 展开/退出:销毁把手视图,释放渲染进程
 }
 
@@ -2284,6 +2345,11 @@ if (!gotLock) {
         get menuPopupView() { return menuPopupView; },
         get trayMenuWin() { return trayMenuWin; },
         get currentBarH() { return currentBarH; },
+        // S3 首次收起演示:revealTabView 会随收起/展开创建销毁,故走 getter;
+        // 断言面是"提示状态机 + 视图 bounds",不暴露内部计时器
+        get revealTabView() { return revealTabView; },
+        get handleHintActive() { return handleHintActive; },
+        HANDLE_W, HANDLE_H,
         get trayState() { return trayState; },
         trayStatusText,
         updatesState: updates.state, // 双通道共享状态对象(稳定引用):断言取消旗标/安装子进程等

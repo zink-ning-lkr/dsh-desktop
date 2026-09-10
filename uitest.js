@@ -251,6 +251,31 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST toast ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2587, 'toast-static');
+  // ⓠ 首次收起演示静态契约(S3):把手的可发现性问题靠"演示一次"解决,而演示只做一次
+  //    靠配置项记忆。两类静默故障:配置键写错(每次都演示,变成每次收起都闪一下)、
+  //    呼吸动画被 reduced-motion 分支漏掉(动效偏好被无视)。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const rv = read('reveal-tab.html');
+    const pre = read('titlebar-preload.js');
+    t('s3-const', /const HANDLE_HINT_MS = 3000;/.test(main));
+    t('s3-state', /function beginHandleHint\(/.test(main) && /function endHandleHint\(/.test(main));
+    // 配置项记忆:没有它就会每次收起都演示
+    t('s3-once', /handleHintShown/.test(main) && /if \(!cfg\.handleHintShown\) \{ cfg\.handleHintShown = true; saveConfig\(cfg\); \}/.test(main));
+    // 首次收起才演示:由 startHandlePolling 读配置裁决
+    t('s3-gate', /if \(!loadConfig\(\)\.handleHintShown\) beginHandleHint\(\);/.test(main));
+    // 演示期间轮询必须让位,否则鼠标一移开就被 80ms 轮询收走,3s 驻留走不完
+    t('s3-poll-yield', /if \(handleHintActive\) return;/.test(main));
+    t('s3-channel', main.includes("'tb:handle-hint'") && /onHandleHint:/.test(pre));
+    t('s3-renderer', /body\.hint \{ animation: breathe/.test(rv) && /@keyframes breathe/.test(rv));
+    t('s3-reduced-motion', /@media \(prefers-reduced-motion: reduce\) \{ body, body\.hint \{ animation: none; \} \}/.test(rv));
+    t('s3-renderer-hook', /onHandleHint\?\.\(\(on\) => document\.body\.classList\.toggle\('hint', !!on\)\)/.test(rv));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST s3 ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2594, 's3-static');
   uiStep(() => readDom(d.titlebarView, `(()=>{
     const c = document.getElementById('cluster');
     const dot = (document.getElementById('svcDot') || {}).className || '';
@@ -330,6 +355,37 @@ function runUitest(d) {
   uiStep(() => d.log(`UITEST bar-collapsed h=${d.currentBarH}(期望 0) → ${d.currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
   uiStep(() => d.toggleTitlebar(true), 9200, 'bar-expand');
   uiStep(() => d.log(`UITEST bar-expanded h=${d.currentBarH}(期望 ${d.TITLEBAR_H},PASS=${d.currentBarH === d.TITLEBAR_H}) viewH=${d.titlebarView?.getBounds().height}(期望 ${d.TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
+  // ⑮ 首次收起演示(S3 阶段 1):把手自己浮出、呼吸 3s 后隐去,并把"已演示"落盘(只做一次)。
+  //    用非动画路径收起(toggleTitlebar(false,false)):动画有 240ms,提示的开始时刻会随帧率漂移,
+  //    断言窗口就不好卡;这条路径此前无覆盖,顺带补上。
+  //    旗标先清空再测、测完还原 —— 否则第二次运行永远走不到"首次"分支。
+  const s3Orig = d.loadConfig().handleHintShown;
+  uiStep(() => {
+    const cfg = d.loadConfig();
+    delete cfg.handleHintShown;
+    d.saveConfig(cfg);
+  }, 9710, 's3-arm');
+  uiStep(() => d.toggleTitlebar(false, false), 9760, 's3-collapse');
+  uiStep(() => {
+    const w = d.revealTabView ? d.revealTabView.getBounds().width : 0;
+    const flag = !!d.loadConfig().handleHintShown;
+    const ok = d.handleHintActive === true && w === d.HANDLE_W && !flag;
+    d.log(`UITEST s3-hint-on active=${d.handleHintActive} w=${w}(期望 ${d.HANDLE_W}) flag=${flag}(期望 false) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 9900, 's3-hint-on');
+  // 3s 驻留到期(9760 + 3000 ≈ 12760):把手收走 + 旗标落盘。此处不再检查 revealTabView 是否销毁
+  // —— 展开态才销毁,收起态本就该留着(下次悬停还要用)
+  uiStep(() => {
+    const w = d.revealTabView ? d.revealTabView.getBounds().width : 0;
+    const flag = !!d.loadConfig().handleHintShown;
+    const ok = d.handleHintActive === false && w === 0 && flag;
+    d.log(`UITEST s3-hint-off active=${d.handleHintActive} w=${w}(期望 0) flag=${flag}(期望 true,已落盘) → ${ok ? 'PASS' : 'FAIL'}`);
+  }, 12900, 's3-hint-off');
+  uiStep(() => d.toggleTitlebar(true, false), 12920, 's3-restore');
+  uiStep(() => {
+    const cfg = d.loadConfig();
+    if (s3Orig === undefined) delete cfg.handleHintShown; else cfg.handleHintShown = s3Orig;
+    d.saveConfig(cfg);
+  }, 12950, 's3-flag-restore');
   // ③ 对话框队列化(P2-1):D1 在屏期间调 D2 → D2 入队不顶掉;D1 回程后接续展示 D2
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
   // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
