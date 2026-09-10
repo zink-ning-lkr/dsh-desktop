@@ -167,6 +167,9 @@
       else if (it.accel) { accel.className = 'accel'; accel.textContent = it.accel; }
       accel.setAttribute('aria-hidden', 'true'); // 快捷键文本并入 aria-label,避免读屏器拆读
       row.setAttribute('aria-label', it.label + (it.accel ? ' ' + it.accel : ''));
+      // aria-keyshortcuts 是快捷键的**程序化**出口(X4-4):visible 文本被 aria-hidden 之后,
+      // 只有它能让读屏器的"快捷键"查询列出这一项,而不是逼用户去翻快捷键速查表
+      if (it.accel) row.setAttribute('aria-keyshortcuts', it.accel);
       row.append(ico, lbl, accel);
       row.addEventListener('click', () => window.__menu.action(it.id));
       row.addEventListener('mouseenter', () => select(navRows.indexOf(row)));

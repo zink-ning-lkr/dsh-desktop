@@ -26,12 +26,12 @@
    focusPrimary 打开即聚焦主按钮(替代 status/dialog/report 三份)
    focusTrap   对话框焦点陷阱(阶段 0 修复 X3 用)
    srOnly      视觉隐藏但读屏可读的文本节点
+   keyedList   按 key 复用节点重建列表(阶段 2 修 C3:150ms 全量重建)
+   listNav     列表行 roving tabindex(阶段 2 修 X4:↑↓/Home/End + Enter/Delete)
 
    ---- 明确暂不提供(避免死代码,待消费方出现时再落地) ----
    winShell : 辅助窗统一外壳属阶段 3(窗口模型归一),届时四窗一并改造;
-   field    : 表单行属阶段 3(accel → settings 三分区);
-   listNav  : 列表行 roving tabindex 必须与阶段 2 的 keyed diff 同时落地——
-             当前 status 每 150ms 全量重建列表,任何在此之上的焦点管理都会被重置冲掉。 */
+   field    : 表单行属阶段 3(accel → settings 三分区)。 */
 (function () {
   'use strict';
 
@@ -203,12 +203,117 @@
     return () => root.removeEventListener('keydown', onKey);
   }
 
+  /* ---------- keyed 列表重建 ----------
+     specs 按顺序描述 host 的子节点,每项必须带唯一 spec.k(键)。
+       create(spec) → 新节点(本层负责写入 data-k)
+       update(node, spec) → 就地更新已有节点
+     行为:按 k 认领旧节点,顺序不符时用 insertBefore **移动**而不是重建。这一步是 C3 的根治——
+     150ms 一次的全量 innerHTML 重建会同时冲掉滚动位置、CSS 动画、未提交的输入与**焦点**;
+     移动节点则四者全部存活。不在 specs 里的节点(含没有 data-k 的残留)在末尾统一摘掉。
+     返回 { added, removed, moved } 供断言与调试(不参与渲染决策)。 */
+  function keyedList(host, specs, create, update) {
+    const alive = new Map();
+    for (const node of Array.prototype.slice.call(host.children)) {
+      const k = node.dataset.k;
+      if (k === undefined) node.remove(); // 无键节点:既无法复用也排不进序
+      else if (!alive.has(k)) alive.set(k, node); // 重复键只认第一个,后来者留待末尾清理
+    }
+    const stat = { added: 0, removed: 0, moved: 0 };
+    let anchor = host.firstChild;
+    for (const spec of specs) {
+      let node = alive.get(spec.k);
+      if (node) alive.delete(spec.k);
+      else { node = create(spec); node.dataset.k = spec.k; stat.added++; }
+      if (node !== anchor) { host.insertBefore(node, anchor); stat.moved++; }
+      update(node, spec);
+      anchor = node.nextSibling;
+    }
+    // 认领过的节点都已被拉到 anchor 之前,故 anchor 及其后即为残留(含未被认领的旧键)
+    while (anchor) { const next = anchor.nextSibling; anchor.remove(); stat.removed++; anchor = next; }
+    return stat;
+  }
+
+  /* ---------- 列表行 roving tabindex ----------
+     把 root 内每个 rowSelector 行里的可聚焦控件拉成**一组 roving tabindex**:
+     整个列表在 Tab 序里只占一格(恰好一个控件 tabindex=0,其余 -1),焦点与 tabindex 一起走。
+     调用方须把行内控件建为 tabindex=-1,由本层提升其一(否则 Tab 序里会多出 N 个停靠点)。
+       ↑ / ↓  移到上/下一行的同列控件(列数不同则落该行最后一个)
+       ← / →  前/后一个控件(可跨行)
+       Home / End  当前行的首/末控件
+       Enter  不拦截:焦点就在控件上,"主操作"由原生 button 自己完成(拦截反而会与点击重复触发)
+       Delete 行级取消/关闭,交给 opts.onDelete(row)(本层不预设语义,由调用方裁决)
+     必须与 keyedList 配套:节点被复用才谈得上"焦点不被 150ms 一帧冲掉"。
+     返回 { sync, destroy }:列表每次重建后调 sync() 重算行序与 tabindex。
+     sync() 以 document.activeElement 为准恢复位置,故不持有任何节点引用,节点被移动也不受影响。 */
+  function listNav(root, opts) {
+    const o = opts || {};
+    const rowSel = o.rowSelector || '[role="listitem"]';
+    const itemSel = o.itemSelector || 'button, [href], input, [tabindex]';
+    // 只认可见行:折叠进历史(display:none)的行必须跳过,否则焦点会被送到看不见的地方
+    const rows = () => Array.prototype.filter.call(root.querySelectorAll(rowSel), (r) => r.offsetParent !== null);
+    const items = () => rows().reduce((acc, r) => acc.concat(Array.prototype.slice.call(r.querySelectorAll(itemSel))), []);
+    // 只挪 tabindex,绝不主动 focus:sync() 挂在每帧渲染上(150ms 一次),
+    // 一旦在这里 focus(),用户把焦点放到列表之外(头部按钮/详情文本)后会被每帧拽回第一行
+    function mark(node) {
+      const list = items();
+      list.forEach((n) => { n.tabIndex = n === node ? 0 : -1; });
+    }
+    function sync() {
+      const list = items();
+      if (!list.length) return;
+      const at = list.indexOf(document.activeElement);
+      mark(list[at >= 0 ? at : 0]);
+    }
+    function goTo(node) {
+      mark(node);
+      if (node) node.focus(); // 键盘导航才动焦点
+    }
+    function onKey(e) {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const list = items();
+      if (!list.length) return;
+      const at = list.indexOf(document.activeElement);
+      const row = at >= 0 ? list[at].closest(rowSel) : null;
+      if (e.key === 'Delete') {
+        if (!row || !o.onDelete || o.onDelete(row) !== true) return;
+        e.preventDefault();
+        return;
+      }
+      if (at < 0) return; // 焦点不在列表控件上:方向键交回浏览器(滚动/原生行为)
+      const cur = list[at];
+      const host = cur.closest(rowSel);
+      const all = rows();
+      if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        const cols = Array.prototype.slice.call(host.querySelectorAll(itemSel));
+        goTo(e.key === 'Home' ? cols[0] : cols[cols.length - 1]);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        goTo(list[Math.max(0, Math.min(list.length - 1, at + (e.key === 'ArrowRight' ? 1 : -1)))]);
+        return;
+      }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const r = host ? all.indexOf(host) : -1;
+        const target = all[Math.max(0, Math.min(all.length - 1, (r < 0 ? 0 : r) + (e.key === 'ArrowDown' ? 1 : -1)))];
+        if (!target) return;
+        const cols = Array.prototype.slice.call(target.querySelectorAll(itemSel));
+        const col = Array.prototype.indexOf.call(host ? host.querySelectorAll(itemSel) : [], cur);
+        goTo(cols[Math.min(col < 0 ? 0 : col, cols.length - 1)]);
+      }
+    }
+    root.addEventListener('keydown', onKey);
+    return { sync, rows, destroy: () => root.removeEventListener('keydown', onKey) };
+  }
+
   // ---------- 视觉隐藏但读屏可读 ----------
   function srOnly(text) {
     return el('span', { class: 'sr-only', text: text == null ? '' : String(text) });
   }
 
   window.UI_KIT = {
-    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, srOnly,
+    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, srOnly, keyedList, listNav,
   };
 })();

@@ -116,7 +116,7 @@ function runUitest(d) {
     const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
     const exported = (src.match(/window\.UI_KIT\s*=\s*\{([^}]*)\}/) || [, ''])[1];
     t('uikit-global', /window\.UI_KIT\s*=/.test(src));
-    t('uikit-apis', ['el', 'buttonRow', 'progressBar', 'bigBadge', 'feedback', 'focusPrimary', 'focusTrap', 'srOnly']
+    t('uikit-apis', ['el', 'buttonRow', 'progressBar', 'bigBadge', 'feedback', 'focusPrimary', 'focusTrap', 'srOnly', 'keyedList', 'listNav']
       .every((k) => new RegExp(`\\b${k}\\b`).test(exported)));
     // 禁用 ES module 的回归锁:页面走 file://,type="module" 会被 Chromium 按 CORS 拒绝
     t('uikit-nomodule', !/^\s*(import|export)\s/m.test(src));
@@ -372,6 +372,41 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST menu-tree ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2603, 'menu-tree-static');
+  // ⓠ 任务列表 keyed diff + roving tabindex 静态契约(阶段 2 · v0.7.14)。
+  //    C3(每 150ms 全量重建)与 X4(行内控件只能靠 Tab 逐个穿行)是一对必须同批修的缺陷——
+  //    焦点管理建在"每帧都被换掉"的节点上等于没建,所以 ui-kit 的头部注释早就把 listNav
+  //    挂在 keyed diff 后面。三类静默故障:
+  //    ① 重建里仍残留 innerHTML='' → 滚动位置每帧归零(表现为"列表自己在往上跳");
+  //    ② 行节点没有稳定键 → keyedList 每帧新建节点,焦点/动画照样被冲掉(等于没修);
+  //    ③ 行内控件没退出 Tab 序 → roving 只是多一层壳,Tab 仍要逐行逐个穿。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const status = read('status.html');
+    const kit = read('ui-kit.js');
+    const menu = read('menu.html');
+    t('list-kit', /keyedList,\s*listNav/.test(kit) && /function keyedList\(host, specs, create, update\)/.test(kit) && /function listNav\(root, opts\)/.test(kit));
+    t('list-keyed', /K\.keyedList\(/.test(status) && !/tlist'\)\.innerHTML/.test(status) && !/\blist\.innerHTML = ''/.test(status));
+    t('list-row-key', /row\.dataset\.taskId = t\.id/.test(status) && /node\.dataset\.k = spec\.k/.test(kit));
+    t('list-specs', /function listSpecs\(tasks\)/.test(status) && status.includes("kind: 'hist'") && status.includes("kind: 'wrap'"));
+    // 完成项恒住折叠区(而不是"没有进行中任务时直接挂列表"):否则最后一个进行中任务完成的
+    // 那一帧,该行要从列表搬进折叠区,节点身份断掉、焦点跟着丢
+    t('list-wrap-stable', /expanded: !act\.length \|\| histOpen/.test(status) && /node\.style\.display = spec\.expanded/.test(status));
+    // 折叠区里的完成行也要走 keyed diff(它们同样每帧刷新进度/文本)
+    t('list-nested', /K\.keyedList\(node, spec\.tasks\.map/.test(status));
+    t('list-nav', /K\.listNav\(document\.getElementById\('tlist'\)/.test(status) && (status.match(/nav\.sync\(\)/g) || []).length >= 2);
+    t('list-nav-delete', /onDelete: \(row\) =>/.test(status) && /S\.dismiss\(id\)/.test(status) && /S\.cancelOne\(id\)/.test(status));
+    // roving 的两半:行内控件退出 Tab 序(❸),Delete 加速键可程序化发现(X4-4)
+    t('list-tabindex', /x\.tabIndex = -1/.test(status) && /b\.tabIndex = -1/.test(status));
+    t('list-keyshortcuts', /x\.setAttribute\('aria-keyshortcuts', 'Delete'\)/.test(status));
+    // 可见性过滤:折叠进历史的行 offsetParent 为 null,方向键必须跳过它们,否则焦点被送到看不见的行上
+    t('list-visible-rows', /r\.offsetParent !== null/.test(kit));
+    // 菜单侧同一条 X4-4:accel 文本被 aria-hidden 之后,必须另有 aria-keyshortcuts 出口
+    t('menu-keyshortcuts', /row\.setAttribute\('aria-keyshortcuts', it\.accel\)/.test(menu));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST list ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2604, 'list-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
@@ -900,6 +935,29 @@ function runUitest(d) {
       d.log(`UITEST accel-win ✗ ${err.stack || err}`);
     }
   }, 24200);
+  // ⑬ 任务列表 keyed diff 的运行锁(阶段 2 v0.7.14 · 修 C3)。
+  //    出口标准原文:"10+ 任务下滚动位置与折叠态在进度帧中不丢"。旧实现每 150ms 全量重建
+  //    (list.innerHTML=''),行节点被整批换掉 → scrollTop 归零、焦点蒸发。
+  //    本组用「节点身份」而非像素判据:把首行打上 JS 标记,跨若干进度帧后它必须还是同一个
+  //    DOM 对象 —— 这是 keyed diff 唯一无法伪造的证据(样式/文本怎么改都对,只有复用才活得过帧)。
+  uiStep(() => {
+    // 任务按 __origin 分槽(taskIdOf),故用互不相同的 origin 造出 11 条,列表必然溢出滚动
+    for (let i = 1; i <= 11; i++) {
+      d.showStatus({ mode: 'download', title: `压测任务 ${i}`, detail: '滚动与折叠态验证', pct: i * 5 + '%', size: i * 10 + ' MB', __origin: 'load' + i });
+    }
+  }, 38000, 'keydiff-prep');
+  uiStep(() => readDom(d.statusWin, '(()=>{const l=document.getElementById("tlist");const rows=[...l.querySelectorAll(".trow")];if(rows.length<10)return "FAIL 行数="+rows.length;window.__kd=rows[0];rows[0].__stamp="X";window.__kdName=rows[0].querySelector(".ltitle").textContent;l.scrollTop=l.scrollHeight-l.clientHeight;window.__kdTop=l.scrollTop;return (window.__kdTop>0?"PASS ":"FAIL 未溢出 ")+"行数="+rows.length+" 首行="+window.__kdName+" scrollTop="+window.__kdTop})()', 'keydiff-mark'), 38300);
+  // 造一条已完成任务 → 出现历史折叠头(同时验证新行插入不会打乱已有行的身份与滚动位置)
+  uiStep(() => { d.showStatusResult({ type: 'success', title: '压测完成项', detail: '历史折叠态验证', buttons: [{ id: 'ok', label: '好的' }], __origin: 'load-done' }, () => {}); }, 38500, 'keydiff-hist');
+  uiStep(() => readDom(d.statusWin, '(()=>{const h=document.querySelector("#tlist .hist");if(!h)return "FAIL 无折叠头";h.click();const w=document.getElementById("histWrap");return (h.getAttribute("aria-expanded")==="true"&&w&&w.style.display==="contents")?"PASS 已展开":"FAIL aria="+h.getAttribute("aria-expanded")+" wrap="+(w&&w.style.display)})()', 'keydiff-expand'), 38650);
+  // 三帧进度(同 origin upsert,行数不变)+ 一次新增任务(行数变化)混合施压
+  uiStep(() => {
+    d.showStatus({ mode: 'download', title: '压测任务 1', detail: '滚动与折叠态验证', pct: '77%', size: '110 MB', __origin: 'load1' });
+    d.showStatus({ mode: 'download', title: '压测任务 2', detail: '滚动与折叠态验证', pct: '42%', size: '220 MB', __origin: 'load2' });
+    d.showStatus({ mode: 'download', title: '压测任务 3', detail: '滚动与折叠态验证', pct: '19%', size: '330 MB', __origin: 'load3' });
+    d.showStatus({ mode: 'install', title: '压测新增任务', detail: '行数变化', spin: true, __origin: 'load-new' });
+  }, 38800, 'keydiff-frame');
+  uiStep(() => readDom(d.statusWin, '(()=>{const l=document.getElementById("tlist");const now=l.querySelector(".trow");const same=now===window.__kd;const stamped=!!(now&&now.__stamp==="X");const kept=l.scrollTop===window.__kdTop;const h=l.querySelector(".hist");const w=document.getElementById("histWrap");const folded=h?h.getAttribute("aria-expanded")==="true":false;const shown=!!w&&w.style.display==="contents";const ok=same&&stamped&&kept&&folded&&shown;return (ok?"PASS ":"FAIL ")+"节点复用="+same+" 标记存活="+stamped+" scrollTop="+l.scrollTop+"/"+window.__kdTop+" 折叠仍展开="+folded+" 折叠区可见="+shown+" 首行仍是="+(now&&now.querySelector(".ltitle").textContent)})()', 'keydiff-verify'), 39100);
   setTimeout(() => {
     // 清理 UITEST 写入 userData 的假 npm 脚本
     for (const f of ['fake-npm-ok.js', 'fake-npm-hang.js']) {
@@ -925,7 +983,7 @@ function runUitest(d) {
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');
     d.app.quit();
-  }, 35600);
+  }, 40600); // 推迟到 keydiff 组之后(该组要 11 条任务 + 展开历史)
 }
 
 module.exports = { runSmokeDemo, runUitest };

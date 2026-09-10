@@ -136,6 +136,18 @@
   let listMode = false;
   let histOpen = false;
   let lastViewKey = ''; // 上帧视图键(result/act/list):仅视图切换帧聚焦安全控件,进度帧不打扰焦点
+  // 列表行的 roving tabindex 宿主(阶段 2 X4):让整份列表在 Tab 序里只占一格。
+  // Enter 不在这里接管——焦点本就在行内控件上,原生 button 自己完成"主操作";
+  // 本层只补两件浏览器不给的事:↑↓/Home/End 的行间移动,以及 Delete 的行级取消/关闭。
+  const nav = K.listNav(document.getElementById('tlist'), {
+    rowSelector: '.trow',
+    onDelete: (row) => {
+      const id = row.dataset.taskId;
+      if (!id) return false;
+      if (row.classList.contains('done')) S.dismiss(id); else S.cancelOne(id);
+      return true;
+    },
+  });
 
   /* -------- 共享语义构件:实现已上移至 ui-kit.js --------
      进度条/按钮行/结果圆标/聚焦主按钮原先是"9 个页面各写一份"中的一份,现统一走 L3 构件;
@@ -198,90 +210,205 @@
     document.getElementById('size').textContent = p.size || '';
   }
 
-  /* -------- 多任务列表(任务中心) -------- */
-  function taskRow(t) {
+  /* -------- 多任务列表(任务中心) --------
+     阶段 2(C3 + X4):行的骨架只建一次,此后每帧只改变化了的字段(keyed diff,见 ui-kit.keyedList),
+     行内控件退出 Tab 序、由 listNav 的 roving tabindex 接管(↑↓/Home/End + Enter/Delete)。
+     这两件事必须同批落地:全量重建会把行节点整个换掉,任何在此之上的焦点管理都会被冲掉。 */
+  function fmtPct(t, has) {
+    return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? T('status.wait') : ''));
+  }
+  // 只在值真的变了才写 DOM:进度帧 150ms 一次,无脑赋值会每帧重建文本节点
+  function setText(node, v) {
+    const s = v == null ? '' : String(v);
+    if (node && node.textContent !== s) node.textContent = s;
+  }
+  function fillButtons(container, t, cls) {
+    container.className = cls;
+    return K.buttonRow(container, t.buttons || [], (b) => S.action(t.id, b.id));
+  }
+
+  // 行骨架:一次建好 .lico/.lbody/.ltitle/.lx 四个稳定件,其余(详情/进度条/按钮行)按形态增删
+  function buildRow(t) {
     const row = document.createElement('div');
-    row.className = 'trow' + (t.done ? ' done' : '');
-    row.dataset.taskId = t.id;
     row.setAttribute('role', 'listitem');
+    row.dataset.taskId = t.id;
     const ico = document.createElement('span');
-    ico.className = 'lico' + (t.done ? ' ' + (t.type || 'info') : '');
+    ico.className = 'lico';
     ico.setAttribute('aria-hidden', 'true');
-    ico.innerHTML = t.done ? (RES[t.type || 'info'] || RES.info) : (ACT[t.mode] || ACT.check);
     const body = document.createElement('div');
     body.className = 'lbody';
     const title = document.createElement('div');
     title.className = 'ltitle';
-    title.textContent = t.title || '';
     body.appendChild(title);
-    if (t.detail) {
-      const det = document.createElement('div');
-      det.className = 'ldetail';
-      det.textContent = t.detail;
-      body.appendChild(det);
+    const x = document.createElement('button');
+    x.className = 'lx';
+    x.tabIndex = -1; // 退出 Tab 序:整个列表在 Tab 里只占一格(K.listNav 会把其中一个提升为 0)
+    // Delete 是本行的取消/关闭加速键:并进 aria-keyshortcuts 让读屏器可程序化发现(X4-4)
+    x.setAttribute('aria-keyshortcuts', 'Delete');
+    x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    // 语义从行本身读,不从建行时的 t 闭包读:节点会被 keyed diff 复用到另一个任务上
+    x.addEventListener('click', () => {
+      const id = row.dataset.taskId;
+      if (row.classList.contains('done')) S.dismiss(id); else S.cancelOne(id);
+    });
+    row.append(ico, body, x);
+    row._st = {};
+    return row;
+  }
+
+  // 主体下半段(进行中:进度条 + pct/size;已完成:结果按钮行)。只在形态真的变了时重建
+  function rebuildFoot(row, t) {
+    const body = row.querySelector('.lbody');
+    for (const sel of ['.bar', '.meta', '.lbtns']) {
+      const old = body.querySelector(sel);
+      if (old) old.remove();
     }
     if (!t.done) {
-      // 进行中:进度条 + pct/size(与单视图同一套 ui-kit 共享构件)
       body.appendChild(K.progressBar(t, t.title || T('status.progress')));
       const meta = document.createElement('div');
       meta.className = 'meta';
-      const pct = document.createElement('span');
-      pct.textContent = fmtPct(t, typeof t.progress === 'number');
-      const size = document.createElement('span');
-      size.textContent = t.size || '';
-      meta.append(pct, size);
+      meta.append(document.createElement('span'), document.createElement('span'));
       body.appendChild(meta);
-    } else if ((t.buttons || []).length) {
-      body.appendChild(fillButtons(document.createElement('div'), t, 'lbtns'));
+      return;
     }
-    const x = document.createElement('button');
-    x.className = 'lx';
-    x.title = t.done ? T('status.closeRow') : T('status.cancelRow');
-    x.setAttribute('aria-label', (t.done ? T('status.closeRow') : T('status.cancelRow')) + (t.title || ''));
-    x.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
-    x.addEventListener('click', () => (t.done ? S.dismiss(t.id) : S.cancelOne(t.id)));
-    row.append(ico, body, x);
-    return row;
+    if ((t.buttons || []).length) {
+      const box = K.buttonRow(document.createElement('div'), t.buttons || [], (b) => S.action(row.dataset.taskId, b.id), { cls: 'lbtns' });
+      // 行内按钮同样退出 Tab 序(与 .lx 一致):否则 Tab 又要逐行逐个穿行,roving 形同虚设
+      box.querySelectorAll('button').forEach((b) => { b.tabIndex = -1; });
+      body.appendChild(box);
+    }
+  }
+  // 形态键:完成态 + 按钮集合的指纹。指纹变了才重建,否则进度帧会每帧重造按钮行
+  function footKey(t) {
+    if (!t.done) return 'active';
+    return 'done:' + (t.buttons || []).map((b) => (b.id || '') + '|' + (b.label || '')).join(',');
+  }
+
+  function updateRow(row, t) {
+    const st = row._st;
+    const cls = 'trow' + (t.done ? ' done' : '');
+    if (row.className !== cls) row.className = cls;
+    const ico = row.querySelector('.lico');
+    const icoCls = 'lico' + (t.done ? ' ' + (t.type || 'info') : '');
+    if (ico.className !== icoCls) ico.className = icoCls;
+    const svg = t.done ? (RES[t.type || 'info'] || RES.info) : (ACT[t.mode] || ACT.check);
+    if (st.svg !== svg) { ico.innerHTML = svg; st.svg = svg; }
+    setText(row.querySelector('.ltitle'), t.title || '');
+    // 详情行:有则改文本,无则移除(不留空节点,行高契约按内容算)
+    const detail = t.detail || '';
+    if (st.detail !== detail) {
+      st.detail = detail;
+      let d = row.querySelector('.ldetail');
+      if (!detail) { if (d) d.remove(); }
+      else {
+        if (!d) {
+          d = document.createElement('div');
+          d.className = 'ldetail';
+          const title = row.querySelector('.ltitle');
+          title.parentNode.insertBefore(d, title.nextSibling);
+        }
+        d.textContent = detail;
+      }
+    }
+    const fk = footKey(t);
+    if (st.foot !== fk) { st.foot = fk; st.shape = ''; rebuildFoot(row, t); }
+    if (!t.done) {
+      const has = typeof t.progress === 'number';
+      const fill = row.querySelector('.fill');
+      if (fill) {
+        const fillCls = 'fill' + (has ? '' : ' indet');
+        if (fill.className !== fillCls) fill.className = fillCls;
+        if (has) {
+          const pct = Math.max(0, Math.min(100, t.progress));
+          const w = pct + '%';
+          if (fill.style.width !== w) fill.style.width = w;
+          const v = String(Math.round(pct));
+          const bar = fill.parentNode;
+          if (bar.getAttribute('aria-valuenow') !== v) bar.setAttribute('aria-valuenow', v);
+        } else {
+          const bar = fill.parentNode;
+          if (bar.hasAttribute('aria-valuenow')) bar.removeAttribute('aria-valuenow');
+        }
+      }
+      const meta = row.querySelector('.meta');
+      if (meta) {
+        setText(meta.children[0], fmtPct(t, has));
+        setText(meta.children[1], t.size || '');
+      }
+    }
+    // ✕ 语义随完成态原地切换(节点被复用到另一个任务上时必须重算)
+    const xl = t.done ? T('status.closeRow') : T('status.cancelRow');
+    if (st.xl !== xl) {
+      st.xl = xl;
+      const x = row.querySelector('.lx');
+      x.title = xl;
+      x.setAttribute('aria-label', xl + (t.title || ''));
+    }
+  }
+
+  // 列表的期望子节点序列。完成项**恒**住在 #histWrap 里(而不是"没有进行中任务时直接挂列表"):
+  // 否则最后一个进行中任务完成的那一帧,该行要从列表搬进折叠区,节点身份断掉、焦点跟着丢。
+  function listSpecs(tasks) {
+    const act = tasks.filter((t) => !t.done);
+    const done = tasks.filter((t) => t.done);
+    const specs = act.map((t) => ({ k: 't:' + t.id, kind: 'row', t }));
+    if (done.length) {
+      if (act.length) specs.push({ k: 'hist', kind: 'hist', n: done.length });
+      specs.push({ k: 'w', kind: 'wrap', tasks: done, expanded: !act.length || histOpen });
+    }
+    return specs;
   }
 
   function renderList(tasks) {
     cur = null;
     const act = tasks.filter((t) => !t.done);
-    const done = tasks.filter((t) => t.done);
     document.getElementById('activity').style.display = 'none';
     document.getElementById('activity').setAttribute('aria-busy', 'false');
     document.getElementById('result').style.display = 'none';
     const list = document.getElementById('tlist');
     list.style.display = 'flex';
-    list.innerHTML = '';
     document.getElementById('ico').innerHTML = ACT.check;
-    document.getElementById('title').textContent = act.length ? T('status.titleActive', { n: act.length }) : T('status.title');
+    setText(document.getElementById('title'), act.length ? T('status.titleActive', { n: act.length }) : T('status.title'));
     document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
     document.getElementById('xBtn').title = T('status.closeAll');
     document.getElementById('xBtn').setAttribute('aria-label', T('status.closeAll'));
-    // 进行中任务置顶;完成项有进行中任务时折叠进历史
-    act.forEach((t) => list.appendChild(taskRow(t)));
-    if (done.length && act.length) {
-      const h = document.createElement('button');
-      h.className = 'hist' + (histOpen ? ' open' : '');
-      h.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
-      h.setAttribute('aria-controls', 'histWrap');
-      // 折叠三角用 SVG(原文本 ▶ 字形随字体渲染漂移):aria-expanded 语义不变
-      h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span>' + T('status.done', { n: done.length }) + '</span>';
-      h.addEventListener('click', () => { histOpen = !histOpen; h.classList.toggle('open', histOpen); h.setAttribute('aria-expanded', histOpen ? 'true' : 'false'); toggleHist(); });
-      list.appendChild(h);
+    K.keyedList(list, listSpecs(tasks), (spec) => {
+      if (spec.kind === 'row') return buildRow(spec.t);
+      if (spec.kind === 'hist') {
+        const h = document.createElement('button');
+        h.className = 'hist';
+        h.setAttribute('aria-controls', 'histWrap');
+        // 折叠三角用 SVG(原文本 ▶ 字形随字体渲染漂移):aria-expanded 语义不变
+        h.innerHTML = '<svg class="tri" viewBox="0 0 8 8" aria-hidden="true"><path d="M2 1l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><span></span>';
+        h.addEventListener('click', () => setHist(!histOpen));
+        return h;
+      }
       const wrap = document.createElement('div');
       wrap.id = 'histWrap';
-      wrap.style.display = histOpen ? 'contents' : 'none';
-      done.forEach((t) => wrap.appendChild(taskRow(t)));
-      list.appendChild(wrap);
-    } else {
-      done.forEach((t) => list.appendChild(taskRow(t)));
-    }
+      return wrap;
+    }, (node, spec) => {
+      if (spec.kind === 'row') return updateRow(node, spec.t);
+      if (spec.kind === 'hist') {
+        node.classList.toggle('open', histOpen);
+        node.setAttribute('aria-expanded', histOpen ? 'true' : 'false');
+        setText(node.querySelector('span'), T('status.done', { n: spec.n }));
+        return;
+      }
+      node.style.display = spec.expanded ? 'contents' : 'none';
+      // 嵌套一层 keyed diff:完成行的进度/文本同样只改变化了的字段
+      K.keyedList(node, spec.tasks.map((t) => ({ k: 't:' + t.id, kind: 'row', t })),
+        (s) => buildRow(s.t), (n, s) => updateRow(n, s.t));
+      return;
+    });
+    nav.sync(); // 行序每次都会变:重算 roving 的 tabindex 落点(焦点位置从 activeElement 恢复)
   }
-  function toggleHist() {
+  function setHist(open) {
+    histOpen = open;
     const w = document.getElementById('histWrap');
-    if (w) w.style.display = histOpen ? 'contents' : 'none';
+    if (w) w.style.display = open ? 'contents' : 'none';
+    const h = document.querySelector('#tlist .hist');
+    if (h) { h.classList.toggle('open', open); h.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+    nav.sync(); // 折叠/展开改变了可见行集合
   }
 
   function renderTasks(tasks) {
