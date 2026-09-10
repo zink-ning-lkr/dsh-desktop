@@ -15,8 +15,11 @@
   /* 头部走 ui.css 公共 .win-head(拖拽区 + 图标槽 + 标题规格),
      替代原本地 .head:横向内距与 .foot 同为 16px,标题 14/1.4 与其余窗口同一规格 */
   .win-head { --head-pad: 12px var(--sp-4); }
-  .hero { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: var(--sp-4); padding: var(--sp-2) calc(var(--sp-5) * 2); text-align: center; }
+  /* .hero 仍是 flex:1(窗口被下限撑高时保持垂直居中);内容高度由主进程量 .hero-in 得到
+     (阶段 3 S2:窗口尺寸改内容自适应,量被拉伸的外层会得到窗口高度而非内容高度) */
+  .hero { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    padding: var(--sp-2) calc(var(--sp-5) * 2); text-align: center; }
+  .hero-in { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
   .hero img { width: 72px; height: 72px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--c-brand) 30%, transparent)); }
   .hero h1 { margin: 0; font-size: var(--fs-display); font-weight: 600; line-height: var(--lh-display); color: var(--c-fg0); }
   .hero .sub { font-size: var(--fs-body); color: var(--c-fg1); line-height: var(--lh-body); }
@@ -40,9 +43,11 @@
     <span class="t">DSH Desktop</span>
   </div>
   <div class="hero">
-    <img src="assets/whale-white.png" alt="DSH" data-logo>
-    <h1 id="h1"></h1>
-    <p class="sub" id="sub"></p>
+    <div class="hero-in">
+      <img src="assets/whale-white.png" alt="DSH" data-logo>
+      <h1 id="h1"></h1>
+      <p class="sub" id="sub"></p>
+    </div>
   </div>
   <div class="act">
     <button class="btn primary" id="wlChoose" type="button"></button>
@@ -73,6 +78,9 @@
   document.getElementById('wlQuit').addEventListener('click', () => W.quit());
   // Esc = 退出(与 Alt+F4/取消语义一致);Enter 在焦点按钮上直接激活
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') W.quit(); });
+  // 布局稳定后回报一次,由主进程按真实内容高度回填窗口(阶段 3 S2)。
+  // 只在本页主动 ping:不在 resize 上回报 —— setContentSize 会触发 resize,挂上去就是自激循环
+  W.rendered();
 </script>
 </body>
 </html>

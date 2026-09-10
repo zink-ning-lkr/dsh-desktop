@@ -407,6 +407,38 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST list ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
   }, 2604, 'list-static');
+  // ⓤ 辅助窗尺寸策略静态契约(阶段 3 v0.8.0 · S2:撤 566/560 固定档)。
+  //    「窗口高度 = 内容高度」靠三件事同批成立,缺任何一件都不会报错、只会静默退回固定档:
+  //    ① 页面在布局稳定后 ping 一次 —— 不 ping,窗口永远停在首帧估算值;
+  //    ② 主进程有对应 handler 且做了来源校验 —— 不校验,任何窗口都能改别的窗口尺寸;
+  //    ③ handler 的 max 走统一的 maxContentHeight() —— 各写一份 clamp 时,副屏更矮就会超高。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const welcome = read('welcome.html');
+    const accel = read('accel.html');
+    const wPre = read('welcome-preload.js');
+    const aPre = read('accel-preload.js');
+    t('size-max-helper', /function maxContentHeight\(ref\)/.test(main) && /return maxContentHeight\(mainWindow\);/.test(main));
+    t('size-welcome-ping', /W\.rendered\(\);/.test(welcome) && /rendered: \(\) => ipcRenderer\.send\('wl:rendered'\)/.test(wPre));
+    t('size-accel-ping', /function reportH\(\)/.test(accel) && /reportH\(\);/.test(accel) && /rendered: \(\) => ipcRenderer\.send\('acc:rendered'\)/.test(aPre));
+    t('size-welcome-handler', /ipcMain\.on\('wl:rendered'/.test(main) && /fitWindowToContent\(welcomeWin, WELCOME_H_EXPR/.test(main));
+    t('size-accel-handler', /ipcMain\.on\('acc:rendered'/.test(main) && /fitWindowToContent\(accelWin, ACCEL_H_EXPR/.test(main));
+    t('size-handler-trusted', /!trustedEvent\(e\) \|\| !welcomeWin \|\| e\.sender !== welcomeWin\.webContents/.test(main)
+      && /!trustedEvent\(e\) \|\| !accelWin \|\| e\.sender !== accelWin\.webContents/.test(main));
+    t('size-handler-max', /max: maxContentHeight\(welcomeWin\)/.test(main) && /max: maxContentHeight\(accelWin\)/.test(main));
+    t('size-min-floor', /const WELCOME_MIN_H = 360;/.test(main) && /const ACCEL_MIN_H = 320;/.test(main));
+    // 欢迎页必须量内层 .hero-in:量被 flex:1 拉伸的 .hero 会得到窗口高度,回填就成了自我确认
+    t('size-welcome-inner', /class="hero-in"/.test(welcome) && /q\("\.hero-in"\)/.test(main) && /\.hero-in \{ display: flex/.test(welcome));
+    // 设置窗量可滚动区的 scrollHeight:被 max 夹住时它仍等于自然内容高
+    t('size-accel-scroll', /q\("\.content"\)\.scrollHeight/.test(main) && /\.content \{[^}]*overflow-y: auto/.test(accel));
+    // 页面不得在 resize 上回报:setContentSize 自己会触发 resize,挂上去就是自激循环
+    t('size-no-resize-loop', !/addEventListener\('resize'[^\n]*rendered/.test(welcome) && !/addEventListener\('resize'[^\n]*rendered/.test(accel));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST sizing ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2605, 'sizing-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
@@ -852,6 +884,21 @@ function runUitest(d) {
   // WEL-2 验证项:欢迎页首帧焦点应落在「选择工作目录」(脚本解析期 focus() 在 show() 前执行,
   // 隐藏窗口期可能不生效);若此断言持续 FAIL,需在主进程 show() 后补发聚焦
   uiStep(() => readDom(d.welcomeWin, '(()=>{const ae=document.activeElement;return (ae&&ae.id==="wlChoose")?"PASS focus=选择按钮":"FAIL ae="+((ae&&ae.id)||ae.tagName)})()', 'welcome-focus'), 33800);
+  // 尺寸自适应运行锁(阶段 3 S2,与 sizing-static 的静态断言成对):
+  // 窗口高度必须**等于**渲染层量出来的内容高度(±8,与 fitWindowToContent 的 tolerance 同口径),
+  // 且落在 [360, 工作区−120]。只用 getContentSize 断言会漏掉"回填到了错的值"这种情况。
+  uiStep(() => {
+    const w = d.welcomeWin;
+    if (!w || w.isDestroyed()) { d.log('UITEST welcome-size FAIL 窗口不存在'); return; }
+    const winH = w.getContentSize()[1];
+    const maxH = d.screen.getDisplayMatching(w.getBounds()).workArea.height - 120;
+    w.webContents.executeJavaScript('(()=>{const q=(s)=>document.querySelector(s);const cs=getComputedStyle(q(".hero"));const pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);return Math.ceil(q(".win-head").getBoundingClientRect().height+q(".hero-in").getBoundingClientRect().height+pad+q(".act").getBoundingClientRect().height+q(".foot").getBoundingClientRect().height)})()')
+      .then((contentH) => {
+        const ok = Math.abs(winH - contentH) <= 8 && winH >= 360 && winH <= maxH;
+        d.log(`UITEST welcome-size win=${winH} content=${contentH} max=${maxH} → ${ok ? 'PASS' : 'FAIL'}`);
+      })
+      .catch((e) => d.log(`UITEST welcome-size FAIL ${e.message}`));
+  }, 33850, 'welcome-size');
   uiStep(() => { d.abortWelcome(); }, 33900, 'welcome-abort');
   uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 34100, 'welcome-closed-verify');
   // ⑭ 快捷键速查(P2-2):菜单「键盘快捷键…」→ 速查对话框,内容与菜单 accel 同源(shortcuts.js)
@@ -923,6 +970,12 @@ function runUitest(d) {
       const bad = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "not-a-url")');
       const aCls = await d.accelWin.webContents.executeJavaScript('document.querySelector(".win").classList.contains("mica")');
       d.log(`UITEST accel-mica cls=${aCls} want=${d.isWin11()} → ${aCls === d.isWin11() ? 'PASS' : 'FAIL'}`);
+      // 尺寸自适应运行锁(阶段 3 S2):原 566 固定档已撤,窗口高度须等于 .content 的自然内容高
+      const winH = d.accelWin.getContentSize()[1];
+      const contentH = await d.accelWin.webContents.executeJavaScript('(()=>{const q=(s)=>document.querySelector(s);return Math.ceil(q(".win-head").getBoundingClientRect().height+q(".content").scrollHeight+q(".foot").getBoundingClientRect().height)})()');
+      const maxH = d.screen.getDisplayMatching(d.accelWin.getBounds()).workArea.height - 120;
+      const sizeOk = Math.abs(winH - contentH) <= 8 && winH >= 320 && winH <= maxH;
+      d.log(`UITEST accel-size win=${winH} content=${contentH} max=${maxH} → ${sizeOk ? 'PASS' : 'FAIL'}`);
       const s3 = await d.accelWin.webContents.executeJavaScript('window.__accel.set("mirror", "")');
       const cfg3 = d.loadConfig().downloadMirror; // delete 后应为 undefined
       const ok = before.segments === 6 && before.downloadMirror === '' && uiSeg === '6'

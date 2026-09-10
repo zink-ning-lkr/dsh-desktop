@@ -152,6 +152,10 @@
   }
   let cur = null;
 
+  // 内容高度回报(阶段 3 S2):窗口尺寸不再是固定档,凡可能改高度的写入都回报一次。
+  // rAF 让本轮样式改动先落地,避免量到改前的布局
+  function reportH() { requestAnimationFrame(() => A.rendered()); }
+
   function toast(msg, ok) {
     // 就地反馈走共享构件(.inline-feedback + 统一 2200ms)。
     // 原实现在本页自维护一个反馈计时器与 2600ms 时长,与 report 的 1800ms 并存——
@@ -174,6 +178,8 @@
     document.getElementById('cfgPath').textContent = p.cfgPath || 'config.json';
     // 下载进行中打开设置窗:提示新设置只对下次下载生效,避免误以为能加速当前下载
     document.getElementById('dlNote').style.display = p.downloadActive ? '' : 'none';
+    // dlNote 的显隐、cfgPath 文本长度都会改内容高度,故每次 apply 后都回报
+    reportH();
   }
 
   // 滑杆:拖动实时预览数值,松手保存;读屏经 aria-valuetext 播报「N 段」(值本身只是裸数字)
@@ -198,13 +204,14 @@
     } else {
       // 错误只在字段级就地呈现(ACC-2,配合 aria-live 播报);底部 toast 只报成功/状态
       mirrorErr.textContent = r.error;
+      reportH(); // 校验文案可能折行成两行 → 窗口要跟着长,别把按钮挤出可视区
     }
   }
   document.getElementById('mirrorSave').addEventListener('click', saveMirror);
   document.getElementById('mirrorClear').addEventListener('click', async () => {
     const r = await A.set('mirror', '');
     if (r.ok) { mirror.value = ''; mirrorErr.textContent = ''; toast(T('accel.toastReset'), true); }
-    else mirrorErr.textContent = r.error; // 清除失败(写入被拒)同样就地呈现,不再静默
+    else { mirrorErr.textContent = r.error; reportH(); } // 清除失败(写入被拒)同样就地呈现,不再静默
   });
   mirror.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveMirror(); });
 
@@ -221,7 +228,7 @@
     const typed = mirror.value.trim();
     if (typed !== saved) {
       const r = await A.set('mirror', typed);
-      if (!r.ok) { mirrorErr.textContent = r.error; mirror.focus(); return; }
+      if (!r.ok) { mirrorErr.textContent = r.error; reportH(); mirror.focus(); return; }
     }
     A.close();
   }
@@ -230,6 +237,8 @@
 
   A.onShow(apply);
   A.get().then((p) => { if (p) { apply(p); segN.textContent = p.segments; } }).catch(() => {}); // 异常时不改表单,保持默认值
+  // 兜底回报:即使 A.get() 失败(上面 catch 里不 apply),窗口也至少要按默认表单回填一次高度
+  reportH();
 </script>
 </body>
 </html>

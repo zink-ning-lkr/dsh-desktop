@@ -1080,7 +1080,6 @@ ipcMain.on('st:cancel-all', (e) => {
 });
 
 // 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
-// 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
 // 单任务固定档(活动 186 / 结果 250)保持旧尺寸不动(UITEST 锁定)——渲染层只在列表模式下回报
 ipcMain.on('st:rendered', (e) => {
   if (!trustedEvent(e) || !statusWin || e.sender !== statusWin.webContents) return;
@@ -1155,10 +1154,17 @@ function dialogHeightFor(o, width) {
   return Math.min(Math.max(200, h), dialogMaxHeight());
 }
 
-// 对话框高度上限按主窗口所在显示器的工作区(而不是主显示器):副屏更矮时对话框不会超高
-function dialogMaxHeight() {
-  const d = mainWindow ? screen.getDisplayMatching(mainWindow.getBounds()) : screen.getPrimaryDisplay();
+// 内容高度上限:按**参考窗口自己所在显示器**的工作区留 120px 呼吸(副屏更矮时不会超高)。
+// ref 为空(窗口未建/已销毁)时回退主窗所在屏,再回退主显示器。
+// 阶段 3 起这是全部辅助窗的同一口径:对话框、欢迎页、设置窗都走它,不再各写一份 clamp。
+function maxContentHeight(ref) {
+  const target = ref && !ref.isDestroyed() ? ref : (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null);
+  const d = target ? screen.getDisplayMatching(target.getBounds()) : screen.getPrimaryDisplay();
   return Math.max(240, d.workArea.height - 120);
+}
+// 对话框高度上限(旧名保留:调用点沿用「对话框口径 = 按主窗所在屏」的语义)
+function dialogMaxHeight() {
+  return maxContentHeight(mainWindow);
 }
 
 // 实测式窗口高度校准(P1-1):估算值(dialogHeightFor / statusHeight)只做首帧,
@@ -1177,6 +1183,41 @@ function fitWindowToContent(win, expr, { min = 0, max = Infinity, tolerance = 8,
     if (recenter) centerOn(win, mainWindow);
   }).catch(() => {});
 }
+
+// 辅助窗「内容自适应」的两条测量式(阶段 3 · S2):主进程注入页面求值,渲染层只负责在
+// 布局稳定后 ping 一下。测量式放在主进程的理由与 dl:/st:rendered 一致 —— 它和窗口尺寸的
+// clamp 逻辑同处一个文件,改尺寸策略时不会漏掉页面里的第 N 份实现。
+//
+// 欢迎页:hero 仍是 flex:1(窗口被 min 撑高时保持垂直居中),所以要量它的**内层** .hero-in,
+//   而不是 hero 自己 —— 被拉伸后的 rect 高度反映的是窗口高度而非内容高度。
+// 设置窗:`> .content` 是可滚动区,scrollHeight 就是自然内容高度(被 max 夹住时依然准确);
+//   它本身就是「内容超上限就滚动」的落点,不需要额外包一层。
+const WELCOME_H_EXPR = '(()=>{const q=(s)=>document.querySelector(s);'
+  + 'const cs=getComputedStyle(q(".hero"));const pad=parseFloat(cs.paddingTop)+parseFloat(cs.paddingBottom);'
+  + 'return Math.ceil(q(".win-head").getBoundingClientRect().height'
+  + '+q(".hero-in").getBoundingClientRect().height+pad'
+  + '+q(".act").getBoundingClientRect().height'
+  + '+q(".foot").getBoundingClientRect().height)})()';
+const ACCEL_H_EXPR = '(()=>{const q=(s)=>document.querySelector(s);'
+  + 'return Math.ceil(q(".win-head").getBoundingClientRect().height'
+  + '+q(".content").scrollHeight'
+  + '+q(".foot").getBoundingClientRect().height)})()';
+// 下限:窗口被内容压到过矮会显得像残骸(截断感),给一个仍明显小于原固定档的地板
+const WELCOME_MIN_H = 360;
+const ACCEL_MIN_H = 320;
+
+// 首启欢迎窗:窗口先于主窗创建,故 centerOn 走「主显示器工作区居中」分支
+ipcMain.on('wl:rendered', (e) => {
+  if (!trustedEvent(e) || !welcomeWin || e.sender !== welcomeWin.webContents) return;
+  fitWindowToContent(welcomeWin, WELCOME_H_EXPR,
+    { min: WELCOME_MIN_H, max: maxContentHeight(welcomeWin), recenter: true });
+});
+// 设置窗(原加速设置窗)
+ipcMain.on('acc:rendered', (e) => {
+  if (!trustedEvent(e) || !accelWin || e.sender !== accelWin.webContents) return;
+  fitWindowToContent(accelWin, ACCEL_H_EXPR,
+    { min: ACCEL_MIN_H, max: maxContentHeight(accelWin), recenter: true });
+});
 
 // 解除对话框模态(阶段 0 修复 X3 的配套兜底)。
 // 对话框窗口是「隐藏复用」而非一次性销毁(P2-1 队列化的刻意设计),而 modal 子窗在平台上
@@ -1324,7 +1365,10 @@ function showAccelSettings() {
   cancelAccelRecycle(); // 正在使用:取消闲置回收
   if (!accelWin) {
     accelWin = new BrowserWindow({
-      width: 520, height: 566, useContentSize: true, // 内容 470px 在 11px 标签后零余量:+10px 恢复呼吸空间(第四轮 X4-5)
+      // 首帧估算(阶段 3 S2:固定档已撤)。窗口展示后由 acc:rendered 按真实内容高度回填,
+      // 内容变高(下载中提示显形/镜像校验文案折行)时窗口跟着长;上限见 maxContentHeight()。
+      // 566 的来历:内容 470px + 11px 标签后零余量 + 10px 呼吸(第四轮 X4-5)——仅作估算沿用
+      width: 520, height: 566, useContentSize: true,
       frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
       // Win11 Mica(P2-3 铺开,v0.6.1):与 reportWin 同档系统材质
       backgroundMaterial: isWin11() ? 'mica' : undefined,
@@ -2426,6 +2470,8 @@ function showWelcome() {
     ipcMain.on('wl:choose', onChoose);
     ipcMain.on('wl:quit', onQuit);
     welcomeWin = new BrowserWindow({
+      // 首帧估算(阶段 3 S2:原 480×560 固定档已撤)。加载完成后由 wl:rendered 回填真实
+      // 内容高度——首启页文案随语言/字号变化,固定档在 125%/150% 缩放下会出现裁切或大留白
       width: 480, height: 560, useContentSize: true,
       frame: false, resizable: false, show: false,
       backgroundColor: chromeBgColor(),

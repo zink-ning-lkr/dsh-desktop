@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('__accel', {
   // 复制文本到剪贴板(主进程 clipboard,file:// 页面不可用 navigator.clipboard)
   copy: (text) => ipcRenderer.send('acc:copy', String(text || '')),
   close: () => ipcRenderer.send('acc:close'),
+  // 布局稳定后回报一次(阶段 3 S2):主进程据此把窗口高度回填成真实内容高度
+  // (含「下载进行中」提示显形、校验文案折行等会让内容长高的情形)
+  rendered: () => ipcRenderer.send('acc:rendered'),
 });
 
 // 文案表同步拉取(渲染层 i18n,X-2 第二批):sandbox 读不了 fs,经主进程一次性下发静态快照
