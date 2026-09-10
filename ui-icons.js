@@ -2,8 +2,9 @@
    用法:<script src="ui-icons.js"></script> 置于页面自身脚本之前(CSP script-src 'self' 已允许),
    经 window.UI_ICONS 访问:UI_ICONS.result.info / UI_ICONS.activity.download / UI_ICONS.menu['open-workspace']。
    域:result / activity(结果与活动态,viewBox 24)· menu(菜单条目,viewBox 16、固定 15×15)
-      · cmdbar(命令栏状态簇,viewBox 16、固定 15×15)· toast(通知条目,viewBox 16、固定 15×15)。
-   描边规范:result/activity 族 viewBox 24(线性图标);menu/cmdbar/toast 族 viewBox 16、固定 15×15。
+      · cmdbar(命令栏状态簇,viewBox 16、固定 15×15)· toast(通知条目,viewBox 16、固定 15×15)
+      · palette(命令面板,viewBox 16、固定 13×13)。
+   描边规范:result/activity 族 viewBox 24(线性图标);menu/cmdbar/toast/palette 族 viewBox 16。
    原三份逐字符重复的定义(status RES / dialog ICONS / menu ICONS)已收编至此,改图标只改这一处。 */
 (function () {
   const result = {
@@ -60,5 +61,10 @@
     err: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M5.9 5.9l4.2 4.2M10.1 5.9L5.9 10.1" stroke-linecap="round"/></svg>',
     close: '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
   };
-  window.UI_ICONS = { result, activity, menu, cmdbar, toast };
+  // 命令面板(阶段 2):search 同时供 titlebar.html 的命令入口胶囊按钮与 palette.html 的输入行使用,
+  // 二者是同一个语义("搜索或跳转"),放两处会各自漂移成两种放大镜。
+  const palette = {
+    search: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14" stroke-linecap="round"/></svg>',
+  };
+  window.UI_ICONS = { result, activity, menu, cmdbar, toast, palette };
 })();

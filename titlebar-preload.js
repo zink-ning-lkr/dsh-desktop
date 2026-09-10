@@ -2,7 +2,14 @@
 // 标题栏/把手页面与主进程之间的桥:仅暴露窗口控制与菜单事件,不开放其他能力。
 const { contextBridge, ipcRenderer } = require('electron');
 
+// 命令面板的快捷键显示名(阶段 2):sandbox 里读不到 process.platform,故由主进程按
+// shortcuts.display() 的同一规则算好下发(Windows=Ctrl+K / macOS=Cmd+K)。
+// 面板本身不注册 accelerator(见 main.js bindPaletteKey),这里只是给徽标取正确的前缀写法
+let paletteKbd = '';
+try { paletteKbd = ipcRenderer.sendSync('sc:display', 'CmdOrCtrl+K') || ''; } catch { /* 回退空串 */ }
+
 contextBridge.exposeInMainWorld('__titlebar', {
+  paletteKbd, // 静态字符串(非方法):页面加载时即已确定,无需再订阅事件
   minimize: () => ipcRenderer.send('tb:min'),
   toggleMaximize: () => ipcRenderer.send('tb:max'),
   close: () => ipcRenderer.send('tb:close'),
@@ -14,6 +21,7 @@ contextBridge.exposeInMainWorld('__titlebar', {
   checkUpdate: () => ipcRenderer.send('tb:update'),
   cycleTheme: () => ipcRenderer.send('tb:cycle-theme'),
   copyWorkspace: () => ipcRenderer.send('tb:copy-ws'),
+  openPalette: () => ipcRenderer.send('tb:palette'), // 中段命令入口(阶段 2)
   onTheme: (cb) => ipcRenderer.on('tb:theme', (_e, v) => cb(v)),
   onMaximized: (cb) => ipcRenderer.on('tb:maximized', (_e, v) => cb(v)),
   onWorkspace: (cb) => ipcRenderer.on('tb:workspace', (_e, v) => cb(v)),

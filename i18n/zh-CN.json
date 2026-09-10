@@ -104,6 +104,17 @@
     "copyWs": "复制工作目录路径",
     "wsCopied": "已复制工作目录路径"
   },
+  "palette": {
+    "region": "命令面板",
+    "results": "命令结果",
+    "placeholder": "输入命令或搜索…",
+    "empty": "没有匹配的命令",
+    "open": "搜索或跳转…",
+    "hint": "↑↓ 选择 · Enter 执行 · Esc 关闭",
+    "recent": "常用",
+    "on": "已开启",
+    "off": "已关闭"
+  },
   "toast": {
     "region": "通知",
     "dismiss": "关闭通知",

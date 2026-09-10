@@ -135,7 +135,21 @@ function runUitest(d) {
       }
     }
     t('ui-consistent', miss.length === 0);
-    d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${miss.length ? ` 问题:${miss.join(' ')}` : ''}`);
+    // 页面脚本 ↔ 页面 HTML:脚本里 getElementById(x) 的 x 必须真的存在(id="x" / el.id='x' / 数据里的 id:'x')。
+    // 与上面两类同属"静默失败":拼错一个 id,该元素只是永不更新,页面照常渲染、控制台只报一次 null 访问
+    const idBad = [];
+    for (const f of fs.readdirSync(__dirname).filter((x) => x.endsWith('.html'))) {
+      const html = fs.readFileSync(path.join(__dirname, f), 'utf8');
+      const declared = new Set();
+      for (const m of html.matchAll(/id="([^"]+)"/g)) declared.add(m[1]);
+      for (const m of html.matchAll(/\.id\s*=\s*'([^']+)'/g)) declared.add(m[1]);
+      for (const m of html.matchAll(/^\s*id:\s*'([^']+)'/gm)) declared.add(m[1]);
+      for (const m of html.matchAll(/getElementById\('([^']+)'\)/g)) {
+        if (!declared.has(m[1])) idBad.push(`${f}:${m[1]}`);
+      }
+    }
+    t('dom-ids', idBad.length === 0);
+    d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${miss.length ? ` 问题:${miss.join(' ')}` : ''}${idBad.length ? ` 缺 id:${idBad.join(' ')}` : ''}`);
   }, 2500, 'uikit');
   // ⓠ i18n / a11y 收尾(阶段 0 第五批):文案零硬编码 + 键名可达 + 主区域 landmark。
   // 三项都是"静默失败":硬编码中文、拼错的键名(t() 回退 key 本身,页面照常渲染但显示
@@ -178,7 +192,8 @@ function runUitest(d) {
     // 二者不套 <main> —— 单控件窗里再放主区域会造出误导性结构,属有意豁免。
     // toast.html 同理豁免:它是浮在主窗之上的通知层(role="region" 已带可访问名),
     // 本身没有"页面主体",硬套 <main> 只会让读屏器多出一个空的主区域跳转点。
-    const EXEMPT = { 'menu.html': 'role=menu 弹出层', 'dialog.html': 'role=dialog 模态', 'toast.html': 'role=region 浮动通知层' };
+    // palette.html 同属浮层(role="dialog" 包裹 combobox + listbox 两个控件),理由同上。
+    const EXEMPT = { 'menu.html': 'role=menu 弹出层', 'dialog.html': 'role=dialog 模态', 'toast.html': 'role=region 浮动通知层', 'palette.html': 'role=dialog 命令面板浮层' };
     const noLm = pages.filter((f) => !/role="main"|<main[\s>]/.test(read(f)) && !EXEMPT[f]);
     t('a11y-landmark', noLm.length === 0);
     // reveal-tab 的交互宿主必须是真 <button>(X4-2):role="button" 挂在 <body> 上时,
@@ -258,6 +273,56 @@ function runUitest(d) {
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
     d.log(`UITEST cmd ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}${missing.length ? ` 缺执行分支:${missing.join(',')}` : ''}${orphans.length ? ` 孤儿分支:${orphans.join(',')}` : ''}${bare.length ? ` 裸键:${bare.join(',')}` : ''}`);
   }, 2598, 'cmd-static');
+  // ⓠ 命令面板静态契约(阶段 2):面板是"全量命令清单"的唯一出口,三处静默故障:
+  //    ① 高度常量与渲染层的行高/行数上限脱节 → 面板底部被裁或留一大片空白;
+  //    ② Ctrl+K 被注册成 Electron accelerator → dsh 页面再也拿不到这个组合键(且跨进程才能排查);
+  //    ③ 新文件漏进 build.files → 开发期完全无感,装机点 Ctrl+K 直接白屏。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const main = read('main.js');
+    const html = read('palette.html');
+    const pre = read('palette-preload.js');
+    const bar = read('titlebar.html');
+    const barPre = read('titlebar-preload.js');
+    const files = JSON.parse(read('package.json')).build.files;
+    t('palette-lazy', /function ensurePaletteView\(/.test(main) && /function destroyPaletteView\(/.test(main) && /function syncPaletteBounds\(/.test(main));
+    // 载具必须是主窗内视图:面板要接收鼠标,独立窗会与主窗脱帧;而 toast 必须独立窗才谈得上穿透
+    t('palette-view', /paletteView = new WebContentsView\(/.test(main) && /addChildView\(paletteView\)/.test(main));
+    // 常量 ↔ 渲染层严格配对:高度公式的加数/乘数/上限,任一处单改就会错位
+    t('palette-consts', /PALETTE_W = 560/.test(main) && /PALETTE_ROW_H = 36/.test(main)
+      && /PALETTE_MAX_ROWS = 8/.test(main) && /PALETTE_INPUT_H = 56/.test(main)
+      && /const MAX_ROWS = 8;/.test(html) && /height: 36px/.test(html) && /height: 56px/.test(html));
+    // 绝不用 accelerator:dsh 页面自身可能也在用同一组合键,注册就是把冲突面推到进程外。
+    // 排除条件收紧到"accelerator 里出现 +K"——将来别的键位加 accelerator 不该被这条误伤
+    t('palette-no-accelerator', /function bindPaletteKey\(wc\)/.test(main)
+      && /before-input-event/.test(main)
+      && !/globalShortcut/.test(main)
+      && !/accelerator:[^\n]*\+K['"]/.test(main));
+    t('palette-key-bound', /bindPaletteKey\(titlebarView\.webContents\)/.test(main) && /bindPaletteKey\(dshView\.webContents\)/.test(main));
+    t('palette-ipc', ['pt:show', 'pt:run', 'pt:close', 'pt:height']
+      .every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
+    // trustedEvent 是每个新 IPC handler 的准入门槛;回程三个通道一个都不能漏,
+    // 且必须校验 sender(面板视图可能已被销毁重建,只认当前实例)
+    t('palette-trusted', (main.match(/ipcMain\.on\('pt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!trustedEvent\(e\)/g) || []).length === 3
+      && (main.match(/e\.sender [!=]== paletteView\.webContents/g) || []).length === 3);
+    // 命令出口唯一:面板只回传 id,执行仍归 runCommand(与菜单/托盘/命令栏同源)
+    t('palette-run-command', /ipcMain\.on\('pt:run'[\s\S]{0,700}?runCommand\(key\)/.test(main));
+    // 命令栏中段入口:按钮 + 桥 + 三分支断点(≥1200 全称 / 960–1200 图标 / <960 隐藏)
+    t('palette-entry', /id="cmdBtn"/.test(bar) && /openPalette:/.test(barPre)
+      && /max-width: 1199px/.test(bar) && /cmdentry/.test(bar));
+    // 平台前缀不由渲染层判断:经 sc:display 从 shortcuts.display() 下发
+    t('palette-kbd', main.includes("'sc:display'") && /on\('sc:display'/.test(main) && barPre.includes('sc:display'));
+    // 页面契约:combobox + listbox + activedescendant(WAI-ARIA APG 的 combobox 模式)
+    t('palette-aria', html.includes('role="combobox"') && html.includes('aria-controls="plist"')
+      && html.includes('role="listbox"') && html.includes('aria-activedescendant'));
+    const srcs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+    t('palette-page-deps', srcs.includes('ui-theme.js') && srcs.includes('ui-icons.js'));
+    t('palette-packed', files.includes('palette.html') && files.includes('palette-preload.js'));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST palette ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2602, 'palette-static');
   // ⓠ 通知宿主静态契约(阶段 1 X1):"不抢焦点 / 不挡点击"是这一批唯一的硬约束,
   //    而它们全靠两行 API 成立(focusable:false + setIgnoreMouseEvents)——删掉任何一行,
   //    运行时都不会报错,只会表现为"鼠标划过 toast 区域时,下方内容突然点不动了"。
@@ -342,6 +407,49 @@ function runUitest(d) {
     const ok = !!want && t.includes(want) && t.includes('D:\\Work');
     d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
   }, 2600, 'tray-status');
+  // ⑪ 命令面板运行时(阶段 2):开 → 结构 → 筛选 → Esc 关。窗口在 3500 会被状态窗抢焦点,
+  //    而面板是"失焦即收起",故整段必须赶在 3500 之前跑完。
+  uiStep(() => {
+    d.showPalette();
+    const b = d.paletteView?.getBounds();
+    const want = d.PALETTE_W + d.PALETTE_MARGIN * 2;
+    d.log(`UITEST palette-open w=${b?.width}(期望 ${want}) → ${b && b.width === want ? 'PASS' : 'FAIL'}`);
+  }, 3100, 'palette-open');
+  uiStep(() => readDom(d.paletteView, `(()=>{
+    const p = document.getElementById('pal');
+    const q = document.getElementById('q');
+    const list = document.getElementById('plist');
+    const rows = list.querySelectorAll('.prow');
+    const ad = q.getAttribute('aria-activedescendant');
+    const sel = list.querySelector('.prow.sel');
+    const focusOk = document.activeElement === q;
+    const ok = p.getAttribute('role') === 'dialog'
+      && q.getAttribute('role') === 'combobox'
+      && q.getAttribute('aria-controls') === 'plist'
+      && list.getAttribute('role') === 'listbox'
+      && rows.length === ${d.PALETTE_MAX_ROWS}
+      && ad && sel && sel.id === ad
+      && focusOk;
+    return (ok ? 'PASS' : 'FAIL') + ' rows=' + rows.length + ' ad=' + ad + ' focus=' + focusOk;
+  })()`, 'palette-dom'), 3190);
+  // 筛选:子序列匹配(『工录』跨字命中『工作目录』),结果必须收窄;空查询时按 MAX_ROWS 截断
+  uiStep(() => readDom(d.paletteView, `(()=>{
+    const q = document.getElementById('q');
+    q.value = '工录';
+    q.dispatchEvent(new Event('input'));
+    const rows = [...document.querySelectorAll('.prow')];
+    const labels = rows.map((r) => r.querySelector('.plbl').textContent);
+    const ok = rows.length >= 1 && rows.length < ${d.PALETTE_MAX_ROWS} && labels.some((l) => l.includes('工作目录'));
+    return (ok ? 'PASS' : 'FAIL') + ' n=' + rows.length + ' ' + labels.join('|');
+  })()`, 'palette-filter'), 3300);
+  // Esc 关窗:面板是把焦点交还 dsh 页面的(否则关掉后打字没反应)
+  uiStep(() => {
+    d.paletteView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {});
+    setTimeout(() => {
+      const still = d.paletteOpen();
+      d.log(`UITEST palette-closed open=${still}(期望 false) → ${!still ? 'PASS' : 'FAIL'}`);
+    }, 300);
+  }, 3400, 'palette-esc');
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(d.statusWin, 'status'); }, 3500, 'status-show');
   // 命令栏任务徽标必须跟随真实任务数(阶段 1 S1 出口标准:有任务在跑时徽标数字正确)
   uiStep(() => readDom(d.titlebarView, `(()=>{

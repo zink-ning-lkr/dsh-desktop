@@ -1,0 +1,272 @@
+<!-- 命令面板(阶段 2):Ctrl+K 唤起的可搜索命令入口,与 ☰ 菜单、托盘菜单同源(commands.js)。 -->
+<!-- 无 landmark 是有意为之(X4-3 豁免,同 menu.html / dialog.html):本窗整体是一个
+     role="dialog" 浮层,内部只有输入框(role=combobox)与结果列表(role=listbox)两个控件,
+     再套 <main> 只会让读屏器多出一个"主区域里只有一个搜索框"的空跳转点。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>palette</title>
+<link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
+<script src="ui-icons.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  /* 四周留白容纳阴影。12px 必须与主进程 PALETTE_MARGIN 一致,否则面板会被裁边 */
+  body { padding: 12px; box-sizing: border-box; font: var(--font-ui); color: var(--c-fg1); user-select: none; -webkit-app-region: no-drag; }
+  /* .pal 按内容定高(不设 height:100%):主进程的视图高度 = .pal 外框高 + 2×留白,
+     渲染层上报的就是 .pal.offsetHeight —— 内容与视图尺寸由同一个数字决定,不存在互相反推 */
+  .pal {
+    display: flex; flex-direction: column;
+    background: var(--c-panel-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-l);
+    box-shadow: var(--c-panel-shadow);
+    overflow: hidden;
+    animation: palIn .16s cubic-bezier(.2, .9, .3, 1.1);
+  }
+  @keyframes palIn { from { opacity: 0; transform: translateY(-6px) scale(.99); } to { opacity: 1; transform: none; } }
+  /* 输入行 56px:与主进程 PALETTE_INPUT_H 严格对应(高度公式的加数,改一处必须同改另一处) */
+  .pin { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 14px; flex: none; border-bottom: 1px solid var(--c-border); }
+  .pin .pico { width: 16px; height: 16px; flex: none; color: var(--c-fg2); display: flex; align-items: center; justify-content: center; }
+  #q {
+    all: unset;
+    flex: 1; min-width: 0;
+    font-family: inherit; font-size: var(--fs-body); line-height: var(--lh-ctrl); color: var(--c-fg0);
+  }
+  #q::placeholder { color: var(--c-fg3); }
+  /* Ctrl+K 徽标:文字由主进程按平台下发(CmdOrCtrl 前缀规则同 shortcuts.js),渲染层不判断平台 */
+  .pkbd {
+    flex: none; padding: 2px 6px; border: 1px solid var(--c-border); border-radius: var(--radius-ctl);
+    font-size: var(--fs-micro); line-height: 1.4; color: var(--c-fg2);
+  }
+  .plist { flex: none; padding: 0 6px; }
+  /* 结果行 36px:与主进程 PALETTE_ROW_H 严格对应(高度公式的乘数) */
+  .prow {
+    display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px;
+    border-radius: var(--radius-s); cursor: default; white-space: nowrap;
+    font-size: var(--fs-body); line-height: var(--lh-ctrl);
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+  }
+  .prow:hover, .prow.sel { background: var(--c-sel-bg); color: var(--c-sel-fg); }
+  .prow .pico { width: 16px; height: 16px; flex: none; color: var(--c-fg2); display: flex; align-items: center; justify-content: center; }
+  .prow:hover .pico, .prow.sel .pico { color: var(--c-brand-hi); }
+  .prow .plbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* 分类标签与快捷键都是"扫码用"的次级信息:压到 --c-fg2 并右对齐,不与标题争视线 */
+  .prow .pgrp { flex: none; font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2); }
+  .prow .pchk { flex: none; font-size: var(--fs-micro); color: var(--c-brand-hi); }
+  .prow .pacc { flex: none; font-size: var(--fs-ctrl); color: var(--c-fg2); font-variant-numeric: tabular-nums; }
+  /* 分节标题(空查询时的"常用"):不入键盘导航(见脚本 navRows 只收 .prow),高度 22px */
+  .psec {
+    height: 22px; display: flex; align-items: center; padding: 0 8px;
+    font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2);
+  }
+  .pempty { height: 36px; display: flex; align-items: center; padding: 0 8px; font-size: var(--fs-body); color: var(--c-fg2); }
+  /* 底部提示行 30px:方向键/Enter/Esc 的用法不写在界面某处就没人知道 */
+  .phint { flex: none; height: 30px; display: flex; align-items: center; padding: 0 14px; font-size: var(--fs-micro); line-height: var(--lh-ctrl); color: var(--c-fg2); }
+  .phint.hide { display: none; }
+  @media (prefers-reduced-motion: reduce) { .pal { animation: none; } }
+</style>
+</head>
+<body>
+<div class="pal" id="pal" role="dialog" aria-modal="false">
+  <div class="pin">
+    <span class="pico" id="qIco" aria-hidden="true"></span>
+    <!-- combobox + aria-controls + aria-activedescendant:焦点始终留在输入框(打字不中断),
+         选中项由后代 role=option 播报,是 WAI-ARIA APG 的 combobox 模式 -->
+    <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="plist" spellcheck="false" autocomplete="off">
+    <span class="pkbd" id="kbd"></span>
+  </div>
+  <div class="plist" id="plist" role="listbox"></div>
+  <div class="phint" id="phint"></div>
+</div>
+<script>
+  const P = window.__palette;
+  const T = (k, p) => window.__i18n.t(k, p);
+  const ICONS = window.UI_ICONS.menu; // 图标按条目 id 取用(与菜单同一张表),内部白名单、innerHTML 注入安全
+  document.getElementById('qIco').innerHTML = window.UI_ICONS.palette.search;
+
+  // 面板一次最多显示 8 行:与主进程 PALETTE_MAX_ROWS 严格对应(高度上限的乘数)
+  const MAX_ROWS = 8;
+  // 分类加权(方案 §5.3):动作 > 设置项 > 跳转。同分再看匹配质量与注册表顺序
+  const KIND_W = { action: 0, setting: 1, nav: 2 };
+
+  const pal = document.getElementById('pal');
+  const q = document.getElementById('q');
+  const kbd = document.getElementById('kbd');
+  const list = document.getElementById('plist');
+  const hint = document.getElementById('phint');
+
+  pal.setAttribute('aria-label', T('palette.region'));
+  list.setAttribute('aria-label', T('palette.results'));
+  q.setAttribute('placeholder', T('palette.placeholder'));
+  hint.textContent = T('palette.hint');
+
+  let items = [];     // 全部命令(主进程下发)
+  let recent = [];    // 本会话最近执行的 id(主进程维护,不落盘)
+  let view = [];      // 当前可见且可导航的条目(≤ MAX_ROWS)
+  let headText = '';  // 空查询且有最近记录时的分节标题,否则空串(分节行不可导航)
+  let sel = 0;
+  let lastH = 0;
+
+  /* 子序列匹配(方案 §5.3):查询串的字符按顺序出现在标签里即命中,允许中间跳字,
+     例如『工录』命中『打开工作目录』、『sh』命中『重启 dsh 服务』。
+     注意:这是对标签**字面**的子序列匹配,不做拼音转换——方案里"zk 命中打开工作目录"的例子
+     需要拼音索引才成立,本轮不做(要么引词典要么自己维护拼音表,代价远超收益)。
+     返回 null = 不匹配;否则评分越小越靠前:间隔越散分越高,首次命中越靠后分越高 */
+  function match(label, qs) {
+    if (!qs) return { score: 0 };
+    const s = label.toLowerCase();
+    let i = 0, first = -1, gap = 0, last = -1;
+    for (const ch of qs) {
+      const at = s.indexOf(ch, i);
+      if (at < 0) return null;
+      if (first < 0) first = at;
+      if (last >= 0) gap += at - last - 1;
+      last = at; i = at + 1;
+    }
+    return { score: gap * 2 + first };
+  }
+
+  function compute(qs) {
+    headText = '';
+    const s = qs.trim().toLowerCase();
+    if (!s) {
+      // 空查询:最近 5 次执行置顶(会话内的使用习惯,比"按字母排"有用得多),
+      // 其余按注册表顺序跟上。首次使用没有历史,就是一份完整清单
+      const byId = new Map(items.map((it) => [it.id, it]));
+      const top = recent.map((id) => byId.get(id)).filter(Boolean);
+      if (top.length) headText = T('palette.recent');
+      const seen = new Set(top.map((it) => it.id));
+      return top.concat(items.filter((it) => !seen.has(it.id)));
+    }
+    const hit = [];
+    items.forEach((it, idx) => {
+      const m = match(it.label, s);
+      if (m) hit.push({ it, idx, score: m.score });
+    });
+    hit.sort((a, b) => (KIND_W[a.it.kind] - KIND_W[b.it.kind]) || (a.score - b.score) || (a.idx - b.idx));
+    return hit.map((x) => x.it);
+  }
+
+  /* 高度回报:主进程按这个数字算视图 bounds。只在真实高度变化时发,避免每次击键都跨进程 */
+  function report() {
+    const h = pal.offsetHeight;
+    if (h && h !== lastH) { lastH = h; P.height(h); }
+  }
+
+  function select(n, scrollTo = true) {
+    if (!view.length) { sel = 0; q.removeAttribute('aria-activedescendant'); return; }
+    sel = Math.max(0, Math.min(n, view.length - 1));
+    list.querySelectorAll('.prow').forEach((el, k) => {
+      const on = k === sel;
+      el.classList.toggle('sel', on);
+      el.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const cur = document.getElementById('po-' + sel);
+    if (!cur) return;
+    // 焦点在输入框上,选中态靠 aria-activedescendant 播报(见 HTML 注释)
+    q.setAttribute('aria-activedescendant', cur.id);
+    if (scrollTo) cur.scrollIntoView({ block: 'nearest' });
+  }
+
+  function run(id) { P.run(id); }
+
+  function renderRows() {
+    list.textContent = '';
+    if (headText) {
+      const sec = document.createElement('div');
+      sec.className = 'psec';
+      sec.setAttribute('role', 'presentation'); // 分节标题只是视觉分组,不占导航位
+      sec.textContent = headText;
+      list.appendChild(sec);
+    }
+    if (!view.length) {
+      const empty = document.createElement('div');
+      empty.className = 'pempty';
+      empty.setAttribute('role', 'presentation');
+      empty.textContent = T('palette.empty');
+      list.appendChild(empty);
+      select(0, false);
+      report();
+      return;
+    }
+    view.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'prow';
+      row.id = 'po-' + i;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+      const ico = document.createElement('span');
+      ico.className = 'pico';
+      ico.setAttribute('aria-hidden', 'true');
+      ico.innerHTML = ICONS[it.id] || '';
+      const lbl = document.createElement('span');
+      lbl.className = 'plbl';
+      lbl.textContent = it.label; // 文本一律 textContent:label 里拼着版本号/内存数等运行时值
+      const grp = document.createElement('span');
+      grp.className = 'pgrp';
+      grp.textContent = it.groupLabel;
+      row.append(ico, lbl, grp);
+      // 勾选项(设置类):读屏器要能报"已开启/已关闭",故把状态写进 aria-label 而不是只画个勾
+      if (it.checked !== null) {
+        const chk = document.createElement('span');
+        chk.className = 'pchk';
+        chk.setAttribute('aria-hidden', 'true');
+        chk.textContent = '✓';
+        row.appendChild(chk);
+      }
+      if (it.accel) {
+        const acc = document.createElement('span');
+        acc.className = 'pacc';
+        // 并入 aria-label,避免读屏器把快捷键逐字母读出来
+        acc.setAttribute('aria-hidden', 'true');
+        acc.textContent = it.accel;
+        row.appendChild(acc);
+      }
+      row.setAttribute('aria-label', it.label
+        + (it.checked !== null ? ' ' + T(it.checked ? 'palette.on' : 'palette.off') : '')
+        + (it.accel ? ' ' + it.accel : ''));
+      row.addEventListener('mouseenter', () => select(i, false)); // 悬停与键盘共用同一份选中态
+      row.addEventListener('click', () => run(it.id));
+      list.appendChild(row);
+    });
+    select(0, false);
+    report();
+  }
+
+  function refilter() {
+    view = compute(q.value).slice(0, MAX_ROWS);
+    sel = 0;
+    renderRows();
+  }
+
+  q.addEventListener('input', refilter);
+
+  document.addEventListener('keydown', (e) => {
+    // 面板内 Ctrl+K 视为再按一次开关:与命令栏按钮的 toggle 语义一致
+    if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
+      e.preventDefault(); P.close(); return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); select(sel + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); select(sel - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); select(0); }
+    else if (e.key === 'End') { e.preventDefault(); select(view.length - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (view[sel]) run(view[sel].id); }
+    else if (e.key === 'Escape') { e.preventDefault(); P.close(); }
+  });
+
+  P.onShow((p) => {
+    items = p.items || [];
+    recent = p.last || [];
+    kbd.textContent = p.kbd || '';
+    kbd.hidden = !p.kbd;
+    q.value = '';
+    refilter();
+    // 焦点必须落在输入框:面板的全部键盘操作都从这次击键开始,焦点没进来等于面板打不开
+    q.focus();
+  });
+</script>
+</body>
+</html>

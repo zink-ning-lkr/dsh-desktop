@@ -74,6 +74,25 @@
   }
   .workspace:hover { opacity: 1; }
   .workspace[hidden] { display: none; }
+  /* ---- 中 · 命令入口(阶段 2) ----
+     胶囊按钮:高度 20px,在 30px 栏内上下各留 5px。用 --radius-pill 拿到真正的胶囊形,
+     而不是拿 6px 圆角冒充。发丝线颜色由 --fg 派生(与状态簇同一取法)——采样底色浅深都可见。 */
+  .cmdentry {
+    gap: 6px; height: 20px; padding: 0 8px; flex: none;
+    border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    border-radius: var(--radius-pill);
+    color: var(--fg); opacity: .8;
+    font-size: var(--fs-micro); line-height: 1;
+  }
+  .cmdentry:hover { background: var(--c-hover); opacity: 1; }
+  .cmdentry:active { background: var(--c-hover-strong); }
+  .cmdentry[hidden] { display: none; }
+  .cmdentry .ceico { display: flex; align-items: center; }
+  .cmdentry .cekbd { padding: 1px 5px; border-radius: var(--radius-ctl); background: color-mix(in srgb, var(--fg) 12%, transparent); opacity: .9; }
+  /* 三级断点(方案 §5.1 / §7.2):≥1200px 全称 + 徽标;960–1200px 收为纯图标;
+     <960px 整钮隐藏(主窗 minWidth 即 960,此处是边框吃宽后的兜底),此时仅 Ctrl+K 可用 */
+  @media (max-width: 1199px) { .cmdentry .celbl, .cmdentry .cekbd { display: none; } }
+  @media (max-width: 959px) { .cmdentry { display: none; } }
   .spacer { flex: 1; }
   /* ---- 状态簇(阶段 1 S1)· 主题边界(X2) ----
      栏内有且只有一处跟随 dsh 页面采样色:body 的背景(--bg)与前景(--fg,由主进程按采样
@@ -136,9 +155,15 @@
          "role=button 挂在非控件元素上" 修掉,这里不重蹈覆辙。 -->
     <button class="workspace" id="workspace" type="button"></button>
   </div>
-  <!-- 中 · 命令入口:阶段 2 接入命令面板(胶囊按钮 + Ctrl+K 徽标)。
-       未实现前按计划降级隐藏 —— 菜单与快捷键不受影响,可独立灰度上线。
-       此处保留段位插入点,便于对照 §5.1 的三段式布局。 -->
+  <!-- 中 · 命令入口(阶段 2):胶囊按钮 + Ctrl+K 徽标。两个 .spacer 把入口夹在标识区与状态簇之间,
+       使其落在二者中间——面板也从命令栏中段向下展开,点击位置与面板位置对齐。
+       徽标文案来自主进程(sc:display → shortcuts.display),渲染层不判断平台。 -->
+  <div class="spacer"></div>
+  <button class="cmdentry" id="cmdBtn" type="button">
+    <span class="ceico" id="cmdIco" aria-hidden="true"></span>
+    <span class="celbl" id="cmdLbl"></span>
+    <span class="cekbd" id="cmdKbd" aria-hidden="true"></span>
+  </button>
   <div class="spacer"></div>
   <!-- 右 · 状态簇(阶段 1 S1):服务点 / 任务徽标 / 更新徽标 / 主题。
        徽标与更新钮在无内容时整钮隐藏,避免恒定噪音;图标由 ui-icons.js 注入(command-bar 族)。 -->
@@ -182,6 +207,17 @@
   setTip('minBtn', T('titlebar.minimize'));
   setTip('maxBtn', T('titlebar.maximize'));
   setTip('closeBtn', T('common.close'));
+  // 中段命令入口(阶段 2):图标走 palette 域(与面板输入行同一个放大镜),
+  // 标签/徽标/提示全部来自文案表与主进程下发的平台前缀
+  $('cmdIco').innerHTML = window.UI_ICONS.palette.search;
+  $('cmdLbl').textContent = T('palette.open');
+  $('cmdKbd').textContent = t.paletteKbd || '';
+  $('cmdKbd').hidden = !t.paletteKbd;
+  setTip('cmdBtn', [T('palette.open'), t.paletteKbd].filter(Boolean).join(' '));
+  $('cmdBtn').onclick = () => t.openPalette();
+  // aria-keyshortcuts 用 ARIA 的英文键名写法(Control+K / Meta+K),与界面显示的徽标各司其职:
+  // 前者给读屏器,后者给人看
+  if (t.paletteKbd) $('cmdBtn').setAttribute('aria-keyshortcuts', t.paletteKbd.replace('Ctrl', 'Control').replace('Cmd', 'Meta'));
 
   /* ---- 状态簇(阶段 1 S1)----
      服务点 / 任务徽标 / 更新徽标 / 主题。四项全部由主进程 tb:status 整体推送,

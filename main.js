@@ -170,6 +170,9 @@ let currentBarH = TITLEBAR_H;
 let barAnim = null;
 let menuClosedAt = 0; // 弹层最后关闭时刻:防"点按钮关闭→blur 先关→点击又打开"的抖动
 let menuQueued = null; // 菜单页未加载完成时排队的载荷(极快点击首帧不丢失)
+let paletteView = null; // 命令面板(阶段 2):与菜单弹层同一套懒创建 / 关闭即销毁
+let paletteQueued = null; // 面板页未加载完成时排队的载荷
+let paletteH = 0; // 渲染层上报的面板内容高度(0 = 尚未量到,用输入行高度兜底)
 
 function layoutViews() {
   if (!mainWindow || !titlebarView || !dshView) return;
@@ -182,6 +185,8 @@ function layoutViews() {
   // 通知宿主贴主窗右上角,主窗尺寸/命令栏高度一变就必须跟着走(X1)。
   // 挂在这里而不是各处 resize 分支:layoutViews 已是"任何几何变化都要调一次"的汇合点
   syncToastBounds();
+  // 命令面板水平居中于内容区,同样随窗口尺寸走(阶段 2)
+  syncPaletteBounds();
 }
 
 // 强制视图 surface 与逻辑尺寸同步。首次显示时,窗口的实际显示尺寸(高 DPI 下的
@@ -1026,6 +1031,10 @@ function trustedEvent(e) {
 // 无敏感信息与副作用,任意调用方拉取无安全影响
 ipcMain.on('i18n:table', (e) => { e.returnValue = i18n.snapshot(); });
 
+// 加速键的平台显示名(阶段 2):渲染层 sandbox 里没有 process.platform,拿不到 Ctrl/Cmd 前缀,
+// 故由主进程按 shortcuts.display() 的同一规则算好下发。同 i18n:table:只读静态字符串、无副作用
+ipcMain.on('sc:display', (e, accel) => { e.returnValue = shortcuts.display(String(accel || '')); });
+
 // 窗口环境标志(v0.6.1):Win11 Acrylic 材质透出,渲染层据此加 .win.acrylic(只读静态,同 i18n:table 不设信任门槛)
 ipcMain.on('st:env', (e) => { e.returnValue = { acrylic: isWin11() }; });
 
@@ -1796,6 +1805,164 @@ ipcMain.on('m:close', (e) => {
   else closeMenuPopup(true);
 });
 
+// ---------- 命令面板(阶段 2 · 可发现性) ----------
+// 与菜单弹层同一套路:懒创建、关闭即销毁(平时不留常驻渲染进程)。
+// 载具用主窗内的 WebContentsView 而非独立 BrowserWindow:面板本来就要接收鼠标(点选条目),
+// 不存在 toast 那种"必须穿透"的诉求,用 View 才能与主窗同帧跟随、不额外多一个窗口。
+const PALETTE_W = 560;          // 方案 §5.3 的面板宽
+const PALETTE_MARGIN = 12;      // 视图四周留白,容纳阴影(与 palette.html 的 body padding 严格对应)
+const PALETTE_INPUT_H = 56;     // 输入行高(高度公式的加数)
+const PALETTE_ROW_H = 36;       // 结果行高(高度公式的乘数)
+const PALETTE_MAX_ROWS = 8;     // 结果区最多 8 行(与 palette.html 的 MAX_ROWS 严格对应)
+const PALETTE_HINT_H = 30;      // 底部提示行高
+const PALETTE_H_MAX = PALETTE_INPUT_H + PALETTE_MAX_ROWS * PALETTE_ROW_H + PALETTE_HINT_H;
+const PALETTE_RECENT_MAX = 5;   // 空查询时置顶的"常用"条数
+
+// 面板载荷:条目与 ☰ 菜单 / 托盘菜单同源(commands.js 注册表),last 是本次会话最近执行的 id。
+// 筛选与排序放在渲染层:子序列匹配要跟着每次击键走,跨进程序列化只会让输入变卡。
+function palettePayload() {
+  const ctx = commandCtx();
+  const items = commands.list.map((c) => {
+    const checked = commands.checkedOf(c, ctx);
+    return {
+      id: c.id,
+      kind: c.kind,
+      label: commands.labelOf(c, ctx),
+      groupLabel: t(commands.groupLabelKey(c.group)),
+      accel: commands.accelOf(c.id),
+      checked: checked === undefined ? null : checked, // null 与 false 必须分开:前者"不是开关",后者"开关关着"
+    };
+  });
+  return { items, last: paletteRecent.slice(), kbd: shortcuts.display('CmdOrCtrl+K') };
+}
+
+// Ctrl+K 的平台显示名走 shortcuts.js 的 display()(Windows/Linux=Ctrl,macOS=Cmd)。
+// 面板本身不是 Electron accelerator(见 bindPaletteKey),但徽标文案要与其它快捷键同一套前缀规则
+const paletteRecent = []; // 本会话最近执行的命令 id:使用习惯,不是配置,故不落盘
+
+// 视图 bounds:水平居中于内容区,垂直紧贴命令栏下沿。
+// 方案 §5.3 写的是"命令栏下方 8px",这里取 0 —— 视图四周有 12px 透明留白用于阴影,
+// 而 WebContentsView 的透明区**不穿透鼠标**(与 toast 相反,toast 能穿透是因为它用的 BrowserWindow)。
+// 若按 8px 起算,视图顶边会压住命令栏 4px 并吃掉那 4px 的点击。12px 视觉间距与菜单弹层一致。
+function paletteBounds() {
+  if (!mainWindow) return null;
+  const [w] = mainWindow.getContentSize();
+  const width = PALETTE_W + PALETTE_MARGIN * 2;
+  const body = Math.min(Math.max(paletteH || PALETTE_INPUT_H, PALETTE_INPUT_H), PALETTE_H_MAX);
+  return {
+    x: Math.max(0, Math.floor((w - width) / 2)),
+    y: currentBarH,
+    width,
+    height: body + PALETTE_MARGIN * 2,
+  };
+}
+
+function syncPaletteBounds() {
+  if (!mainWindow || !paletteView) return;
+  const b = paletteBounds();
+  if (!b) return;
+  try { paletteView.setBounds(b); } catch { /* 销毁竞态 */ }
+}
+
+function ensurePaletteView() {
+  if (!mainWindow) return;
+  if (paletteView && !paletteView.webContents.isDestroyed()) return;
+  paletteView = new WebContentsView({
+    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'palette-preload.js') },
+  });
+  paletteView.setBackgroundColor('#00000000'); // 同菜单弹层:不置透明,面板四周的阴影留白会被衬成白圈
+  paletteView.webContents.loadFile(path.join(__dirname, 'palette.html')).catch(() => {});
+  // 失焦即收起(点面板外 = 关掉),并把键盘焦点还给 dsh 页面——
+  // 焦点留在已销毁的视图上会让用户"关掉面板后打字没反应"
+  paletteView.webContents.on('blur', () => { if (paletteView && paletteView.getBounds().width > 0) closePalette(true); });
+  // 首帧加载完成时补发排队载荷(极快按 Ctrl+K 不会出现空面板)
+  paletteView.webContents.on('did-finish-load', () => {
+    if (paletteQueued && paletteView && paletteView.getBounds().width > 0) {
+      const q = paletteQueued;
+      paletteQueued = null;
+      paletteView.webContents.send('pt:show', q);
+    }
+  });
+  mainWindow.contentView.addChildView(paletteView); // 后 add 的位于最上层
+  layoutViews();
+}
+
+function destroyPaletteView() {
+  if (!paletteView) return;
+  const v = paletteView;
+  paletteView = null;
+  paletteQueued = null;
+  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
+  try { v.webContents.close(); } catch { /* 已销毁 */ }
+}
+
+function paletteOpen() { return !!paletteView && paletteView.getBounds().width > 0; }
+
+function showPalette() {
+  if (!mainWindow) return;
+  closeMenuPopup(); // 与菜单弹层互斥:两个浮层同时挂着会互相盖住且各自抢焦点
+  closeTrayMenu();
+  paletteH = PALETTE_INPUT_H; // 每次重开从"只有输入行"起步,真实高度由渲染层量完回报
+  ensurePaletteView();
+  syncPaletteBounds();
+  const payload = palettePayload();
+  const wc = paletteView.webContents;
+  if (wc.isLoading()) { paletteQueued = payload; } else { paletteQueued = null; wc.send('pt:show', payload); }
+  paletteView.webContents.focus();
+}
+
+function closePalette(refocus = false) {
+  if (paletteView) {
+    try { paletteView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    destroyPaletteView();
+  }
+  if (refocus) dshView?.webContents.focus();
+}
+
+function togglePalette() { if (paletteOpen()) closePalette(true); else showPalette(); }
+
+// Ctrl+K(阶段 2)。刻意**不**注册 Electron accelerator:
+// accelerator 是应用级注册,注册之后 dsh 页面自身(以及将来任何输入框 / 代码编辑器)再也拿不到
+// 这个组合键,且冲突排查要跨进程。改为在 before-input-event 里捕获——这是页面拿到按键之前的
+// 唯一拦截点,冲突面收敛在这一处:要放行某个视图,不给它调 bindPaletteKey 即可。
+// 注:dsh 服务页的 preload 对远程页面零暴露(dsh-preload.js 的安全面约束),
+// 因此拿不到"当前焦点是否在输入框"的信号,这里按方案 §9.2 的低风险项处理:统一拦截。
+function bindPaletteKey(wc) {
+  wc?.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    if (!input.control || input.alt || input.meta || input.shift) return;
+    if (String(input.key).toLowerCase() !== 'k') return;
+    e.preventDefault();
+    togglePalette();
+  });
+}
+
+ipcMain.on('tb:palette', (e) => {
+  if (!trustedEvent(e)) return;
+  togglePalette(); // 命令栏中段的入口按钮
+});
+ipcMain.on('pt:run', (e, id) => {
+  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  const key = String(id);
+  const at = paletteRecent.indexOf(key);
+  if (at >= 0) paletteRecent.splice(at, 1); // 已在列表里先摘掉再置顶,避免重复项
+  paletteRecent.unshift(key);
+  if (paletteRecent.length > PALETTE_RECENT_MAX) paletteRecent.length = PALETTE_RECENT_MAX;
+  closePalette(true); // 先关再执行:命令可能弹对话框 / 弹结果窗,面板留着会一起抢焦点
+  runCommand(key);
+});
+ipcMain.on('pt:close', (e) => {
+  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  closePalette(true);
+});
+ipcMain.on('pt:height', (e, h) => {
+  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  const n = Number(h) || 0;
+  if (n <= 0 || n === paletteH) return; // 同值短路:每次击键都会回报,不短路就是每次击键一次 setBounds
+  paletteH = n;
+  syncPaletteBounds();
+});
+
 // 标题栏底色跟随 dsh 页面实际背景色,视觉上与内容融为一体。
 // dsh 页面可能动态切换主题(白天/夜间、用户改色):仅 did-finish-load 采样一次会在切换后失同步,
 // 故增加 ①页面导航钩子(did-navigate / did-navigate-in-page 覆盖整页跳转与 SPA 路由)②周期采样器
@@ -1881,6 +2048,7 @@ function createWindow() {
   // View 默认底色是白色:Windows 无边框窗口顶沿的隐形系统边框带/未绘制区会露白边,必须显式设主题色
   titlebarView.setBackgroundColor(chromeBgColor());
   titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html')).catch(() => {});
+  bindPaletteKey(titlebarView.webContents); // 焦点在命令栏时 Ctrl+K 同样可用(阶段 2)
   // 页面加载完成后同步一次关闭语义 tooltip(loadFile 前 send 会丢)
   // 同时补推一次状态簇(阶段 1 S1):同值短路下 titlebarStatusLast 可能已有缓存值,
   // 页面重载后必须无条件重发,否则新页面会一直空着——故先清缓存再推。
@@ -1900,6 +2068,7 @@ function createWindow() {
   });
   dshView.webContents.setBackgroundThrottling(false);
   dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
+  bindPaletteKey(dshView.webContents); // dsh 页面本体是 Ctrl+K 的主战场(阶段 2)
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
   dshView.setBackgroundColor(chromeBgColor());
   // 431 自愈(v0.6.3):万一头仍超限(单会话内多次重启累积等边缘路径),清 Cookie 后自动重载一次
@@ -2390,6 +2559,11 @@ if (!gotLock) {
         getThemeSource: () => nativeTheme.themeSource,
         applyTheme,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
+        // 命令面板(阶段 2):paletteView 会随开合创建销毁,故走 getter;常量一并暴露,
+        // 断言"视图宽 = PALETTE_W + 2×留白"这类契约时不写第二份魔数
+        get paletteView() { return paletteView; },
+        showPalette, closePalette, paletteOpen,
+        PALETTE_W, PALETTE_MARGIN, PALETTE_INPUT_H, PALETTE_ROW_H, PALETTE_MAX_ROWS,
         toggleTitlebar, showAccelSettings, installDshUpdate: updates.installDshUpdate,
         isWin11, // Mica 试点(P2-3):断言 reportWin 的 mica 类与平台判定一致
         configPath, loadConfig, saveConfig,
