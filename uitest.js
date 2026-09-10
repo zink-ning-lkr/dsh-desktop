@@ -137,6 +137,57 @@ function runUitest(d) {
     t('ui-consistent', miss.length === 0);
     d.log(`UITEST uikit ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${miss.length ? ` 问题:${miss.join(' ')}` : ''}`);
   }, 2500, 'uikit');
+  // ⓠ i18n / a11y 收尾(阶段 0 第五批):文案零硬编码 + 键名可达 + 主区域 landmark。
+  // 三项都是"静默失败":硬编码中文、拼错的键名(t() 回退 key 本身,页面照常渲染但显示
+  // 成 "menu.enabled" 这种裸键)、缺 landmark(读屏器不报错,只是永远没有区域可跳)。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const pages = fs.readdirSync(__dirname).filter((x) => x.endsWith('.html'));
+    const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+    // 渲染层零中文硬编码:剥掉 HTML/CSS/行注释后,属性值 / JS 单引号串 / 文本节点都不应含汉字。
+    // 文案一律走 i18n 表,由 preload 的 __i18n 或主进程 t() 提供。
+    const hard = [];
+    for (const f of pages) {
+      const body = read(f)
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      const cn = [];
+      for (const m of body.matchAll(/\w[\w-]*\s*=\s*"[^"]*[\u4e00-\u9fa5][^"]*"/g)) cn.push(m[0].slice(0, 24));
+      for (const m of body.matchAll(/'[^'\n]*[\u4e00-\u9fa5][^'\n]*'/g)) cn.push(m[0].slice(0, 24));
+      for (const m of body.matchAll(/>[^<>\n]*[\u4e00-\u9fa5][^<>\n]*</g)) cn.push(m[0].slice(0, 24));
+      if (cn.length) hard.push(`${f}:${cn[0]}`);
+    }
+    t('i18n-nohardcode', hard.length === 0);
+    // 键名可达:所有字面量 t('域.键')/T('域.键') 必须命中文案表。
+    // t() 找不到键时回退 key 本身,拼错不会抛错 —— 只有这条断言能拦住它。
+    const i18n = require('./i18n');
+    const dead = [];
+    for (const f of [...pages, ...fs.readdirSync(__dirname).filter((x) => x.endsWith('.js') && x !== 'uitest.js')]) {
+      for (const m of read(f).matchAll(/\b[tT]\('([a-z][A-Za-z0-9]*\.[A-Za-z0-9]+)'/g)) {
+        if (i18n.t(m[1]) === m[1]) dead.push(`${f}:${m[1]}`);
+      }
+    }
+    t('i18n-keys', dead.length === 0);
+    // 快捷键单一数据源只存键名(修 X5):文案不得再内联,且键名必须可达
+    const sc = require('./shortcuts');
+    t('sc-labelKey', sc.list.every((s) => typeof s.labelKey === 'string' && !('label' in s))
+      && sc.list.every((s) => i18n.t(s.labelKey) !== s.labelKey));
+    // 主区域 landmark(X4-3):menu 是纯 role="menu" 弹出层、dialog 是 role="dialog" 模态窗,
+    // 二者不套 <main> —— 单控件窗里再放主区域会造出误导性结构,属有意豁免。
+    const EXEMPT = { 'menu.html': 'role=menu 弹出层', 'dialog.html': 'role=dialog 模态' };
+    const noLm = pages.filter((f) => !/role="main"|<main[\s>]/.test(read(f)) && !EXEMPT[f]);
+    t('a11y-landmark', noLm.length === 0);
+    // reveal-tab 的交互宿主必须是真 <button>(X4-2):role="button" 挂在 <body> 上时,
+    // 读屏器的控件导航与 Enter 激活都落不到它身上,键盘语义只能靠手写 keydown 兜。
+    const rv = read('reveal-tab.html');
+    t('a11y-reveal-btn', /<button[^>]*id="revealBtn"/.test(rv)
+      && !/<body[^>]*role="button"/.test(rv)
+      && !/document\.body\.addEventListener\('(click|keydown)'/.test(rv));
+    const bad = [...hard, ...dead, ...noLm];
+    d.log(`UITEST i18n-a11y ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${bad.length ? ` 问题:${bad.join(' ')}` : ''}`);
+  }, 2550, 'i18n-a11y');
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
   uiStep(() => {
     const t = d.trayStatusText();

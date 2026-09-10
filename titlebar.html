@@ -13,8 +13,6 @@
   /* 画布底层兜底暗色:主题未送达时页面任何像素都不是白 */
   html { background-color: var(--bg); }
   body {
-    display: flex;
-    align-items: center;
     /* 纯色背景,不再有底部渐隐区:栏高与页面顶边完全对齐(原渐变区不透明,会把页面顶部盖掉一截) */
     background-color: var(--bg);
     color: var(--fg);
@@ -22,6 +20,15 @@
     font: var(--fs-ctrl)/var(--lh-ctrl) "Segoe UI", "Microsoft YaHei", sans-serif;
     user-select: none;
     -webkit-app-region: drag; /* 整条可拖动移动窗口;双击最大化/还原 */
+  }
+  /* 主区域 landmark(X4):本窗内容就是这条标题栏。
+     行布局原语从 body 原样搬到 main:main 为 body 唯一子元素且 height:100%,
+     盒与 body 的内容盒等大(无内外边距/边框),.cap 的 height:100% 仍解析到同一确定高度,
+     故像素零变化。-webkit-app-region 留在 body:窗口拖动区仍是整个视口。 */
+  main {
+    height: 100%;
+    display: flex;
+    align-items: center;
   }
   button {
     all: unset;
@@ -63,6 +70,7 @@
 </style>
 </head>
 <body>
+<main>
   <button id="menuBtn" title="" aria-label="" aria-haspopup="menu" aria-expanded="false">
     <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
       <line x1="2" y1="3.5" x2="12" y2="3.5"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="2" y1="10.5" x2="12" y2="10.5"/>
@@ -88,6 +96,7 @@
       <svg viewBox="0 0 11 11"><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.1"/></svg>
     </button>
   </div>
+</main>
 <script>
   const t = window.__titlebar;
   // 静态文案收编(X-2 第二批):preload 已同步拉取文案表,直接填充

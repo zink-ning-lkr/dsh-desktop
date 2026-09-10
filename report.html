@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
-<title>DSH 错误报告</title>
+<title>DSH</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
 <script src="ui-kit.js"></script>
@@ -52,7 +52,7 @@
 </style>
 </head>
 <body>
-<div class="win">
+<div class="win" role="main">
   <div class="win-head">
     <img class="logo" src="assets/whale-white.png" alt="" data-logo>
     <span class="t" id="headTitle"></span>
@@ -64,10 +64,10 @@
     <span class="name" id="name"></span>
     </div>
     <div class="cause" id="cause"></div>
-    <div class="advice" id="advice" role="list" aria-label="处理建议"></div>
+    <div class="advice" id="advice" role="list"></div>
     <div class="log-wrap">
       <span class="sec-label" id="logLabel"></span>
-      <div class="log" id="log" role="log" aria-label="关键日志预览"></div>
+      <div class="log" id="log" role="log" aria-labelledby="logLabel"></div>
     </div>
   </div>
   <div class="foot">
@@ -87,7 +87,9 @@
   // 文案表(X-2 第二批):渲染层 t(),静态文案 JS 填充
   const T = (k, p) => window.__i18n.t(k, p);
   let payload = null;
+  document.title = T('report.winTitle');
   document.getElementById('logLabel').textContent = T('report.logLabel');
+  document.getElementById('advice').setAttribute('aria-label', T('report.adviceLabel'));
   document.getElementById('copyBtn').textContent = T('report.copy');
   document.getElementById('exportBtn').textContent = T('report.export');
   document.getElementById('logBtn').textContent = T('report.logFile');
@@ -104,7 +106,8 @@
     // 可见头部文案跟随场景:进程退出时不应再显示「启动诊断」(原为静态文本)
     const headEl = document.getElementById('headTitle');
     if (headEl) headEl.textContent = p.phase === 'exit' ? T('report.headExit') : T('report.headBoot');
-    const badge = p.badge || (p.phase === 'exit' ? '进程退出' : '启动失败');
+    // 徽标兜底文案入表(X5):原为三元里的中文字面量,与 report.badgeExit/badgeBoot 同词
+    const badge = p.badge || (p.phase === 'exit' ? T('report.badgeExit') : T('report.badgeBoot'));
     document.getElementById('badge').textContent = badge;
     document.getElementById('name').textContent = p.name || '';
     document.getElementById('cause').textContent = p.cause || '';

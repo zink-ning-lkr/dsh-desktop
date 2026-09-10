@@ -1,7 +1,11 @@
 // i18n.js —— 文案集中与术语统一(P2-6 结构先行):主进程共享 t(key, params)。
 // 文案表 i18n/zh-CN.json 启动后首次调用时同步加载并缓存;表缺失或键不存在时
-// 回退 key 本身,保证功能不受文案表影响。渲染层暂未接入(渐进收编:先收编主进程
-// 自绘文案;渲染层经 preload 同步拉取 snapshot() 后本地 t(),status 页已接入(v0.6.0))。
+// 回退 key 本身,保证功能不受文案表影响。
+// 渲染层收编状态(阶段 0 收尾 X5):全部页面已完成接入,渲染层不再有中文硬编码。
+// 页面经各自 preload 的 sendSync('i18n:table') 同步拉取 snapshot() 后本地 t()
+// (accel / loading / report / status / titlebar / reveal-tab / welcome / menu);
+// dialog.html 是唯一例外——它的标题/正文/按钮文案全部由主进程 payload 逐条下发,
+// 页面自身没有面向用户的固定文案,故不接文案表。
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');

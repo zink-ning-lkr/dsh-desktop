@@ -86,18 +86,18 @@
 </style>
 </head>
 <body>
-<div class="win">
+<div class="win" role="main">
   <div class="win-head" id="head">
     <span class="ico" id="ico" aria-hidden="true"></span>
     <span class="t" id="title" aria-live="polite">…</span>
-    <button class="hmbtn" id="bgBtn" title="最小化到任务栏,完成时通知" aria-label="最小化到任务栏,完成时通知">
+    <button class="hmbtn" id="bgBtn">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg><span id="bgLabel"></span>
     </button>
-    <button class="win-close" id="xBtn" title="取消并关闭" aria-label="取消并关闭"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <button class="win-close" id="xBtn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="activity" id="activity">
     <div class="detail" id="detail"></div>
-    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="进度"><div class="fill indet" id="fill"></div></div>
+    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div class="fill indet" id="fill"></div></div>
     <div class="meta"><span id="pct"></span><span id="size"></span></div>
   </div>
   <div class="result" id="result" role="alertdialog" aria-labelledby="rtitle" aria-describedby="rdetail">
@@ -106,7 +106,7 @@
     <div class="rdetail" id="rdetail"></div>
     <div class="btns" id="btns"></div>
   </div>
-  <div class="tlist" id="tlist" role="list" aria-label="任务列表"></div>
+  <div class="tlist" id="tlist" role="list"></div>
 </div>
 <script>
   const S = window.__status;
@@ -118,12 +118,20 @@
   // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key
   const T = (k, p) => window.__i18n.t(k, p);
   // 「后台」按钮文案/提示入表(ST-3):tooltip 精确到行为(最小化到任务栏,非"dsh 转后台")
+  // 头部/列表区其余文案也在本块统一入表(阶段 0 收尾 X5):此前 ✕、进度条、任务列表的
+  // title/aria-label 以中文字面量写在标签属性里,属渲染层硬编码;xBtn 的两处动态改写
+  // (renderHead / 列表模式)仍在原位,此处只保证首帧即有可用标签。
   {
     const bg = document.getElementById('bgBtn');
     const tip = T('status.backgroundTip');
     bg.title = tip;
     bg.setAttribute('aria-label', tip);
     document.getElementById('bgLabel').textContent = T('status.background');
+    const x = document.getElementById('xBtn');
+    x.title = T('status.cancelClose');
+    x.setAttribute('aria-label', T('status.cancelClose'));
+    document.getElementById('bar').setAttribute('aria-label', T('status.progress'));
+    document.getElementById('tlist').setAttribute('aria-label', T('status.listLabel'));
   }
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;

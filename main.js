@@ -1293,8 +1293,9 @@ function menuItems() {
 }
 
 // 快捷键速查浮层(P2-2):数据源与菜单弹层/应用菜单同源(shortcuts.js),不手写第二份
+// 文案走 labelKey → i18n(阶段 0 修 X5),与主菜单同名条目取到同一句话
 function showShortcutsDialog() {
-  const lines = shortcuts.list.map((s) => `${s.label} · ${shortcuts.display(s.menu)}`);
+  const lines = shortcuts.list.map((s) => `${t(s.labelKey)} · ${shortcuts.display(s.menu)}`);
   showDialog({
     type: 'info', title: t('dlg.shortcutsTitle'), width: 420,
     message: t('dlg.shortcutsMsg'),

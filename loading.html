@@ -15,13 +15,20 @@
     color: var(--c-fg2);
     /* 字栈走 ui.css 公共 --font-ui(原为本地重复的一份硬编码字栈) */
     font: var(--font-ui);
+    user-select: none;
+    overflow: hidden;
+  }
+  /* 主区域 landmark(X4):启动内容是本窗唯一主区域,此前全页无 landmark,读屏器无法按区域跳转。
+     布局原语从 body 原样搬到 main —— main 的盒与 body 的内容盒等大(height:100%、无内外边距、
+     无边框),故像素零变化;.logtail / .slow 均为 position:absolute 且无定位祖先,包含块仍是视口,
+     不受这层静态包裹影响。 */
+  main {
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 24px;
-    user-select: none;
-    overflow: hidden;
   }
   .logo {
     width: 56px; height: 56px;
@@ -78,12 +85,13 @@
 </style>
 </head>
 <body>
+<main>
   <img class="logo" src="assets/whale-white.png" alt="" data-logo>
   <div class="ring" aria-hidden="true"></div>
   <p class="stage" id="stage" role="status" aria-live="polite"></p>
   <div class="dots" id="dots" aria-hidden="true"></div>
   <p class="hint" id="hint"></p>
-  <div class="slow" id="slow" role="group" aria-label="启动较慢时的自助操作">
+  <div class="slow" id="slow" role="group">
     <p class="slow-tip" id="slowTip"></p>
     <div class="slow-btns btn-row">
       <button class="btn" id="btnLog" type="button"></button>
@@ -92,11 +100,13 @@
     </div>
   </div>
   <div class="logtail" id="logtail"></div>
+</main>
 <script>
   // 文案表(X-2 第二批):阶段名与主进程 boot 域同源,UITEST 慢启动用例依赖 3 个自助按钮
   const T = (k, p) => window.__i18n.t(k, p);
   document.getElementById('stage').textContent = T('boot.initial');
   document.getElementById('hint').textContent = T('boot.hint');
+  document.getElementById('slow').setAttribute('aria-label', T('boot.slowActions'));
   document.getElementById('slowTip').textContent = T('boot.slowTip');
   document.getElementById('btnLog').textContent = T('boot.viewLog');
   document.getElementById('btnRetry').textContent = T('action.retry');

@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
-<title>下载加速设置</title>
+<title>DSH</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
 <script src="ui-kit.js"></script>
@@ -64,7 +64,7 @@
 </style>
 </head>
 <body>
-<div class="win">
+<div class="win" role="main">
   <div class="win-head">
     <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 4v10M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     <span class="t" id="headTitle"></span>
@@ -121,6 +121,7 @@
   // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <strong> 标签),用 innerHTML
   const T = (k, p) => window.__i18n.t(k, p);
   {
+    document.title = T('accel.title');
     const set = (id, k) => { const el = document.getElementById(id); if (el) el.textContent = T(k); };
     set('headTitle', 'accel.title');
     set('segTitle', 'accel.segTitle');

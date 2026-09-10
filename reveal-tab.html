@@ -26,24 +26,45 @@
   body:hover { background: var(--c-reveal-bg-hover); color: var(--c-fg1); }
   svg { width: 14px; height: 14px; transition: transform .16s ease; }
   body:hover svg { transform: translateY(1px); }
+  /* 主区域 landmark(X4-3)+ 主区域盒:body 仍是 flex 容器与唯一视觉层(背景/圆角/悬停规则
+     一字未动),main 是它唯一子项且宽高 100%,盒与 body 内容盒等大 → 像素零变化。 */
+  main { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  /* 交互宿主从 body 换成真 <button>(阶段 0 修 X4-2):
+     原实现把 role="button" / tabindex="0" / click / keydown 全挂在 <body> 上,语义与可聚焦
+     元素错位——body 不是控件,读屏器的表单控件导航与 Enter 激活都落不到它身上,键盘语义
+     还得靠一段手写 keydown 补。现改真按钮:原生可聚焦、原生 Enter/Space 激活、原生 button 角色,
+     键盘语义不必自建。按钮透明且铺满 main,视觉与命中区完全由 body 承担,故外观不变。
+     复位选择器保持 button(特异性 0,0,1),不高于 ui.css 的 :where(button,…):focus-visible
+     (0,1,0),否则 all:unset 会把公共焦点环一起清掉。 */
+  button {
+    all: unset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    cursor: default;
+    -webkit-app-region: no-drag;
+  }
   @media (prefers-reduced-motion: reduce) { body { animation: none; } }
 </style>
 </head>
-<body role="button" aria-label="" tabindex="0">
-  <svg viewBox="0 0 11 11" aria-hidden="true"><path d="M1.5 4 L5.5 8 L9.5 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+<body>
+<main>
+  <button id="revealBtn" type="button">
+    <svg viewBox="0 0 11 11" aria-hidden="true"><path d="M1.5 4 L5.5 8 L9.5 4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+  </button>
+</main>
 <script>
   // 文案收编 i18n(X-2 漏网):menu.showBar 与本把手语义同源;titlebar-preload 提供 __i18n
   {
     const tip = window.__i18n.t('menu.showBar');
-    document.body.title = tip;
-    document.body.setAttribute('aria-label', tip);
+    const btn = document.getElementById('revealBtn');
+    btn.title = tip;
+    btn.setAttribute('aria-label', tip);
+    // Enter/Space 由 <button> 原生处理,不再需要自建 keydown 分支
+    btn.addEventListener('click', () => window.__titlebar && window.__titlebar.showTitlebar());
   }
-  const show = () => window.__titlebar && window.__titlebar.showTitlebar();
-  document.body.addEventListener('click', show);
-  // role=button 需自带键盘激活:Enter/Space 与鼠标点击同效
-  document.body.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(); }
-  });
 </script>
 </body>
 </html>

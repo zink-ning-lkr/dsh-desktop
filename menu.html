@@ -1,4 +1,7 @@
 <!-- 自绘深色菜单:主菜单与托盘菜单共用渲染器,支持图标/快捷键/勾选项/键盘导航 -->
+<!-- 无 landmark 是有意为之(X4-3 豁免):本窗整体就是一个 role="menu" 弹出层,
+     menu 自身已是读屏器可直接跳入的容器型角色,再套 <main> 只会造出"主区域里只有一个菜单"
+     的误导性结构。同为单控件窗的 dialog.html(role="dialog")同理豁免。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -57,12 +60,16 @@
 </style>
 </head>
 <body>
-<div class="panel" id="panel" role="menu" aria-label="菜单" tabindex="-1"></div>
+<div class="panel" id="panel" role="menu" tabindex="-1"></div>
 <script>
+  // 文案走 i18n(阶段 0 修 X5):菜单曾硬编码「已启用」,是全仓最后一处渲染层 JS 中文硬编码。
+  // menu-preload 已同步拉取快照,T() 语义与 status/titlebar 页一致(表缺失回退 key)。
+  const T = (k, p) => window.__i18n.t(k, p);
   // 菜单图标走 ui-icons.js 共享层(P1-2):按条目 id 取用,内部白名单、textContent 渲染不变
   const ICONS = window.UI_ICONS.menu;
 
   const panel = document.getElementById('panel');
+  panel.setAttribute('aria-label', T('menu.ariaLabel')); // 面板名同样入表(原为中文字面量属性)
   let navRows = []; // 可交互条目的 DOM 行(与 sel 下标一致;禁用行/分隔线不在内)
 
   function render(items) {
@@ -112,7 +119,7 @@
       lbl.className = 'lbl';
       lbl.textContent = it.label; // 文本一律 textContent:label 中拼接的版本号/路径等不经 HTML 解析
       const accel = document.createElement('span');
-      if (it.checked) { accel.className = 'accel'; accel.title = '已启用'; accel.textContent = '✓'; }
+      if (it.checked) { accel.className = 'accel'; accel.title = T('menu.enabled'); accel.textContent = '✓'; }
       else if (it.accel) { accel.className = 'accel'; accel.textContent = it.accel; }
       accel.setAttribute('aria-hidden', 'true'); // 快捷键文本并入 aria-label,避免读屏器拆读
       row.setAttribute('aria-label', it.label + (it.accel ? ' ' + it.accel : ''));

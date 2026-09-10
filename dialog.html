@@ -1,4 +1,6 @@
 <!-- 通用深色对话框:替代原生 MessageBox,支持类型图标/多按钮/Enter=默认/Esc=取消 -->
+<!-- 无 landmark 是有意为之(X4-3 豁免):.win 已是 role="dialog" + aria-modal + 焦点陷阱,
+     读屏器进入模态即播报并锁定其中;再嵌 <main> 属结构性冗余。menu.html 同理豁免。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
