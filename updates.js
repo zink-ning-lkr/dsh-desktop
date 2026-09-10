@@ -86,6 +86,13 @@ function finishDshCheckTimer() {
   state.dshCheckTimer = null;
 }
 
+// 可用性变化外发(阶段 1 S1):命令栏「更新徽标」需要即时知道有没有待处理的新版本。
+// state.pendingVersion 的两处变更(onUpdateAvailable 置值 / cancelStatusOp 清空)是可用性的
+// 唯一真值源,集中经此转发一次,免得调用方各自去比对 state(将来加字段也会漏改)。
+function flushAvail() {
+  try { if (deps && deps.onUpdateStateChange) deps.onUpdateStateChange(); } catch { /* 渲染层未就绪等,忽略 */ }
+}
+
 // 是否已展示过「下载失败」结果窗:下载失败会同时走 autoUpdater 的 error 事件与
 // downloadUpdate 的 promise reject,两边都弹会双重显示,互相见结果为真则跳过
 function downloadErrorShown() {
@@ -211,6 +218,7 @@ function onUpdateAvailable(info) {
   if (!lateResultAllowed(state.manualCheckTimedOutAt, state.manualCheckDropped)) return; // 已取消/超时过宽限期:丢弃迟到结果
   finishUpdateCheckTimer();
   state.pendingVersion = info.version;
+  flushAvail(); // 命令栏更新徽标点亮(阶段 1 S1)
   // 手动=直接弹窗;自动=只发桌面通知,点击通知再弹窗(不抢占当前操作;与 dsh 本体通道语义一致)
   const showResult = (nonIntrusive) => deps.showStatusResult({
     type: 'info', title: t('update.availTitle'), __origin: 'desktop',
@@ -792,6 +800,7 @@ function cancelStatusOp(originArg) {
     state.downloadInProgress = false;
     state.updateDownloaded = false;
     state.pendingVersion = null;
+    flushAvail(); // 命令栏更新徽标熄灭(阶段 1 S1):用户已取消本次更新
   }
   if (origin !== 'desktop') {
     if (state.dshCheckTimer) finishDshCheckTimer();

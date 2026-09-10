@@ -87,6 +87,13 @@
     "closeTray": "关闭(最小化到托盘)",
     "closeQuit": "关闭(直接退出)"
   },
+  "cmdbar": {
+    "groupLabel": "状态与命令",
+    "tasks": "任务中心 · {n} 项进行中",
+    "update": "有新版本可用",
+    "copyWs": "复制工作目录路径",
+    "wsCopied": "已复制工作目录路径"
+  },
   "dlg": {
     "ok": "好的",
     "cancel": "取消",

@@ -188,6 +188,49 @@ function runUitest(d) {
     const bad = [...hard, ...dead, ...noLm];
     d.log(`UITEST i18n-a11y ${ck.every((s) => s.endsWith(':ok')) ? 'PASS' : 'FAIL'} ${ck.join(' ')}${bad.length ? ` 问题:${bad.join(' ')}` : ''}`);
   }, 2550, 'i18n-a11y');
+  // ⓠ 命令栏状态簇(阶段 1 S1):静态结构 + 渲染层真实状态。
+  // 静态部分防"三处命令分发各写一份"与"新增通道漏接线";运行部分防"徽标数字与真实任务数脱节"。
+  uiStep(() => {
+    const ck = [];
+    const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
+    const main = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+    const pre = fs.readFileSync(path.join(__dirname, 'titlebar-preload.js'), 'utf8');
+    const bar = fs.readFileSync(path.join(__dirname, 'titlebar.html'), 'utf8');
+    const icons = fs.readFileSync(path.join(__dirname, 'ui-icons.js'), 'utf8');
+    // 命令分发单一入口:case 只允许在 runCommand 里出现一次。命令栏若照抄一份 switch,
+    // 两个 case 计数会立刻变成 2 —— 这是"菜单能点、命令栏点了没反应"这类漂移的唯一防线。
+    t('cmdbar-runCommand', /function runCommand\(id\)/.test(main));
+    t('cmdbar-single-switch', (main.match(/case 'check-update':/g) || []).length === 1
+      && (main.match(/case 'cycle-theme':/g) || []).length === 1);
+    t('cmdbar-ipc', ['tb:tasks', 'tb:update', 'tb:cycle-theme', 'tb:copy-ws'].every((c) => main.includes(`'${c}'`)));
+    t('cmdbar-bridge', ['onStatus', 'openTasks', 'checkUpdate', 'cycleTheme', 'copyWorkspace'].every((k) => pre.includes(k)));
+    t('cmdbar-push', /function pushTitlebarStatus\(\)/.test(main) && main.includes("send('tb:status'"));
+    // 状态簇四个槽位 + 图标源:新增状态钮必须落进 .cluster,不能散在栏上
+    t('cmdbar-slots', ['svcStat', 'taskBtn', 'updBtn', 'themeBtn'].every((id) => bar.includes(`id="${id}"`))
+      && /class="cluster"[\s\S]{0,900}?<\/div>/.test(bar));
+    t('cmdbar-icons', /const cmdbar = \{/.test(icons)
+      && ['tasks', 'update', 'theme'].every((k) => new RegExp(`${k}:`).test(icons)));
+    t('cmdbar-icons-loaded', (bar.match(/<script\s+src="([^"]+)"/g) || []).join(' ').includes('ui-icons.js'));
+    const bad = ck.filter((s) => s.endsWith(':FAIL'));
+    d.log(`UITEST cmdbar ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}`);
+  }, 2575, 'cmdbar-static');
+  uiStep(() => readDom(d.titlebarView, `(()=>{
+    const c = document.getElementById('cluster');
+    const dot = (document.getElementById('svcDot') || {}).className || '';
+    const svc = (dot.split(' ')[1] || '');
+    const theme = document.getElementById('themeBtn');
+    const tl = theme ? (theme.getAttribute('aria-label') || '') : '';
+    const ws = document.getElementById('workspace');
+    const wl = ws ? (ws.getAttribute('aria-label') || '') : '';
+    const problems = [];
+    if (!c || c.children.length !== 4) problems.push('簇子项=' + (c ? c.children.length : 'none'));
+    if (!['ok','boot','err'].includes(svc)) problems.push('服务点=' + dot);
+    if (svc !== '${d.trayState}') problems.push('服务点与托盘态不符 ' + svc + '≠${d.trayState}');
+    if (!tl.startsWith('外观:')) problems.push('主题提示=' + tl);
+    if (tl.includes('menu.')) problems.push('主题提示回退成裸键:' + tl);
+    if (!wl || wl.includes('cmdbar.')) problems.push('工作目录标签=' + wl);
+    return problems.length ? 'FAIL ' + problems.join(' ;') : 'PASS svc=' + svc + ' theme="' + tl + '" ws="' + wl + '"';
+  })()`, 'cmdbar-dom'), 2650);
   // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
   uiStep(() => {
     const t = d.trayStatusText();
@@ -196,6 +239,16 @@ function runUitest(d) {
     d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
   }, 2600, 'tray-status');
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }); hookWin(d.statusWin, 'status'); }, 3500, 'status-show');
+  // 命令栏任务徽标必须跟随真实任务数(阶段 1 S1 出口标准:有任务在跑时徽标数字正确)
+  uiStep(() => readDom(d.titlebarView, `(()=>{
+    const tb = document.getElementById('taskBtn'), n = document.getElementById('taskN');
+    const shown = !!tb && !tb.hidden;
+    const num = n ? n.textContent : '';
+    const label = tb ? (tb.getAttribute('aria-label') || '') : '';
+    return (shown && /^\\d+$/.test(num) && label.includes(num))
+      ? 'PASS 徽标=' + num + ' label="' + label + '"'
+      : 'FAIL shown=' + shown + ' n=' + num + ' label=' + label;
+  })()`, 'cmdbar-badge'), 3700);
   // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
   //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
   uiStep(() => {

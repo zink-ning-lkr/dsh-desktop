@@ -357,6 +357,9 @@ function trayStatusText() {
 let trayLastTip = null;
 let trayLastIcon = null;
 function refreshTray() {
+  // 命令栏状态簇与托盘用同一份数据(托盘态/进行中任务/工作目录),也在同一时机刷新:
+  // 挂在 refreshTray 上而不是散在各个状态变更点,新增状态变更时不会漏刷。
+  pushTitlebarStatus();
   if (!tray) return;
   const tip = trayStatusText();
   if (tip !== trayLastTip) { trayLastTip = tip; tray.setToolTip(tip); }
@@ -372,7 +375,58 @@ function setTrayState(s) {
   const changed = trayState !== s;
   trayState = s;
   if (s === 'ok' && changed) trayStartedAt = Date.now();
-  refreshTray();
+  refreshTray(); // 内部会一并刷新命令栏状态簇(阶段 1 S1)
+}
+
+// ---------- 命令栏状态簇推送(阶段 1 S1) ----------
+// 托盘态 / 进行中任务数 / 更新可用性 / 主题模式四个字段整体推给 titlebar 渲染层。
+// 整推而非按字段增量:载荷只有 5 个短字段,整推更容易保证两侧一致,调用方也不必
+// 记得"这次改的是哪个字段"。调用点只有一处(refreshTray),故新增状态变更不会漏刷。
+// 同值短路:内容没变就一个 IPC 都不发 —— 这条让本函数可以安全地挂在每 150ms 一次的
+// 进度帧路径上。唯一的例外是下载期间 svcText 里的百分比,它按 1% 粒度变化,属预期。
+let titlebarStatusLast = null;
+function pushTitlebarStatus() {
+  try {
+    const wc = titlebarView && !titlebarView.webContents.isDestroyed() ? titlebarView.webContents : null;
+    if (!wc) return;
+    // 「进行中」不含 ephemeral(状态窗的瞬时 toast 行不是任务,不该计入徽标)
+    let tasks = 0;
+    for (const task of statusTasks.values()) if (!task.done && !task.ephemeral) tasks++;
+    const payload = {
+      svc: trayState,                 // ok / boot / err → 服务点颜色
+      svcText: trayStatusText(),      // 含运行时长与工作目录,与托盘 tooltip 同源
+      tasks,                          // 0 → 渲染层整钮隐藏
+      update: !!(updates.state.pendingVersion || updates.state.updateDownloaded),
+      themeMode: loadConfig().theme || 'auto', // auto / dark / light → 渲染层映射文案
+    };
+    const key = JSON.stringify(payload);
+    if (key === titlebarStatusLast) return; // 同值短路:进度帧不产生 IPC
+    titlebarStatusLast = key;
+    wc.send('tb:status', payload);
+  } catch { /* 窗口销毁竞态等,忽略 */ }
+}
+
+// 命令栏「更新徽标」的可用性真值源在 updates.js(state.pendingVersion 的两次变更);
+// 它经 init 注入的 onUpdateStateChange 回调回来 → 这里刷新徽标。
+// 渲染层未就绪时会话失败也无妨:同值短路保证下次推送仍是最终态。
+
+// 任务徽标点击 → 把任务中心拉回前台。窗口不存在时不凭空造一个空窗:
+// 徽标的前提就是有进行中任务,而任务都会 ensureStatusWindow(),二者不会脱节。
+function focusStatusWindow() {
+  if (!statusWin || statusWin.isDestroyed()) return;
+  if (statusWin.isMinimized()) statusWin.restore();
+  statusWin.show();
+  statusWin.focus();
+}
+
+// 命令栏工作目录点击 → 复制完整路径(S1)。反馈走 toast 统一出口(阶段 1 X1);
+// 该出口未接通前由 notifyToast 兜底,故此处只表达"要说什么",不关心说在哪。
+function copyWorkspacePath() {
+  const ws = loadConfig().workspace || '';
+  if (!ws) return;
+  clipboard.writeText(ws);
+  log(`已复制工作目录路径: ${ws}`);
+  notifyToast(t('cmdbar.wsCopied'));
 }
 
 function trayMenuStatusLabel() {
@@ -1380,12 +1434,11 @@ ipcMain.on('tb:menu', (e) => {
   showMenuPopup();
 });
 
-ipcMain.on('m:action', (e, id) => {
-  if (!trustedEvent(e)) return;
-  // 区分来源:主窗口菜单弹层 / 托盘菜单小窗
-  const fromTray = trayMenuWin && e.sender === trayMenuWin.webContents;
-  if (fromTray) closeTrayMenu();
-  else closeMenuPopup(true);
+// 命令分发单一入口(阶段 1 S1):主菜单弹层 / 托盘菜单 / 命令栏状态簇走同一实现,
+// 不再各自维护一份 switch(此前命令栏若要复用只能照抄一份,必然漂移)。
+// 阶段 2 的 commands.js 会把这里提升为「id → {labelKey, icon, accel, run}」注册表,届时
+// 本函数退化为注册表查表执行;现在先把入口收敛,保证三条路径行为一致。
+function runCommand(id) {
   switch (id) {
     case 'show-main': showMainWindow(); break;
     case 'open-workspace': changeWorkspace(); break;
@@ -1437,10 +1490,20 @@ ipcMain.on('m:action', (e, id) => {
       const label = t({ auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' }[cfg.theme]);
       log(`外观已切换为: ${label}`);
       notifyToast(t('menu.appearance', { mode: label }));
+      pushTitlebarStatus(); // 命令栏主题钮的提示文案随模式变(阶段 1 S1);此路径不走 refreshTray
       break;
     }
     case 'quit': app.quit(); break;
   }
+}
+
+ipcMain.on('m:action', (e, id) => {
+  if (!trustedEvent(e)) return;
+  // 区分来源:主窗口菜单弹层 / 托盘菜单小窗
+  const fromTray = trayMenuWin && e.sender === trayMenuWin.webContents;
+  if (fromTray) closeTrayMenu();
+  else closeMenuPopup(true);
+  runCommand(id);
 });
 ipcMain.on('m:close', (e) => {
   if (!trustedEvent(e)) return;
@@ -1534,7 +1597,13 @@ function createWindow() {
   titlebarView.setBackgroundColor(chromeBgColor());
   titlebarView.webContents.loadFile(path.join(__dirname, 'titlebar.html')).catch(() => {});
   // 页面加载完成后同步一次关闭语义 tooltip(loadFile 前 send 会丢)
-  titlebarView.webContents.on('did-finish-load', sendCloseTip);
+  // 同时补推一次状态簇(阶段 1 S1):同值短路下 titlebarStatusLast 可能已有缓存值,
+  // 页面重载后必须无条件重发,否则新页面会一直空着——故先清缓存再推。
+  titlebarView.webContents.on('did-finish-load', () => {
+    sendCloseTip();
+    titlebarStatusLast = null;
+    pushTitlebarStatus();
+  });
 
   dshView = new WebContentsView({
     webPreferences: {
@@ -1698,6 +1767,23 @@ ipcMain.on('tb:show-bar', (e) => {
   if (!trustedEvent(e)) return;
   toggleTitlebar(true);
   dshView?.webContents.focus();
+});
+// 命令栏状态簇(阶段 1 S1):四个动作全部复用 runCommand / 既有函数,不另写一份语义
+ipcMain.on('tb:tasks', (e) => {
+  if (!trustedEvent(e)) return;
+  focusStatusWindow();
+});
+ipcMain.on('tb:update', (e) => {
+  if (!trustedEvent(e)) return;
+  runCommand('check-update'); // 与主菜单「检查更新…」同源
+});
+ipcMain.on('tb:cycle-theme', (e) => {
+  if (!trustedEvent(e)) return;
+  runCommand('cycle-theme'); // 与主菜单「外观」同源
+});
+ipcMain.on('tb:copy-ws', (e) => {
+  if (!trustedEvent(e)) return;
+  copyWorkspacePath();
 });
 
 // ---------- 启动 / 重启 dsh 并加载页面 ----------
@@ -1955,6 +2041,9 @@ if (!gotLock) {
       getDshChild: () => dshChild,
       setDshChild: (c) => { dshChild = c; },
       bumpBootSeq: () => { bootSeq++; },
+      // 更新可用性变化(阶段 1 S1):命令栏更新徽标的显隐由 state.pendingVersion 决定,
+      // 通道侧在置值/清空两处回调过来,主进程只负责刷新徽标
+      onUpdateStateChange: () => pushTitlebarStatus(),
     });
     buildMenu();
     createWindow();

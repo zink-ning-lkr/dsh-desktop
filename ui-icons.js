@@ -1,7 +1,9 @@
 /* ui-icons.js —— 全部自绘页面共享的 SVG 图标常量(单一事实源,P1-2)。
    用法:<script src="ui-icons.js"></script> 置于页面自身脚本之前(CSP script-src 'self' 已允许),
    经 window.UI_ICONS 访问:UI_ICONS.result.info / UI_ICONS.activity.download / UI_ICONS.menu['open-workspace']。
-   描边规范:result/activity 族 viewBox 24(线性图标);menu 族 viewBox 16、固定 15×15。
+   域:result / activity(结果与活动态,viewBox 24)· menu(菜单条目,viewBox 16、固定 15×15)
+      · cmdbar(命令栏状态簇,viewBox 16、固定 15×15)。
+   描边规范:result/activity 族 viewBox 24(线性图标);menu/cmdbar 族 viewBox 16、固定 15×15。
    原三份逐字符重复的定义(status RES / dialog ICONS / menu ICONS)已收编至此,改图标只改这一处。 */
 (function () {
   const result = {
@@ -39,5 +41,13 @@
     'quit': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2v5M4.5 4a5 5 0 1 0 7 0"/></svg>',
     'tray-status': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>',
   };
-  window.UI_ICONS = { result, activity, menu };
+  // 命令栏状态簇(阶段 1 S1):24px 按钮内的 15×15 线性图标,与 menu 族同一描边规范。
+  // 独立成域而不复用 menu 族:menu 族按「菜单条目 id」组织,状态簇按「状态语义」组织,
+  // 二者的键空间会撞车(check-update 既是菜单条目也是状态簇按钮,但将来会分叉)。
+  const cmdbar = {
+    tasks: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5.8 4h7.7M5.8 8h7.7M5.8 12h7.7"/><path d="M2.2 4l.9.9 1.6-1.8M2.2 8l.9.9 1.6-1.8M2.2 12l.9.9 1.6-1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    update: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11"/></svg>',
+    theme: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor" stroke="none"/></svg>',
+  };
+  window.UI_ICONS = { result, activity, menu, cmdbar };
 })();

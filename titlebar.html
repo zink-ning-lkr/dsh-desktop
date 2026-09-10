@@ -7,6 +7,7 @@
 <title>titlebar</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-icons.js"></script>
 <style>
   :root { --bg: var(--c-bg0); --fg: var(--c-fg2); }
   html, body { margin: 0; height: 100%; overflow: hidden; }
@@ -56,9 +57,62 @@
     opacity: .9;
   }
   .name { white-space: nowrap; opacity: .85; }
-  /* 工作目录次要信息:opacity .72(原 .5 对比度低于 WCAG AA 4.5:1) */
-  .workspace { opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  /* 工作目录:由只读文本升级为「点击复制路径」(阶段 1 S1)。
+     与其余按钮不同,这里是文本行内块 —— 必须显式还原 span 时代的盒模型:
+     display:block + overflow:hidden + text-overflow:ellipsis 三者齐备截断才成立,
+     照抄通用 button 复位的 display:flex 会让 text-overflow 作用在匿名 flex 项上而失效。
+     [hidden] 需单独兜:作者样式 .workspace{display:block} 会盖掉 UA 的 [hidden]{display:none}。 */
+  .workspace {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    opacity: .72;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 46vw;
+  }
+  .workspace:hover { opacity: 1; }
+  .workspace[hidden] { display: none; }
   .spacer { flex: 1; }
+  /* ---- 状态簇(阶段 1 S1)· 主题边界(X2) ----
+     栏内有且只有一处跟随 dsh 页面采样色:body 的背景(--bg)与前景(--fg,由主进程按采样
+     底色亮度算好),窗口键与状态簇的默认字形色都取 --fg,浅底/深底都可读。
+     hover 底色沿用窗口键同一套 ui.css 令牌(--c-hover 是中性半透明灰,两种底色上都成立),
+     于是整条栏只有一套交互色 —— 这正是 X2 要消掉的「同一条栏两套色系」的割裂。
+     状态点/徽标是唯一的语义强调色,取 ui.css 的 --c-ok/--c-warn/--c-err/--c-brand。 */
+  .cluster {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 100%;
+    padding: 0 4px;
+    flex: none;
+    /* 1px 发丝线把簇与栏底(采样色)分开。颜色由 --fg 派生而非 --c-hairline:
+       --c-hairline 走 --c-border,在浅色采样底上会隐形,起不到分隔作用。 */
+    box-shadow: inset 1px 0 0 color-mix(in srgb, var(--fg) 22%, transparent);
+  }
+  .cbtn { position: relative; width: 24px; height: 24px; border-radius: var(--radius-s); color: var(--fg); }
+  .cbtn:hover { background: var(--c-hover); }
+  .cbtn:active { background: var(--c-hover-strong); }
+  .cbtn svg { width: 15px; height: 15px; } /* 与 ui-icons cmdbar 族同规格 */
+  .cbtn[hidden] { display: none; } /* 无内容的状态钮整钮隐藏,不留空位(见 S1) */
+  /* 服务点:与按钮同尺寸的盒,但不可交互、无 hover 底(它不是按钮) */
+  .cstat { position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+  /* 圆点:颜色即状态(默认灰=未判定,启动瞬间才可能短暂出现) */
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c-fg3); }
+  .dot.ok { background: var(--c-ok); }
+  .dot.boot { background: var(--c-warn); }
+  .dot.err { background: var(--c-err); }
+  /* 角标:数字 / 纯圆点两种形态,压在按钮右上角 */
+  .cbtn .sup {
+    position: absolute; top: -2px; right: -2px;
+    min-width: 15px; height: 14px; padding: 0 3px;
+    border-radius: 7px;
+    background: var(--c-brand); color: #fff;
+    font-size: var(--fs-micro); line-height: 14px; font-weight: 600; text-align: center;
+  }
+  .cbtn .sup.dot-only { min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; }
   .cap { display: flex; height: 100%; flex: none; }
   .cap button { width: 44px; }
   .cap button:hover { background: var(--c-hover); }
@@ -78,9 +132,25 @@
   </button>
   <div class="title">
     <img class="logo" src="assets/whale-white.png" alt="DSH"><span class="name">DSH</span>
-    <span class="workspace" id="workspace"></span>
+    <!-- 工作目录:点击复制完整路径(S1)。<button> 而非 span+role:上一轮已把 reveal-tab 的
+         "role=button 挂在非控件元素上" 修掉,这里不重蹈覆辙。 -->
+    <button class="workspace" id="workspace" type="button"></button>
   </div>
+  <!-- 中 · 命令入口:阶段 2 接入命令面板(胶囊按钮 + Ctrl+K 徽标)。
+       未实现前按计划降级隐藏 —— 菜单与快捷键不受影响,可独立灰度上线。
+       此处保留段位插入点,便于对照 §5.1 的三段式布局。 -->
   <div class="spacer"></div>
+  <!-- 右 · 状态簇(阶段 1 S1):服务点 / 任务徽标 / 更新徽标 / 主题。
+       徽标与更新钮在无内容时整钮隐藏,避免恒定噪音;图标由 ui-icons.js 注入(command-bar 族)。 -->
+  <div class="cluster" id="cluster" role="group">
+    <!-- 服务点:纯状态指示,不做成按钮 —— 它没有可执行动作,做成按钮只会多一个无名的 Tab 停靠点。
+         role="status" 让状态变化被读屏播报(播报的是短状态词,不含百分比,不会刷屏);
+         悬停提示走 title,内容与托盘 tooltip 同源(含运行时长与工作目录)。 -->
+    <span class="cstat" id="svcStat" role="status" title=""><span class="dot" id="svcDot"></span><span class="sr-only" id="svcText"></span></span>
+    <button class="cbtn" id="taskBtn" type="button" hidden><span class="sup" id="taskN" aria-hidden="true"></span></button>
+    <button class="cbtn" id="updBtn" type="button" hidden><span class="sup dot-only" aria-hidden="true"></span></button>
+    <button class="cbtn" id="themeBtn" type="button"></button>
+  </div>
   <div class="cap">
     <button id="collapseBtn" title="" aria-label="">
       <svg viewBox="0 0 11 11"><path d="M1.5 7.5 L5.5 3.5 L9.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
@@ -99,20 +169,67 @@
 </main>
 <script>
   const t = window.__titlebar;
-  // 静态文案收编(X-2 第二批):preload 已同步拉取文案表,直接填充
-  {
-    const T = (k) => window.__i18n.t(k);
-    const setTip = (id, k) => {
-      const el = document.getElementById(id);
-      el.title = T(k);
-      el.setAttribute('aria-label', T(k));
-    };
-    setTip('menuBtn', 'titlebar.menu');
-    setTip('collapseBtn', 'menu.hideBar');
-    setTip('minBtn', 'titlebar.minimize');
-    setTip('maxBtn', 'titlebar.maximize');
-    setTip('closeBtn', 'common.close');
-  }
+  const $ = (id) => document.getElementById(id);
+  // 文案表(X-2 第二批):preload 已同步拉取,直接填充。T 提到顶层供状态簇复用。
+  const T = (k, p) => window.__i18n.t(k, p);
+  const setTip = (id, text) => {
+    const el = $(id);
+    el.title = text;
+    el.setAttribute('aria-label', text);
+  };
+  setTip('menuBtn', T('titlebar.menu'));
+  setTip('collapseBtn', T('menu.hideBar'));
+  setTip('minBtn', T('titlebar.minimize'));
+  setTip('maxBtn', T('titlebar.maximize'));
+  setTip('closeBtn', T('common.close'));
+
+  /* ---- 状态簇(阶段 1 S1)----
+     服务点 / 任务徽标 / 更新徽标 / 主题。四项全部由主进程 tb:status 整体推送,
+     渲染层不做增量合并(载荷 5 个字段,整推更容易与主进程保持一致)。
+     图标走 ui-icons.js 的 cmdbar 族经 insertAdjacentHTML 注入:必须用 afterbegin,
+     因为角标是静态子节点,innerHTML= 会把角标一起冲掉。 */
+  const ICONS = window.UI_ICONS.cmdbar;
+  [['taskBtn', ICONS.tasks], ['updBtn', ICONS.update], ['themeBtn', ICONS.theme]]
+    .forEach(([id, svg]) => $(id).insertAdjacentHTML('afterbegin', svg));
+  $('cluster').setAttribute('aria-label', T('cmdbar.groupLabel'));
+  // 模式值 → 文案键:复用主菜单「外观」的同一组键,命令栏与菜单不会各写一份措辞
+  const THEME_KEY = { auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' };
+  const SVC_KEY = { ok: 'tray.running', boot: 'tray.booting', err: 'tray.stopped' };
+  const svcStat = $('svcStat');
+  const svcDot = $('svcDot');
+  const svcText = $('svcText');
+  const taskBtn = $('taskBtn');
+  const taskN = $('taskN');
+  const updBtn = $('updBtn');
+
+  t.onStatus((st) => {
+    // 服务点:颜色即状态。两处文案用途不同,不能混用一份:
+    //   title    —— 悬停提示,用主进程给的完整文本(含运行时长与工作目录,与托盘 tooltip 同源)
+    //   svcText  —— role="status" 的播报文本,只用短状态词;若播报完整文本,下载期间会以
+    //               1% 的粒度反复打断读屏
+    svcDot.className = 'dot ' + (st.svc === 'ok' || st.svc === 'boot' ? st.svc : 'err');
+    svcStat.title = st.svcText || T('tray.stopped');
+    svcText.textContent = T(SVC_KEY[st.svc] || 'tray.stopped');
+    // 任务徽标:0 项时整钮隐藏,不制造恒定噪音;数字同步进 aria-label(角标自身 aria-hidden)
+    if (st.tasks > 0) {
+      taskBtn.hidden = false;
+      taskN.textContent = st.tasks > 99 ? '99+' : String(st.tasks);
+      setTip('taskBtn', T('cmdbar.tasks', { n: st.tasks }));
+    } else {
+      taskBtn.hidden = true;
+    }
+    // 更新徽标:仅在有待处理新版本时出现
+    updBtn.hidden = !st.update;
+    if (st.update) setTip('updBtn', T('cmdbar.update'));
+    // 主题钮:提示带当前模式
+    setTip('themeBtn', T('menu.appearance', { mode: T(THEME_KEY[st.themeMode] || 'menu.appearanceAuto') }));
+  });
+  // 三个可交互状态钮各转发主进程的同名实现(菜单条目 / 既有函数),渲染层不复制语义
+  taskBtn.onclick = () => t.openTasks();
+  updBtn.onclick = () => t.checkUpdate();
+  $('themeBtn').onclick = () => t.cycleTheme();
+  $('workspace').onclick = () => t.copyWorkspace();
+
   // 鲸鱼 logo 黑白版:标题栏底色跟 dsh 页面采样色(而非主题),logo 也随之切换,
   // 否则浅色页面背景上白鲸不可见。采样到达前(加载页阶段)底色是令牌色,跟随 data-theme。
   const logo = document.querySelector('.logo');
@@ -121,34 +238,41 @@
   setLogo(document.documentElement.hasAttribute('data-theme'));
   new MutationObserver(() => { if (!sampled) setLogo(document.documentElement.hasAttribute('data-theme')); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  document.getElementById('menuBtn').onclick = () => t.openMenu();
-  document.getElementById('minBtn').onclick = () => t.minimize();
-  document.getElementById('maxBtn').onclick = () => t.toggleMaximize();
-  document.getElementById('closeBtn').onclick = () => t.close();
-  document.getElementById('collapseBtn').onclick = () => t.hideTitlebar();
+  $('menuBtn').onclick = () => t.openMenu();
+  $('minBtn').onclick = () => t.minimize();
+  $('maxBtn').onclick = () => t.toggleMaximize();
+  $('closeBtn').onclick = () => t.close();
+  $('collapseBtn').onclick = () => t.hideTitlebar();
   t.onTheme(({ bg, fg, light }) => {
-    // 跟随 dsh 页面背景色:纯色栏底与页面顶边相接,同色下无缝
+    // 跟随 dsh 页面背景色:纯色栏底与页面顶边相接,同色下无缝。
+    // 注意:这里只改 body 的底色与默认前景 —— 状态簇的语义强调色与 hover 用的是 ui.css 令牌,
+    // 不受采样影响(阶段 1 X2:栏内只有"底色/字形色"跟随页面,"交互色"统一走令牌)。
     sampled = true;
     document.body.style.backgroundColor = bg;
     document.body.style.color = fg;
     setLogo(light);
   });
   t.onMenuState((open) => {
-    const el = document.getElementById('menuBtn');
+    const el = $('menuBtn');
     if (el) {
       el.classList.toggle('active', !!open);
       el.setAttribute('aria-expanded', String(!!open)); // haspopup 配套:读屏播报展开/折叠(MENU-2)
     }
   });
   t.onMaximized((max) => {
-    document.getElementById('icoMax').style.display = max ? 'none' : '';
-    document.getElementById('icoRestore').style.display = max ? '' : 'none';
-    document.getElementById('maxBtn').title = max ? window.__i18n.t('titlebar.restore') : window.__i18n.t('titlebar.maximize');
-    document.getElementById('maxBtn').setAttribute('aria-label', max ? window.__i18n.t('titlebar.restore') : window.__i18n.t('titlebar.maximize'));
+    $('icoMax').style.display = max ? 'none' : '';
+    $('icoRestore').style.display = max ? '' : 'none';
+    setTip('maxBtn', max ? T('titlebar.restore') : T('titlebar.maximize'));
   });
-  t.onWorkspace((ws) => { document.getElementById('workspace').textContent = ws ? `— ${ws}` : ''; });
+  t.onWorkspace((ws) => {
+    const el = $('workspace');
+    el.textContent = ws ? `— ${ws}` : '';
+    // 无工作目录时整钮隐藏:空按钮仍会被 Tab 命中,是个没有名字的焦点停靠点
+    el.hidden = !ws;
+    if (ws) setTip('workspace', T('cmdbar.copyWs'));
+  });
   // 关闭按钮语义随设置联动:「最小化到托盘」提示用户窗口并未退出(否则点 ✕ 后窗口消失易误以为退出了)
-  t.onCloseTip((tip) => { if (tip) { document.getElementById('closeBtn').title = tip; document.getElementById('closeBtn').setAttribute('aria-label', tip); } });
+  t.onCloseTip((tip) => { if (tip) setTip('closeBtn', tip); });
 </script>
 </body>
 </html>
