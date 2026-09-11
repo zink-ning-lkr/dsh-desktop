@@ -11,13 +11,9 @@
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
-  /* 头部/关闭按钮走 ui.css 公共 .win-head/.win-close;圆角归一到公共 10px(原 12px 与其余窗口不一) */
-  .win-head .logo { width: 18px; height: 18px; flex: none; }
-  /* Win11 Mica 试点(P2-3):系统材质透出——窗口改半透明底并去掉自绘大阴影(系统已有边界) */
-  .win.mica {
-    --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent);
-    --win-shadow: none;
-  }
+  /* 头部三件套(logo/标题/✕)由 ui-kit.winShell 构造(T-5):结构与接线单一来源。
+     logo 走 .win-head .ico img 的 ui.css 公共规格(18px),无需本地尺寸规则 */
+  /* Win11 Mica:材质样式在 ui.css §5(窗口外壳层),本页只加类名 */
   .body { flex: 1; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4) var(--sp-3); min-height: 0; }
   /* 状态横幅(深澜):badge 胶囊 + 结论名合一 —— 渐变底 + 左缘 4px 语义色线。
      boot(启动失败)=赤潮红;exit(进程退出)=珊瑚金(由渲染层按 phase 加 .exit) */
@@ -35,7 +31,7 @@
     background: linear-gradient(180deg, color-mix(in srgb, var(--c-warn) 10%, transparent), color-mix(in srgb, var(--c-warn) 3%, transparent));
   }
   .badge {
-    flex: none; padding: 4px var(--sp-3); border-radius: 999px; font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl);
+    flex: none; padding: 4px var(--sp-3); border-radius: var(--radius-pill); font-size: var(--fs-ctrl); font-weight: 600; line-height: var(--lh-ctrl);
     background: color-mix(in srgb, var(--c-err) 15%, transparent); color: var(--c-err); border: 1px solid color-mix(in srgb, var(--c-err) 35%, transparent);
   }
   .cls.exit .badge { background: color-mix(in srgb, var(--c-warn) 15%, transparent); color: var(--c-warn); border-color: color-mix(in srgb, var(--c-warn) 35%, transparent); }
@@ -80,9 +76,6 @@
   .log .line.warn { color: var(--c-warn); border-left: 2px solid color-mix(in srgb, var(--c-warn) 60%, transparent); padding-left: calc(var(--sp-2) - 2px); margin-left: calc(var(--sp-2) * -1); }
   /* 仅错误模式下,非错误行整个 .line 折叠(而不是隐藏 DOM),保留 grep/复制全文的能力 */
   .log.err-only .line:not(.err) { display: none; }
-  /* 颜色变量缺失时(浅色主题个别子集)走兜底,避免无声白屏 */
-  :root { --c-warn: #f59e0b; --c-fg3: #909296; }
-  [data-theme="light"] { --c-warn: #b45309; --c-fg3: #6b7280; }
   /* 脚区与正文之间加一条发丝线:动作/取证工具与上方内容分属两个层级(原无分隔,按钮组在长日志下像正文续行) */
   .foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--c-hairline); }
   /* 动作按钮(重试/退出等)必须是独立的 flex 行且不可压缩:
@@ -99,9 +92,7 @@
 <body>
 <div class="win" role="main">
   <div class="win-head">
-    <img class="logo" src="assets/whale-white.png" alt="" data-logo>
-    <span class="t" id="headTitle"></span>
-    <button class="win-close" id="xBtn" title="" aria-label=""><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <!-- 三件套由 ui-kit.winShell 构造(T-5):品牌小图带 data-logo 跟随主题换黑白 -->
   </div>
   <div class="body">
     <div class="cls">
@@ -121,13 +112,14 @@
     </div>
   </div>
   <div class="foot">
-    <span class="inline-feedback" id="flash"></span>
+    <!-- 复制/导出的结果反馈:读屏要能播报(X-3)。构件只改 className/textContent,加 aria-live 零冲突 -->
+    <span class="inline-feedback" id="flash" aria-live="polite"></span>
     <div id="actions" class="btn-row"></div>
     <span class="spacer"></span>
     <span class="note" id="reportPath"></span>
-    <button id="logBtn" class="btn"></button>
-    <button id="copyBtn" class="btn"></button>
-    <button id="exportBtn" class="btn"></button>
+    <button id="logBtn" class="btn" type="button"></button>
+    <button id="copyBtn" class="btn" type="button"></button>
+    <button id="exportBtn" class="btn" type="button"></button>
   </div>
 </div>
 <script>
@@ -136,6 +128,14 @@
   const K = window.UI_KIT;
   // 文案表(X-2 第二批):渲染层 t(),静态文案 JS 填充
   const T = (k, p) => window.__i18n.t(k, p);
+  // 头部三件套(品牌小图 + 标题 + ✕)由 winShell 构造(T-5):结构与接线单一来源。
+  // 关闭回调直连主进程 rp:action('_close'),可访问名入表(common.close)
+  const shell = K.winShell(document.querySelector('.win-head'), {
+    icon: { img: 'assets/whale-white.png', logo: true },
+    title: T('report.winTitle'),
+    close: T('common.close'),
+    onClose: () => R.action('_close'),
+  });
   let payload = null;
   document.title = T('report.winTitle');
   document.getElementById('logLabel').textContent = T('report.logLabel');
@@ -148,11 +148,6 @@
   const errOnlyBtn = document.getElementById('errOnlyBtn');
   errOnlyBtn.textContent = T('report.logOnlyErrors');
   errOnlyBtn.setAttribute('aria-label', T('report.logOnlyErrors'));
-  {
-    const x = document.getElementById('xBtn');
-    x.title = T('common.close');
-    x.setAttribute('aria-label', T('common.close'));
-  }
 
   // 行级分类(阶段 3 S4-RPT-3):同一正则跑两次没必要 —— 一次返回类别字符串,
   // 渲染层做 toggle 时再按需 filter,避免拆两次 + 一次样式分配造成的性能漂移
@@ -211,8 +206,7 @@
     document.title = p.name || T('report.winTitle');
     if (p.mica) document.querySelector('.win')?.classList.add('mica'); // Win11 系统材质透出(P2-3)
     // 可见头部文案跟随场景:进程退出时不应再显示「启动诊断」(原为静态文本)
-    const headEl = document.getElementById('headTitle');
-    if (headEl) headEl.textContent = p.phase === 'exit' ? T('report.headExit') : T('report.headBoot');
+    shell.title.textContent = p.phase === 'exit' ? T('report.headExit') : T('report.headBoot');
     // 徽标兜底文案入表(X5):原为三元里的中文字面量,与 report.badgeExit/badgeBoot 同词
     const badge = p.badge || (p.phase === 'exit' ? T('report.badgeExit') : T('report.badgeBoot'));
     document.getElementById('badge').textContent = badge;
@@ -241,7 +235,7 @@
     K.buttonRow(actions, p.actions || [], (a) => R.action(a.id));
     // 打开即聚焦主操作(重试;无动作时回落 ✕):键盘 Enter 直达修复动线(RPT-2)。
     // raf:等一帧布局稳定后再聚焦,避免测量期焦点被重排吞掉(沿用原实现的做法)
-    K.focusPrimary(actions, { raf: true, fallback: document.getElementById('xBtn') });
+    K.focusPrimary(actions, { raf: true, fallback: shell.close });
   }
 
   function flash(msg) {
@@ -249,7 +243,6 @@
     K.feedback(document.getElementById('flash'), msg);
   }
 
-  document.getElementById('xBtn').addEventListener('click', () => R.action('_close'));
   document.getElementById('exportBtn').addEventListener('click', () => R.export());
   document.getElementById('copyBtn').addEventListener('click', () => R.copy());
   document.getElementById('logBtn').addEventListener('click', () => R.openLog());

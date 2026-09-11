@@ -1,6 +1,10 @@
 # 依赖与构建产物
 node_modules/
 dist/
+# electron-builder 打包中途的暂存目录(无脚本引用,跑 dist 时会重建)
+.prepack-base/
+# NVIDIA 驱动经 Chromium GPU 进程在 cwd 下创建的空目录树(非项目产物)
+NVIDIA Corporation/
 
 # 运行期/工具产生的临时文件
 CRASH.txt

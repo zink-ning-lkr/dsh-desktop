@@ -257,11 +257,8 @@ function endHandleHint() {
 function ensureRevealTab() {
   if (!mainWindow) return;
   if (revealTabView && !revealTabView.webContents.isDestroyed()) return;
-  revealTabView = new WebContentsView({
-    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'titlebar-preload.js') },
-  });
-  revealTabView.setBackgroundColor('#00000000'); // 圆角处的透明角落不露白
-  revealTabView.webContents.loadFile(path.join(__dirname, 'reveal-tab.html')).catch(() => {});
+  // 下拉把手:懒创建 + 收起即销毁(内存优化 P0-1);与标题栏共用 preload
+  revealTabView = createAuxView({ file: 'reveal-tab.html', preload: 'titlebar-preload.js' });
   // S3:首次收起与把手视图创建是同一时刻发生的,提示可能在 document 就绪前就置位了 ——
   // 加载完成补发一次(捕获局部引用:此间视图可能已被销毁重建)
   const v = revealTabView;
@@ -450,7 +447,10 @@ function refreshTray() {
 function setTrayState(s) {
   const changed = trayState !== s;
   trayState = s;
-  if (s === 'ok' && changed) trayStartedAt = Date.now();
+  if (s === 'ok' && changed) {
+    trayStartedAt = Date.now();
+    refreshTotalMemory(true); // 服务刚就绪:进程树此时才存在,顺带补一次内存读数(P2-4 的按需刷新时机之一)
+  }
   refreshTray(); // 内部会一并刷新命令栏状态簇(阶段 1 S1)
 }
 
@@ -480,6 +480,13 @@ function pushTitlebarStatus() {
     titlebarStatusLast = key;
     wc.send('tb:status', payload);
   } catch { /* 窗口销毁竞态等,忽略 */ }
+}
+
+// 命令栏的工作目录芯片(阶段 1 S1):启动时下发一次(见 bootDsh),标题栏页面加载完成后再补一次。
+// 单次下发不够 —— send 可能早于渲染层注册监听,而该芯片初始是 hidden 的,漏收的表现是
+// 「整轮会话都看不到工作目录」,只有切换目录才把它点亮,极难归因。
+function pushWorkspace(ws) {
+  titlebarView?.webContents.send('tb:workspace', ws || '');
 }
 
 // 命令栏「更新徽标」的可用性真值源在 updates.js(state.pendingVersion 的两次变更);
@@ -563,19 +570,17 @@ function showTrayMenu() {
   let y = cursor.y - H - 10;
   if (y < wa.y + 4) y = cursor.y + 10;
 
-  trayMenuWin = new BrowserWindow({
-    x, y, width: W, height: H, useContentSize: true,
-    frame: false, transparent: true, resizable: false, skipTaskbar: true,
-    alwaysOnTop: true, show: false,
-    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'menu-preload.js') },
+  // 托盘菜单:瞬时弹层,透明底贴光标,常驻最顶,不进任务栏 —— 与主菜单弹层同策略(用完即毁)
+  trayMenuWin = createAuxWindow({
+    file: 'menu.html', preload: 'menu-preload.js', x, y, width: W, height: H,
+    props: { transparent: true, resizable: false, skipTaskbar: true, alwaysOnTop: true, useContentSize: true },
   });
-  trayMenuWin.setMenuBarVisibility(false);
-  trayMenuWin.loadFile(path.join(__dirname, 'menu.html')).then(() => {
-    if (!trayMenuWin) return;
+  trayMenuWin.webContents.once('did-finish-load', () => {
+    if (!trayMenuWin || trayMenuWin.isDestroyed()) return;
     trayMenuWin.webContents.send('m:show', { items, w: 264, margin: 12 });
     trayMenuWin.show();
     trayMenuWin.focus();
-  }).catch(() => {}); // 窗口早关等取消加载,忽略
+  });
   trayMenuWin.on('blur', () => closeTrayMenu());
   trayMenuWin.on('closed', () => { trayMenuWin = null; });
 }
@@ -622,6 +627,9 @@ function applyStatusProgress() {
   } catch { /* 窗口已销毁等 */ }
 }
 
+// 状态窗宽度:窗口重建与内容高度微调两处共用一份(此前两处各写一个 410 字面量)
+const STATUS_W = 410;
+
 // 窗口内容高度:单任务保持旧尺寸(活动 186 / 结果 250,UITEST 锁定);
 // 多任务列表按行数增长并封顶 460,超出由列表内部滚动吸收
 function statusHeight() {
@@ -646,13 +654,21 @@ function statusWinTitle(tasks) {
 }
 
 // 推送整帧任务数组给渲染器(渲染器单任务时退化为旧单视图,多任务渲染列表)
+// 同值短路:本函数由 progress 回调以 150ms 一帧驱动(约 7 帧/秒),而 setContentSize 会触发
+// 一次原生 resize + 渲染层重排,setTitle 也是原生调用 —— 数值没变时不该触碰系统 API。
+// 与托盘 tooltip / 命令栏状态簇的短路同一模式(那两处早已短路,唯独最重的窗口尺寸漏了)。
+// 缓存随窗口销毁清空(见 statusWin.on('closed'))。
+let statusLastH = -1;
+let statusLastTitle = null;
 function pushTasks({ focus = false } = {}) {
   if (!statusWin) return;
   const tasks = [...statusTasks.values()];
   const act = tasks.filter((t) => !t.done);
   statusPayload = act[act.length - 1] || null; // "最近活动载荷":托盘 tooltip/updates 进度守卫读取
-  statusWin.setContentSize(410, statusHeight());
-  statusWin.setTitle(statusWinTitle(tasks));
+  const h = statusHeight();
+  if (h !== statusLastH) { statusLastH = h; statusWin.setContentSize(STATUS_W, h); }
+  const wt = statusWinTitle(tasks);
+  if (wt !== statusLastTitle) { statusLastTitle = wt; statusWin.setTitle(wt); }
   statusWin.webContents.send('st:tasks', tasks);
   applyStatusProgress();
   refreshTray(); // 下载进度/状态变化同步进托盘 tooltip(P0-3)
@@ -666,17 +682,17 @@ function pushTasks({ focus = false } = {}) {
 
 function ensureStatusWindow() {
   if (statusWin) return true;
-  statusWin = new BrowserWindow({
-    width: 410, height: 186, useContentSize: true,
-    frame: false, resizable: false, skipTaskbar: false, show: false,
-    // Win11 Acrylic 轻量层(P2-3 铺开,v0.6.1):系统材质透出,渲染层经 st:env 加半透明底;Win10 回落实色
-    backgroundMaterial: isWin11() ? 'acrylic' : undefined,
-    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'status-preload.js') },
+  // 状态窗:单任务固定档(186/250)/多任务按内容高度微调,不可调大小;Win11 Acrylic 轻量层
+  // (P2-3 铺开,v0.6.1);「挂后台」= 最小化到任务栏,不是销毁
+  statusWin = createAuxWindow({
+    file: 'status.html', preload: 'status-preload.js', width: STATUS_W, height: 186,
+    props: {
+      useContentSize: true, resizable: false, skipTaskbar: false,
+      backgroundMaterial: isWin11() ? 'acrylic' : undefined,
+    },
   });
-  statusWin.setMenuBarVisibility(false);
   // 与对话框/报告窗一致:在主窗口所在显示器居中(否则副屏用户会在主屏看到状态窗/进度窗)
   centerOn(statusWin, mainWindow);
-  statusWin.loadFile(path.join(__dirname, 'status.html')).catch(() => {});
   statusWin.webContents.once('did-finish-load', () => {
     statusQueued = false;
     pushTasks({ focus: true });
@@ -684,6 +700,7 @@ function ensureStatusWindow() {
   statusWin.on('closed', () => {
     statusWin = null; statusMinimized = false; statusQueued = false;
     statusTasks.clear(); statusActions.clear(); statusPayload = null;
+    statusLastH = -1; statusLastTitle = null; // 尺寸/标题短路缓存随窗口作废,下次重建必须重新下发
     refreshTray();
   });
   statusWin.on('minimize', () => { statusMinimized = true; });
@@ -781,20 +798,20 @@ function toastBounds(h) {
 
 function ensureToastWindow() {
   if (toastWin) return;
-  toastWin = new BrowserWindow({
-    ...toastBounds(TOAST_H_MIN), frame: false, transparent: true, hasShadow: false, resizable: false,
-    movable: false, minimizable: false, maximizable: false, fullscreenable: false,
-    skipTaskbar: true, focusable: false, show: false,
-    parent: mainWindow || undefined, // 子窗:恒在主窗之上,不参与 Alt+Tab,随主窗一起收起
-    webPreferences: {
-      sandbox: true, spellcheck: false, backgroundThrottling: false, // 计时与渲染不受后台降频影响
-      preload: path.join(__dirname, 'toast-preload.js'),
+  // 通知宿主:点击穿透 + 绝不抢焦点(focusable:false)+ 随主窗收起 ——「通知不打扰」的载体;
+  // 背景节流关闭:条目计时与渲染不受后台降频影响
+  toastWin = createAuxWindow({
+    file: 'toast.html', preload: 'toast-preload.js', ...toastBounds(TOAST_H_MIN),
+    props: {
+      transparent: true, hasShadow: false, resizable: false,
+      movable: false, minimizable: false, maximizable: false, fullscreenable: false,
+      skipTaskbar: true, focusable: false,
+      parent: mainWindow || undefined, // 子窗:恒在主窗之上,不参与 Alt+Tab,随主窗一起收起
+      webPreferences: { backgroundThrottling: false },
     },
   });
-  toastWin.setMenuBarVisibility(false);
   // 常态点击穿透。forward:true 让鼠标移动事件仍到达渲染层——这是"悬停延长驻留"的前提
   toastWin.setIgnoreMouseEvents(true, { forward: true });
-  toastWin.loadFile(path.join(__dirname, 'toast.html')).catch(() => {});
   toastWin.webContents.once('did-finish-load', () => {
     toastQueued = false;
     renderToasts();
@@ -928,7 +945,7 @@ function notify(text, opts) {
 
 // 渲染层回程:悬停 / 动作 / 关闭 / 高度。每条首行 trustedEvent + 发送方身份双验
 ipcMain.on('nt:hover', (e, p) => {
-  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents || !p) return;
+  if (!fromWin(e, toastWin)) return;
   const it = toastItems.find((x) => x.id === String(p.id));
   if (!it) return;
   it.hovered = !!p.over;
@@ -936,7 +953,7 @@ ipcMain.on('nt:hover', (e, p) => {
 });
 
 ipcMain.on('nt:action', (e, id) => {
-  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  if (!fromWin(e, toastWin)) return;
   const it = toastItems.find((x) => x.id === String(id));
   if (!it || !it.action) return;
   const run = it.action.run;
@@ -945,12 +962,12 @@ ipcMain.on('nt:action', (e, id) => {
 });
 
 ipcMain.on('nt:close', (e, id) => {
-  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  if (!fromWin(e, toastWin)) return;
   dropToast(String(id));
 });
 
 ipcMain.on('nt:height', (e, h) => {
-  if (!trustedEvent(e) || !toastWin || e.sender !== toastWin.webContents) return;
+  if (!fromWin(e, toastWin)) return;
   toastLastH = Math.max(1, Math.min(600, Math.round(Number(h) || 0)));
   syncToastBounds();
   // 首次实测高度到达才显示:先量后亮,避免"占位高度 → 真实高度"的一帧抖动
@@ -1024,6 +1041,23 @@ function trustedEvent(e) {
   } catch { return false; }
 }
 
+// 发送方身份校验:trustedEvent 只保证"来自本应用某个本地页面",不区分是哪一个 ——
+// 而所有自绘页共享同一个 file: 协议,于是 menu.html 理论上能调 statusWin 的通道、report.html 能调
+// dialog 的通道。高权限通道(rp:export 会弹原生保存框并写文件、st:cancel-* 会中止任务)必须再验一层身份。
+// 当前各页文本一律 textContent、无注入面,这是纵深防御而非在堵已存在的洞。
+// 注意:目标既可能是 BrowserWindow 也可能是 WebContentsView,二者 API 面不同 ——
+// WebContentsView 没有 isDestroyed(),直接调用会抛 TypeError(而 ipcMain 回调里的异常
+// 会被 uncaughtException 吞掉,表现为"通道静默失效":palette 的 Esc 关窗与高度回报都不生效)。
+// 故两处销毁判定都先探类型,销毁与否的最终判据落在 webContents 上(两者都有)。
+function fromWin(e, win) {
+  if (!trustedEvent(e) || !win) return false;
+  if (typeof win.isDestroyed === 'function' && win.isDestroyed()) return false;
+  const wc = win.webContents;
+  if (!wc) return false;
+  if (typeof wc.isDestroyed === 'function' && wc.isDestroyed()) return false;
+  return e.sender === wc;
+}
+
 // 文案表下发(v0.6.0 渲染层 i18n):sandbox 渲染层读不了 fs,preload 经 sendSync 拉取一次。
 // 不走 trustedEvent:preload 阶段 senderFrame 可能尚未指向 file: 页;本通道只回只读静态文案,
 // 无敏感信息与副作用,任意调用方拉取无安全影响
@@ -1037,33 +1071,33 @@ ipcMain.on('sc:display', (e, accel) => { e.returnValue = shortcuts.display(Strin
 ipcMain.on('st:env', (e) => { e.returnValue = { acrylic: isWin11() }; });
 
 ipcMain.on('st:bg', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   if (statusWin && !statusWin.isMinimized()) statusWin.minimize();
 });
 ipcMain.on('st:close', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   closeStatus();
 });
 ipcMain.on('st:action', (e, m) => {
-  if (!trustedEvent(e) || !m) return;
+  if (!fromWin(e, statusWin) || !m) return;
   const fn = statusActions.get(m.taskId);
   statusActions.delete(m.taskId); // 回调一次性:防重复点击/迟到帧二次触发
   if (fn) fn(m.btnId);
 });
 // 关闭单条已完成任务(列表模式);最后一条关闭即收窗
 ipcMain.on('st:dismiss', (e, taskId) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   dismissTask(String(taskId));
 });
 // ✕ 按钮语义(P0-1 全模式对齐):单任务活动态 = 取消该操作并关闭;结果态 = 仅关闭;
 // 列表模式 = 取消全部未完成任务并关闭(st:cancel-all);「后台」按钮才是最小化(不打断任务)
 ipcMain.on('st:cancel', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   updates.cancelStatusOp(statusPayload?.__origin); // 取消逻辑本体在 updates.js(清计时器/忽略迟到结果/中止下载与 npm 安装)
 });
 // 列表模式行级取消:按任务 id 精确取消所属流,不误伤另一更新流
 ipcMain.on('st:cancel-one', (e, taskId) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   const id = String(taskId);
   updates.cancelStatusOp(id === 'default' ? undefined : id);
 });
@@ -1072,7 +1106,7 @@ ipcMain.on('st:cancel-one', (e, taskId) => {
 // 的孤儿任务(进度帧被丢弃、托盘丢"下载中"段、再无任何 UI 可达);现复用 cancelStatusOp 的
 // 按流收窄逻辑逐流取消,与单任务「✕ = 取消并关闭」契约对齐(P0-1)
 ipcMain.on('st:cancel-all', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   for (const t of [...statusTasks.values()]) {
     if (!t.done) updates.cancelStatusOp(t.id);
   }
@@ -1080,7 +1114,7 @@ ipcMain.on('st:cancel-all', (e) => {
 });
 // 深澜(v1.0.0):「清空历史」——只清完成项,进行中任务不受影响(任务中心历史堆积的出口)
 ipcMain.on('st:clear-done', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, statusWin)) return;
   for (const [id, t] of [...statusTasks]) {
     if (t.done) { statusTasks.delete(id); statusActions.delete(id); }
   }
@@ -1091,7 +1125,7 @@ ipcMain.on('st:clear-done', (e) => {
 // 列表模式渲染完成回报(P1-1):按真实内容高度微调,修正 statusHeight 行数估算的漂移。
 // 单任务固定档(活动 186 / 结果 250)保持旧尺寸不动(UITEST 锁定)——渲染层只在列表模式下回报
 ipcMain.on('st:rendered', (e) => {
-  if (!trustedEvent(e) || !statusWin || e.sender !== statusWin.webContents) return;
+  if (!fromWin(e, statusWin)) return;
   const tasks = [...statusTasks.values()];
   if (tasks.length <= 1) return;
   fitWindowToContent(statusWin,
@@ -1102,6 +1136,46 @@ ipcMain.on('st:rendered', (e) => {
     + 'return h + document.querySelector(".win-head").getBoundingClientRect().height + 2})()',
     { min: 100, max: 460 });
 });
+
+// ---------- 辅助窗统一创建(阶段 3 A-2) ----------
+// 此前 7 处 new BrowserWindow 与 3 处 new WebContentsView 各自复制同一套样板:
+// frame:false / show:false / webPreferences:{sandbox, spellcheck:false, preload}
+// → setMenuBarVisibility(false) → loadFile(...).catch(()=>{})。安全默认值(sandbox:true /
+// spellcheck:false)靠人工复制,漏一处即静默降级——收进函数体后新增辅助窗从 15+ 行变 1 行,
+// 降级不可能被无意引入。策略差异(props / 尺寸 / 生命周期)留在调用点写明为何选这套策略。
+// opts.props 整体透传给 BrowserWindow(调用点覆盖:toast 的 focusable:false / dialog 的
+// modal:true / report 的 minWidth / 各窗的 backgroundMaterial);webPreferences 在函数内
+// 与默认值合并,调用点只能追加、不能移除 sandbox/spellcheck。
+function createAuxWindow({ file, preload, x, y, width, height, props = {} }) {
+  const win = new BrowserWindow({
+    x, y, width, height,
+    frame: false, show: false,
+    ...props,
+    webPreferences: {
+      sandbox: true, spellcheck: false,
+      preload: path.join(__dirname, preload),
+      ...(props.webPreferences || {}),
+    },
+  });
+  win.setMenuBarVisibility(false);
+  win.loadFile(path.join(__dirname, file)).catch(() => {}); // 窗口早关等取消加载,忽略
+  return win;
+}
+// 辅助浮层视图(下拉把手/菜单/命令面板):与 createAuxWindow 同一套安全默认值,外加浮层通用
+// 底色 —— 全透明,否则面板四周的阴影留白会被衬成白圈。View 无菜单栏概念,故无 setMenuBarVisibility。
+function createAuxView({ file, preload, props = {} }) {
+  const view = new WebContentsView({
+    ...props,
+    webPreferences: {
+      sandbox: true, spellcheck: false,
+      preload: path.join(__dirname, preload),
+      ...(props.webPreferences || {}),
+    },
+  });
+  view.setBackgroundColor('#00000000');
+  view.webContents.loadFile(path.join(__dirname, file)).catch(() => {});
+  return view;
+}
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
 // 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
@@ -1217,13 +1291,13 @@ const SETTINGS_MIN_H = 320;
 
 // 首启欢迎窗:窗口先于主窗创建,故 centerOn 走「主显示器工作区居中」分支
 ipcMain.on('wl:rendered', (e) => {
-  if (!trustedEvent(e) || !welcomeWin || e.sender !== welcomeWin.webContents) return;
+  if (!fromWin(e, welcomeWin)) return;
   fitWindowToContent(welcomeWin, WELCOME_H_EXPR,
     { min: WELCOME_MIN_H, max: maxContentHeight(welcomeWin), recenter: true });
 });
 // 设置窗(原加速设置窗)
 ipcMain.on('acc:rendered', (e) => {
-  if (!trustedEvent(e) || !settingsWin || e.sender !== settingsWin.webContents) return;
+  if (!fromWin(e, settingsWin)) return;
   fitWindowToContent(settingsWin, SETTINGS_H_EXPR,
     { min: SETTINGS_MIN_H, max: maxContentHeight(settingsWin), recenter: true });
 });
@@ -1271,19 +1345,16 @@ function showDialog(opts, cb) {
   cancelDialogRecycle(); // 正在使用:取消闲置回收
   dialogQueue.push({ opts, cb: cb || null });
   if (!dialogWin) {
-    dialogWin = new BrowserWindow({
-      width: 460, height: 220, useContentSize: true,
-      frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
-      // 模态语义(阶段 0 修复 X3):此前只给 parent —— 那只保证「置顶于父窗」,不阻断父窗输入,
-      // 而渲染层一直声明 aria-modal="true",声明与事实不符;退出确认/破坏性操作确认弹着时
-      // 用户仍可继续操作主窗。modal 仅在存在 parent 时生效,与本窗一致。
-      modal: true,
-      // Win11 Acrylic 轻量层(P2-3 铺开,v0.6.1):同 status 窗
-      backgroundMaterial: isWin11() ? 'acrylic' : undefined,
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'dialog-preload.js') },
+    // 对话框:模态子窗(阻断主窗输入,声明与事实一致——X3),隐藏复用 + 闲置回收 + 队列化,
+    // 是唯一"不销毁"的辅助窗;Win11 Acrylic 轻量层与状态窗同档
+    dialogWin = createAuxWindow({
+      file: 'dialog.html', preload: 'dialog-preload.js', width: 460, height: 220,
+      props: {
+        useContentSize: true, resizable: false, skipTaskbar: true, parent: mainWindow,
+        modal: true,
+        backgroundMaterial: isWin11() ? 'acrylic' : undefined,
+      },
     });
-    dialogWin.setMenuBarVisibility(false);
-    dialogWin.loadFile(path.join(__dirname, 'dialog.html')).catch(() => {});
     dialogWin.webContents.once('did-finish-load', flushDialog);
     // 确认框本身加载失败(did-finish-load 永不触发,框不可见):按「取消」复位,避免退出状态卡死且无任何可见入口
     dialogWin.webContents.on('did-fail-load', () => resetQuitConfirm());
@@ -1304,7 +1375,7 @@ function showDialog(opts, cb) {
 }
 
 ipcMain.on('dl:choose', (e, i, id) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, dialogWin)) return;
   const cb = dialogCb;
   dialogCb = null;
   dialogBusy = false;
@@ -1317,7 +1388,7 @@ ipcMain.on('dl:choose', (e, i, id) => {
 
 // 对话框渲染完成回报(P1-1):按真实内容高度微调(.top + .foot + 上下内边距 36/20 + 边框 2)
 ipcMain.on('dl:rendered', (e) => {
-  if (!trustedEvent(e) || !dialogWin || e.sender !== dialogWin.webContents) return;
+  if (!fromWin(e, dialogWin)) return;
   fitWindowToContent(dialogWin,
     'document.querySelector(".top").getBoundingClientRect().height + document.querySelector(".foot").getBoundingClientRect().height + 58',
     { min: 200, max: dialogMaxHeight(), recenter: true });
@@ -1404,18 +1475,17 @@ function showSettings(section) {
   cancelSettingsRecycle(); // 正在使用:取消闲置回收
   if (SETTINGS_SECTIONS.includes(section)) settingsSection = section;
   if (!settingsWin) {
-    settingsWin = new BrowserWindow({
-      // 首帧估算(阶段 3 S2:固定档已撤)。窗口展示后由 acc:rendered 按真实内容高度回填,
-      // 内容变高(下载中提示显形/镜像校验文案折行)时窗口跟着长;上限见 maxContentHeight()。
-      // 566 的来历:内容 470px + 11px 标签后零余量 + 10px 呼吸(第四轮 X4-5)——仅作估算沿用
-      width: 520, height: 566, useContentSize: true,
-      frame: false, resizable: false, skipTaskbar: true, show: false, parent: mainWindow,
-      // Win11 Mica(P2-3 铺开,v0.6.1):与 reportWin 同档系统材质
-      backgroundMaterial: isWin11() ? 'mica' : undefined,
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'settings-preload.js') },
+    // 设置窗:隐藏复用 + 闲置回收(与对话框同策略),Win11 Mica 与报告窗同档材质。
+    // 首帧估算(阶段 3 S2:固定档已撤)。窗口展示后由 acc:rendered 按真实内容高度回填,
+    // 内容变高(下载中提示显形/镜像校验文案折行)时窗口跟着长;上限见 maxContentHeight()。
+    // 566 的来历:内容 470px + 11px 标签后零余量 + 10px 呼吸(第四轮 X4-5)——仅作估算沿用
+    settingsWin = createAuxWindow({
+      file: 'settings.html', preload: 'settings-preload.js', width: 520, height: 566,
+      props: {
+        useContentSize: true, resizable: false, skipTaskbar: true, parent: mainWindow,
+        backgroundMaterial: isWin11() ? 'mica' : undefined,
+      },
     });
-    settingsWin.setMenuBarVisibility(false);
-    settingsWin.loadFile(path.join(__dirname, 'settings.html')).catch(() => {});
     settingsWin.webContents.once('did-finish-load', flushSettings);
     settingsWin.on('closed', () => { settingsWin = null; cancelSettingsRecycle(); });
     settingsQueued = true;
@@ -1429,24 +1499,27 @@ function showSettings(section) {
 }
 
 ipcMain.on('acc:close', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, settingsWin)) return;
   settingsWin?.hide();
   scheduleSettingsRecycle(); // 隐藏即开始闲置计时(P0-3)
 });
 
 ipcMain.on('acc:copy', (e, text) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, settingsWin)) return;
   clipboard.writeText(String(text || ''));
 });
 
-ipcMain.handle('acc:get', (e) => {
-  if (!trustedEvent(e)) return null;
+ipcMain.handle('acc:get', async (e) => {
+  if (!fromWin(e, settingsWin)) return;
+  // 设置窗每次打开 / 点「重新枚举」都会走这里:强制刷新一次(不受节流限制,否则按钮点了没反应),
+  // 是 P2-4 取消常驻轮询后内存读数的按需来源
+  await refreshTotalMemory(true);
   return settingsPayload(settingsSection);
 });
 
 // 校验并保存单个设置项;返回 {ok} 或 {ok:false,error}
 ipcMain.handle('acc:set', (e, payload) => {
-  if (!trustedEvent(e)) return { ok: false, error: '拒绝:非本地窗口调用' };
+  if (!fromWin(e, settingsWin)) return;
   // 非对象载荷(损坏的渲染层调用)直接拒绝,不能解构抛错变成无反馈的 unhandled rejection
   const field = payload && payload.field;
   const value = payload && payload.value;
@@ -1594,16 +1667,14 @@ function showReport(opts) {
   };
 
   if (!reportWin) {
-    reportWin = new BrowserWindow({
-      width: 760, height: 600, minWidth: 640, minHeight: 480, useContentSize: true,
-      frame: false, resizable: true, show: false,
-      // Win11 Mica 试点(P2-3,仅 reportWin 一个窗口验证):系统材质透出,页面按 payload.mica
-      // 改半透明底并去掉自绘大阴影;Win10 无此选项自动回落实色
-      backgroundMaterial: isWin11() ? 'mica' : undefined,
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'report-preload.js') },
+    // 报告窗:唯一可调大小的辅助窗(长日志需要),关闭即销毁不回收;Win11 Mica 试点窗(P2-3)
+    reportWin = createAuxWindow({
+      file: 'report.html', preload: 'report-preload.js', width: 760, height: 600,
+      props: {
+        useContentSize: true, resizable: true, minWidth: 640, minHeight: 480,
+        backgroundMaterial: isWin11() ? 'mica' : undefined,
+      },
     });
-    reportWin.setMenuBarVisibility(false);
-    reportWin.loadFile(path.join(__dirname, 'report.html')).catch(() => {});
     reportWin.webContents.once('did-finish-load', flushReport);
     reportWin.on('closed', () => { reportWin = null; });
     reportQueued = payload;
@@ -1619,7 +1690,7 @@ function showReport(opts) {
 }
 
 ipcMain.on('rp:export', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, reportWin)) return;
   if (!reportWin) return;
   const def = reportPath || path.join(app.getPath('userData'), 'dsh-error-report.txt');
   const save = dialog.showSaveDialogSync(reportWin, {
@@ -1637,16 +1708,16 @@ ipcMain.on('rp:export', (e) => {
   }
 });
 ipcMain.on('rp:copy', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, reportWin)) return;
   clipboard.writeText(reportText);
   reportWin?.webContents.send('rp:copied'); // 同上:report 窗自带就地反馈(P0-3)
 });
 ipcMain.on('rp:open-log', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, reportWin)) return;
   if (reportLogFile) shell.showItemInFolder(reportLogFile);
 });
 ipcMain.on('rp:action', (e, id) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, reportWin)) return;
   if (id === '_close') return closeReportWindow();
   closeReportWindow();
   if (id === 'quit') app.quit();
@@ -1669,7 +1740,7 @@ function shellMemMB() {
 function fmtMB(mb) {
   return mb >= 1024 ? (mb / 1024).toFixed(1) + 'GB' : mb + 'MB';
 }
-let cachedTotalMemMB = null; // 壳 + dsh 本体进程树 总内存缓存(后台 10s 刷新)
+let cachedTotalMemMB = null; // 壳 + dsh 本体进程树 总内存缓存(按需刷新,见 refreshTotalMemory)
 
 // 枚举 dsh 本体进程树(web 主进程 + 插件子进程如 mcp-proxy)的内存(WorkingSet64 字节)之和。
 // P2-4 轻量化:从根 PID 定向逐层取子进程(按 ParentProcessId 的 WMI 查询),不再全系统枚举 +
@@ -1696,12 +1767,24 @@ function dshTreeMemMB() {
     });
   });
 }
-async function refreshTotalMemory() {
-  // 主窗口隐藏(收进托盘)时跳过:内存数值只出现在主菜单 label,托盘后台常驻期不值得
-  // 每 10s 拉起一次 PowerShell 枚举全系统进程(单次数百 ms CPU);恢复可见后下一轮补刷
-  if (!mainWindow || !mainWindow.isVisible()) return;
-  const tree = await dshTreeMemMB();
-  cachedTotalMemMB = shellMemMB() + Math.round(tree / 1048576);
+// 内存仪表(P2-4):按需刷新,不再常驻轮询。
+// 该数值只出现在 ☰ 菜单的 label 与设置窗「高级」分区,而每次枚举都要拉起 PowerShell 查询进程树
+// (单次数百 ms CPU/IO 尖峰)。原先 startMain 里「立即刷一次 + 每 30s 一次」有两个问题:
+// ① 启动时 dsh 尚未起来(dshChild 为空),这一次必然算出 0,却仍起了一个常驻定时器;
+// ② 用户不打开菜单时,这些枚举纯属后台开销。
+// 改为三个真实时机:服务就绪时(见 setTrayState)、打开菜单时(节流)、设置窗读取时(强制)。
+const MEM_TTL_MS = 30_000;
+let memRefreshedAt = 0;
+let memInflight = null;
+function refreshTotalMemory(force = false) {
+  if (memInflight) return memInflight; // 合并在途请求:连点菜单不会并发拉起多个 PowerShell
+  if (!force && Date.now() - memRefreshedAt < MEM_TTL_MS) return Promise.resolve();
+  memRefreshedAt = Date.now();
+  memInflight = dshTreeMemMB()
+    .then((tree) => { cachedTotalMemMB = shellMemMB() + Math.round(tree / 1048576); })
+    .catch(() => { /* 枚举失败:保留上一次的值,不清零(与 dshTreeMemMB 的降级口径一致) */ })
+    .then(() => { memInflight = null; });
+  return memInflight;
 }
 
 async function showMemoryInfo() {
@@ -1749,7 +1832,7 @@ function commandCtx() {
 // ☰ 主菜单条目(阶段 2,v0.7.13 起为分组树):由 commands.js 注册表生成,不再手写第二份顺序与文案。
 // 每个分组前插一条 type:'sec'(分组小标题,渲染层复用 .sec-label 规格,不入键盘导航/typeahead);
 // menu:false 的条目(复制路径 / 任务中心 / 显示主窗)只进命令面板,不进菜单。
-// 底部再追加一行常驻的「所有命令… Ctrl+K」:菜单是"常用入口"(18 条命令),全量清单归命令面板,
+// 底部再追加一行常驻的「所有命令… Ctrl+K」:菜单是"常用入口",全量清单归命令面板,
 // 这一行就是把用户从前者引向后者的桥(方案 §5.2 的可发现性闭环)。
 function menuItems() {
   const ctx = commandCtx();
@@ -1814,12 +1897,8 @@ function menuHeight(items) {
 function ensureMenuPopup() {
   if (!mainWindow) return;
   if (menuPopupView && !menuPopupView.webContents.isDestroyed()) return;
-  menuPopupView = new WebContentsView({
-    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'menu-preload.js') },
-  });
-  // View 默认底色是白色,会把面板周围透明边距(阴影区)衬成白圈,必须置为全透明
-  menuPopupView.setBackgroundColor('#00000000');
-  menuPopupView.webContents.loadFile(path.join(__dirname, 'menu.html')).catch(() => {});
+  // 菜单弹层:懒创建 + 关闭即销毁(内存优化 P0-2),透明底由 createAuxView 统一设置
+  menuPopupView = createAuxView({ file: 'menu.html', preload: 'menu-preload.js' });
   // 点击菜单外任意处关闭;blur 时若面板仍展开,把键盘焦点还给 dsh 页面(否则菜单关闭后打字无响应)
   menuPopupView.webContents.on('blur', () => { if (menuPopupView && menuPopupView.getBounds().width > 0) closeMenuPopup(true); });
   // 菜单首帧加载完成时补发排队载荷(极快点击不会出现空白菜单)
@@ -1845,6 +1924,7 @@ function destroyMenuPopup() {
 function showMenuPopup() {
   if (!mainWindow) return;
   closeTrayMenu(); // 与托盘菜单互斥
+  refreshTotalMemory(); // 菜单 label 要显示内存读数:打开时按需刷新(P2-4,内置 30s 节流)
   const items = menuItems();
   const mh = menuHeight(items);
   ensureMenuPopup();
@@ -1880,7 +1960,7 @@ function closeMenuPopup(refocus = false) {
 
 // 左上角菜单按钮:点击打开,再点关闭(toggle);blur 自动收起后 350ms 内再点不算重开
 ipcMain.on('tb:menu', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   const open = !!menuPopupView && menuPopupView.getBounds().width > 0;
   if (open || Date.now() - menuClosedAt < 350) { closeMenuPopup(true); return; }
   showMenuPopup();
@@ -1937,7 +2017,7 @@ function runCommand(id) {
 }
 
 ipcMain.on('m:action', (e, id) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, menuPopupView) && !fromWin(e, trayMenuWin)) return;
   // 区分来源:主窗口菜单弹层 / 托盘菜单小窗
   const fromTray = trayMenuWin && e.sender === trayMenuWin.webContents;
   if (fromTray) closeTrayMenu();
@@ -1948,7 +2028,7 @@ ipcMain.on('m:action', (e, id) => {
   runCommand(id);
 });
 ipcMain.on('m:close', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, menuPopupView) && !fromWin(e, trayMenuWin)) return;
   if (trayMenuWin && e.sender === trayMenuWin.webContents) closeTrayMenu();
   else closeMenuPopup(true);
 });
@@ -2015,11 +2095,8 @@ function syncPaletteBounds() {
 function ensurePaletteView() {
   if (!mainWindow) return;
   if (paletteView && !paletteView.webContents.isDestroyed()) return;
-  paletteView = new WebContentsView({
-    webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'palette-preload.js') },
-  });
-  paletteView.setBackgroundColor('#00000000'); // 同菜单弹层:不置透明,面板四周的阴影留白会被衬成白圈
-  paletteView.webContents.loadFile(path.join(__dirname, 'palette.html')).catch(() => {});
+  // 命令面板:与菜单弹层同策略(懒创建 + 关闭即销毁),透明底由 createAuxView 统一设置
+  paletteView = createAuxView({ file: 'palette.html', preload: 'palette-preload.js' });
   // 失焦即收起(点面板外 = 关掉),并把键盘焦点还给 dsh 页面——
   // 焦点留在已销毁的视图上会让用户"关掉面板后打字没反应"
   paletteView.webContents.on('blur', () => { if (paletteView && paletteView.getBounds().width > 0) closePalette(true); });
@@ -2086,11 +2163,11 @@ function bindPaletteKey(wc) {
 }
 
 ipcMain.on('tb:palette', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   togglePalette(); // 命令栏中段的入口按钮
 });
 ipcMain.on('pt:run', (e, id) => {
-  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  if (!fromWin(e, paletteView)) return;
   const key = String(id);
   const at = paletteRecent.indexOf(key);
   if (at >= 0) paletteRecent.splice(at, 1); // 已在列表里先摘掉再置顶,避免重复项
@@ -2100,11 +2177,11 @@ ipcMain.on('pt:run', (e, id) => {
   runCommand(key);
 });
 ipcMain.on('pt:close', (e) => {
-  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  if (!fromWin(e, paletteView)) return;
   closePalette(true);
 });
 ipcMain.on('pt:height', (e, h) => {
-  if (!trustedEvent(e) || !paletteView || e.sender !== paletteView.webContents) return;
+  if (!fromWin(e, paletteView)) return;
   const n = Number(h) || 0;
   if (n <= 0 || n === paletteH) return; // 同值短路:每次击键都会回报,不短路就是每次击键一次 setBounds
   paletteH = n;
@@ -2204,18 +2281,19 @@ function createWindow() {
     sendCloseTip();
     titlebarStatusLast = null;
     pushTitlebarStatus();
+    // 工作目录同理(此前只漏了这一条):bootDsh 在启动早期 send 一次,而标题栏页面此时多半
+    // 还没注册好监听 —— 命令栏的工作目录芯片于是整轮会话都不出现(按钮初始 hidden,
+    // 只有「切换工作目录」才会把它点亮)。uitest 的 cmdbar-dom 一直在报这一条。
+    pushWorkspace(loadConfig().workspace);
   });
 
-  dshView = new WebContentsView({
-    webPreferences: {
-      sandbox: true,
-      backgroundThrottling: false,
-      // 仅本地 file:// 加载页暴露 dshBoot 动作桥,dsh 服务页零暴露(见 dsh-preload.js)
-      preload: path.join(__dirname, 'dsh-preload.js'),
-    },
+  // dsh 页面本体:主内容视图,走 createAuxView 统一安全默认值(sandbox/spellcheck)。
+  // 后台不节流:页面动画/计时不受窗口失焦影响;spellcheck 随统一默认关闭(自绘壳不展示拼写 UI)
+  dshView = createAuxView({
+    file: 'loading.html', preload: 'dsh-preload.js',
+    props: { webPreferences: { backgroundThrottling: false } },
   });
   dshView.webContents.setBackgroundThrottling(false);
-  dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {});
   bindPaletteKey(dshView.webContents); // dsh 页面本体是 Ctrl+K 的主战场(阶段 2)
   // 同上:标题栏收起时 dshView 顶边就是窗口顶边,同样防白边/未绘制区露白
   dshView.setBackgroundColor(chromeBgColor());
@@ -2348,46 +2426,46 @@ function createWindow() {
 
 // ---------- 标题栏按钮 → 主进程 ----------
 ipcMain.on('tb:min', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   mainWindow?.minimize();
 });
 ipcMain.on('tb:max', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   if (!mainWindow) return;
   if (mainWindow.isMaximized()) mainWindow.unmaximize();
   else mainWindow.maximize();
   dshView?.webContents.focus(); // 窗口按钮操作后把焦点还给页面,聊天输入框无需再点一次
 });
 ipcMain.on('tb:close', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   mainWindow?.close();
 });
 ipcMain.on('tb:hide-bar', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   toggleTitlebar(false);
   dshView?.webContents.focus(); // 收起标题栏后焦点还给页面,避免聊天输入框失焦
 });
 ipcMain.on('tb:show-bar', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView) && !fromWin(e, revealTabView)) return;
   toggleTitlebar(true);
   dshView?.webContents.focus();
 });
 // 命令栏状态簇(阶段 1 S1):四个动作全部复用 runCommand(阶段 2 起四个都成了注册表里的命令),
 // 不另写一份语义
 ipcMain.on('tb:tasks', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   runCommand('open-tasks'); // 与命令面板「任务中心」同源
 });
 ipcMain.on('tb:update', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   runCommand('check-update'); // 与主菜单「检查更新…」同源
 });
 ipcMain.on('tb:cycle-theme', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   runCommand('cycle-theme'); // 与主菜单「外观」同源
 });
 ipcMain.on('tb:copy-ws', (e) => {
-  if (!trustedEvent(e)) return;
+  if (!fromWin(e, titlebarView)) return;
   runCommand('copy-workspace'); // 与命令面板「复制工作目录路径」同源
 });
 
@@ -2396,7 +2474,7 @@ ipcMain.on('tb:copy-ws', (e) => {
 // 双重校验:发送者必须是 dshView,且当前框架必须是本地 file:// 页面——
 // dsh 服务页(http://127.0.0.1)即使被注入恶意脚本也无权触发这些动作
 ipcMain.on('boot:action', (e, id) => {
-  if (!dshView || e.sender !== dshView.webContents || !trustedEvent(e)) return;
+  if (!fromWin(e, dshView)) return;
   if (id === 'view-log') shell.showItemInFolder(logFile);
   else if (id === 'retry') bootDsh();
   else if (id === 'quit') app.quit();
@@ -2445,7 +2523,7 @@ async function bootDsh() {
   }, 15_000);
 
   const cwd = loadConfig().workspace;
-  titlebarView?.webContents.send('tb:workspace', cwd);
+  pushWorkspace(cwd);
   try {
     stage(0, t('boot.locate')); // 加载页阶段 0(findDshBin 定位可能耗时,点亮对应阶段)
     stage(1, t('boot.start'));
@@ -2526,7 +2604,7 @@ function showWelcome() {
       r?.(ws);
     };
     const onChoose = (e) => {
-      if (!trustedEvent(e) || !welcomeWin) return;
+      if (!fromWin(e, welcomeWin)) return;
       const pick = dialog.showOpenDialogSync(welcomeWin, {
         title: t('welcome.pickTitle'),
         buttonLabel: t('welcome.pickBtn'),
@@ -2538,20 +2616,18 @@ function showWelcome() {
         finish(pick[0]);
       }
     };
-    const onQuit = (e) => { if (trustedEvent(e)) finish(null); };
+    const onQuit = (e) => { if (fromWin(e, welcomeWin)) finish(null); };
     ipcMain.on('wl:choose', onChoose);
     ipcMain.on('wl:quit', onQuit);
-    welcomeWin = new BrowserWindow({
-      // 首帧估算(阶段 3 S2:原 480×560 固定档已撤)。加载完成后由 wl:rendered 回填真实
-      // 内容高度——首启页文案随语言/字号变化,固定档在 125%/150% 缩放下会出现裁切或大留白
-      width: 480, height: 560, useContentSize: true,
-      frame: false, resizable: false, show: false,
-      backgroundColor: chromeBgColor(),
-      webPreferences: { sandbox: true, spellcheck: false, preload: path.join(__dirname, 'welcome-preload.js') },
+    // 欢迎页:主窗之前创建的唯一辅助窗,无 parent;选择/退出后销毁不回收。
+    // 首帧估算(阶段 3 S2:原 480×560 固定档已撤)。加载完成后由 wl:rendered 回填真实
+    // 内容高度——首启页文案随语言/字号变化,固定档在 125%/150% 缩放下会出现裁切或大留白
+    welcomeWin = createAuxWindow({
+      file: 'welcome.html', preload: 'welcome-preload.js', width: 480, height: 560,
+      props: { useContentSize: true, resizable: false, backgroundColor: chromeBgColor() },
     });
-    welcomeWin.setMenuBarVisibility(false);
     welcomeWin.center(); // 主窗尚未创建:屏幕居中
-    welcomeWin.loadFile(path.join(__dirname, 'welcome.html')).catch(() => {});
+    welcomeWin.webContents.once('did-finish-load', () => welcomeWin?.show());
     welcomeWin.webContents.once('did-finish-load', () => welcomeWin?.show());
     // Alt+F4 等直接关闭 = 退出(与旧 ensureWorkspace 的取消语义一致)
     welcomeWin.on('closed', () => { welcomeWin = null; finish(null); });
@@ -2656,9 +2732,7 @@ if (!gotLock) {
     createWindow();
     createTray();
     bootDsh();
-    // 内存仪表:首次刷新 + 每 30s 后台刷新(壳 + dsh 本体进程树,P2-4 由 10s 放宽),菜单 label 读缓存零阻塞
-    refreshTotalMemory();
-    setInterval(refreshTotalMemory, 30_000);
+    // 内存仪表改为按需刷新(P2-4):服务就绪 / 打开菜单 / 设置窗读取三个时机,见 refreshTotalMemory
 
     // 启动 6 秒后静默检查更新(仅打包版;不打扰,有新版才弹提示)
     setTimeout(() => { if (app.isPackaged) updates.checkForUpdates(false); }, 6_000);

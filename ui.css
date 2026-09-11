@@ -231,6 +231,13 @@
   animation: winIn var(--dur-win) var(--ease-win);
 }
 @keyframes winIn { from { opacity: 0; transform: scale(.94) translateY(-6px); } to { opacity: 1; transform: none; } }
+/* ---- 公共:Win11 系统材质透出(v0.6.1 铺开,第六轮上移) ----
+   底色半透明让 Mica/Acrylic 透出,并去掉自绘大阴影(系统已有窗口边界)。
+   此前 dialog/status 各写一份 acrylic、report/settings 各写一份 mica,四处同值:
+   材质是「窗口外壳」的属性,与 .win 同源。渲染层仍按既有载荷加类名,行为不变。
+   半透明度只有一个来源,新增辅助窗不必再复制两行。 */
+.win.mica { --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent); --win-shadow: none; }
+.win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
 
 /* ============================ §4 原语层 ============================ */
 
@@ -389,6 +396,10 @@
 @keyframes toastIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
+  /* 时长令牌归零:全仓的悬停/切换反馈都写 transition: … var(--dur-*),
+     逐条列举 animation 覆盖不到它们 —— 从令牌层收口,新增组件只要用令牌就自动遵从。
+     关键帧动画不受时长令牌控制,仍需下面逐条 animation: none。 */
+  :root { --dur-fast: 0s; --dur-mid: 0s; --dur-slow: 0s; --dur-win: 0s; }
   .win, .big { animation: none; }
   .fill.indet, .fill::after { animation: none; }
   .titem.enter { animation: none; }

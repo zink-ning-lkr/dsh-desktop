@@ -14,8 +14,14 @@ const ACCEL_SEGMENTS_MAX = 16;
 
 // ---------- 配置(记住上次的工作目录) ----------
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
+// 内存缓存:loadConfig 曾散落在 20+ 处(含 150ms 进度帧上的托盘 tooltip 与命令栏状态簇),
+// 每次都是 readFileSync + JSON.parse —— 下载期间实测约 14 次/秒的同步读盘,阻塞主进程事件循环。
+// 写路径与读路径共用同一份对象;调用方「取出即改、改完 saveConfig」的既有约定不变。
+let cfgCache = null;
 function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; }
+  if (cfgCache) return cfgCache;
+  try { cfgCache = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { cfgCache = {}; }
+  return cfgCache;
 }
 function saveConfig(cfg) {
   const file = configPath();
@@ -25,11 +31,15 @@ function saveConfig(cfg) {
     const tmp = file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
     fs.renameSync(tmp, file);
+    cfgCache = cfg; // 落盘成功:内存与磁盘一致
     return true;
   } catch (e) {
     // Windows 上杀软/同步盘锁定目标文件时 rename 会偶发 EBUSY/EPERM:
     // 记录日志并返回失败,不抛出(调用方分散在 close/before-quit 等生命周期钩子里,抛错会打断流程)
     log(`config.json 写入失败: ${e.message}`);
+    // 失败时磁盘仍是旧值,而调用方通常已经就地改过取出的对象 —— 必须丢弃缓存,
+    // 否则「写入被拒」会被内存里的新值掩盖,设置窗显示的值与磁盘不一致
+    cfgCache = null;
     try { fs.unlinkSync(file + '.tmp'); } catch { /* 残留临时文件下次覆盖 */ }
     return false;
   }

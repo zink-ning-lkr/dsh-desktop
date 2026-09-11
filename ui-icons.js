@@ -26,7 +26,6 @@
     'open-workspace': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5v6.5c0 .8.7 1.5 1.5 1.5h9c.8 0 1.5-.7 1.5-1.5V6.2c0-.8-.7-1.5-1.5-1.5H8.3L6.9 3.5H3.5C2.7 3.5 2 4.2 2 5z"/></svg>',
     'restart-dsh': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 1.5v3h-3"/></svg>',
     'open-browser': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-3.5 3.8-3.5 9.2 0 13M8 1.5c3.5 3.8 3.5 9.2 0 13"/></svg>',
-    'auto-open-browser': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h6v6M14 2 7 9M13 9.5v3a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 2 12.5v-8A1.5 1.5 0 0 1 3.5 3h3"/></svg>',
     'fullscreen': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>',
     'toggle-bar': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M1.5 5.5h13"/></svg>',
     'reload': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9M13.5 8a5.5 5.5 0 0 1-9.4 3.9M2.5 2.5v3h3M13.5 13.5v-3h-3"/></svg>',
@@ -38,12 +37,19 @@
     'memory-info': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="8" rx="1.5"/><path d="M4 12.5v2M8 12.5v2M12 12.5v2"/></svg>',
     'check-update': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11"/></svg>',
     'check-dsh-update': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5l6-3 6 3v6l-6 3-6-3zM2 5l6 3 6-3M8 8v6"/></svg>',
-    'download-accel': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5a5.5 5.5 0 1 1 11 0M2.5 9.5h2.8M10.7 9.5h2.8M8 9.5l2.6-3.6"/><circle cx="8" cy="9.5" r="1"/></svg>',
+    // 原名 'download-accel':v0.8.1 把该菜单项改为打开设置窗「更新与下载」分区的深链,
+    // 命令 id 变成 settings-download,图标键随之改名(键名必须与 commands.js 的 id 对齐)
+    'settings-download': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5a5.5 5.5 0 1 1 11 0M2.5 9.5h2.8M10.7 9.5h2.8M8 9.5l2.6-3.6"/><circle cx="8" cy="9.5" r="1"/></svg>',
     'shortcuts': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="4.5" width="13" height="7.5" rx="1.5"/><path d="M4 7h.01M6.6 7h.01M9.4 7h.01M12 7h.01M5.5 9.7h5" stroke-linecap="round"/></svg>',
     'cycle-theme': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor" stroke="none"/></svg>',
     'quit': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v5M4.5 4a5 5 0 1 0 7 0"/></svg>',
     'tray-status': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.5"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>',
     'open-palette': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>',
+    // 阶段 3 深链与 menu:false 条目(v1.0.1 补齐):这三条命令在菜单/命令面板里此前没有图标键,
+    // 图标槽恒为空白。键名必须与 commands.js 的 id 逐一对应 —— uitest 的 icon-keys-sync 断言拦漂移。
+    'settings-appearance': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/><circle cx="6" cy="4.5" r="1.5"/><circle cx="10" cy="8" r="1.5"/><circle cx="5" cy="11.5" r="1.5"/></svg>',
+    'settings-advanced': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v2.1M8 12.3v2.1M1.6 8h2.1M12.3 8h2.1M3.5 3.5 5 5M11 11l1.5 1.5M3.5 12.5 5 11M11 5l1.5-1.5"/></svg>',
+    'copy-workspace': '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>',
   };
   // 命令栏状态簇(阶段 1 S1):24px 按钮内的 15×15 线性图标,与 menu 族同一描边规范。
   const cmdbar = {
@@ -51,6 +57,9 @@
     update: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11"/></svg>',
     theme: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 1.8a6.2 6.2 0 0 1 0 12.4z" fill="currentColor" stroke="none"/></svg>',
   };
+  // 'open-tasks'(命令面板里的「打开任务中心」)与命令栏的任务钮是同一入口的两个触点,
+  // 复用同一图形:同一件事不该在两个地方长得不一样。必须在 cmdbar 定义之后赋值(TDZ)。
+  menu['open-tasks'] = cmdbar.tasks;
   // 通知宿主(阶段 1 X1):360px 宽的一行提示,图标只做级别提示,不做视觉主体。
   const toast = {
     info: '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 6.9v4.1M8 4.7v.2"/></svg>',

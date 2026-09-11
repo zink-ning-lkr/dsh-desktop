@@ -28,13 +28,13 @@
   }
   .tab:hover { color: var(--c-fg1); background: color-mix(in srgb, var(--c-fg0) 5%, transparent); }
   .tab[aria-selected="true"] { color: var(--c-fg0); font-weight: 600; border-bottom-color: var(--c-brand); }
-  .tab:focus-visible { outline: 2px solid var(--c-brand); outline-offset: -2px; }
+  .tab:focus-visible { outline: var(--focus-ring-w) solid var(--c-brand); outline-offset: -2px; }
   .content { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: 2px var(--sp-5) 10px; }
   .sec { display: flex; flex-direction: column; gap: var(--sp-2); }
   .sec-t { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-body); font-weight: 600; line-height: var(--lh-dense); color: var(--c-fg0); }
   .sec-t .tag {
     font-size: var(--fs-micro); font-weight: 500; line-height: var(--lh-dense); color: var(--c-brand-hi); background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 25%, transparent); border-radius: 999px; padding: 1px var(--sp-2); letter-spacing: .02em;
+    border: 1px solid color-mix(in srgb, var(--c-brand-hi) 25%, transparent); border-radius: var(--radius-pill); padding: 1px var(--sp-2); letter-spacing: .02em;
   }
   .hint { font-size: var(--fs-ctrl); color: var(--c-fg2); line-height: var(--lh-micro); }
   .hint code { background: var(--c-bg1); border: 1px solid var(--c-bg2); border-radius: 4px; padding: 1px 5px; font-size: var(--fs-micro); color: var(--c-fg1); }
@@ -77,7 +77,7 @@
   input[type=text] {
     flex: 1; min-width: 0; min-height: var(--ctl-h); background: var(--c-bg0); border: 1px solid var(--c-border); border-radius: var(--radius-m);
     color: var(--c-fg0); font-size: var(--fs-ctrl); line-height: var(--lh-ctrl); padding: 6px 10px; outline: none; user-select: text;
-    font-family: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+    font-family: var(--font-mono);
     transition: border-color var(--dur-mid);
   }
   input[type=text]:focus { border-color: var(--c-brand); }
@@ -113,8 +113,7 @@
   .mem dt { font-size: var(--fs-ctrl); color: var(--c-fg2); }
   .mem dd { margin: 0; font-size: var(--fs-ctrl); color: var(--c-fg1); font-variant-numeric: tabular-nums; }
   .mem dd.total { color: var(--c-fg0); font-weight: 600; }
-  /* Win11 Mica(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
-  .win.mica { --win-bg: color-mix(in srgb, var(--c-win-bg) 62%, transparent); --win-shadow: none; }
+  /* Win11 Mica:材质样式在 ui.css §5(窗口外壳层),本页只加类名 */
   .foot { flex: none; display: flex; align-items: center; gap: 10px; padding: var(--sp-2) var(--sp-5) 10px; border-top: 1px solid var(--c-bg2); }
   .foot .note { flex: 1; min-width: 0; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .foot .note code { color: var(--c-fg2); }
@@ -124,9 +123,8 @@
 <body>
 <div class="win" role="main">
   <div class="win-head">
-    <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.4M12 18.4v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M6.9 17.1l-1.7 1.7M18.8 5.2l-1.7 1.7" stroke-linecap="round"/></svg></span>
-    <span class="t" id="headTitle"></span>
-    <button class="win-close" id="xBtn" title="" aria-label=""><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    <!-- 三件套(齿轮图标/标题/✕)由 ui-kit.winShell 构造(T-5):结构与接线单一来源。
+         齿轮图标为本页特有,经 winShell 的 icon 参数传入;尺寸微调走上方 .win-head .ico 覆盖 -->
   </div>
   <!-- 分区标签:WAI-ARIA tabs 模式(roving tabindex + ←→/Home/End),与项目其余列表同一套键盘契约 -->
   <div class="tabs" role="tablist" id="tabs">
@@ -155,8 +153,8 @@
           <input type="text" id="mirror" spellcheck="false">
         </div>
         <div class="row">
-          <button class="btn primary" id="mirrorSave"></button>
-          <button class="btn danger-ghost" id="mirrorClear"></button>
+          <button class="btn primary" id="mirrorSave" type="button"></button>
+          <button class="btn danger-ghost" id="mirrorClear" type="button"></button>
           <span class="err" id="mirrorErr" aria-live="polite"></span>
         </div>
         <div class="hint" id="mirrorHint"></div>
@@ -168,7 +166,7 @@
         <div class="hint" id="npmHint"></div>
         <div class="cmd" id="npmCmd"></div>
         <div class="row">
-          <button class="btn" id="npmCopy"></button>
+          <button class="btn" id="npmCopy" type="button"></button>
           <span class="hint" id="npmAfter"></span>
         </div>
       </div>
@@ -233,19 +231,27 @@
 
   <div class="foot">
     <span class="note"><span id="saveNote"></span><code id="cfgPath">config.json</code></span>
-    <span class="inline-feedback" id="toast"></span>
+    <!-- 保存/切换的结果反馈:读屏要能播报(X-3)。构件只改 className/textContent,加 aria-live 零冲突 -->
+    <span class="inline-feedback" id="toast" aria-live="polite"></span>
   </div>
 </div>
 <script>
   const A = window.__accel;
-  // 复合构件走共享层(阶段 0):就地反馈
+  // 复合构件走共享层(阶段 0):就地反馈;头部三件套由 winShell 构造(T-5)
   const K = window.UI_KIT;
   // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <i> 标签),用 innerHTML
   const T = (k, p) => window.__i18n.t(k, p);
+  // 头部三件套(齿轮图标 + 标题 + ✕):结构与接线单一来源。关闭走 closeGuarded(未保存的镜像
+  // 输入先落盘再关)——函数声明提升,此处引用安全;可访问名入表(common.close)
+  const shell = K.winShell(document.querySelector('.win-head'), {
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.4M12 18.4v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M6.9 17.1l-1.7 1.7M18.8 5.2l-1.7 1.7" stroke-linecap="round"/></svg>',
+    title: T('settings.title'),
+    close: T('common.close'),
+    onClose: closeGuarded,
+  });
   {
     document.title = T('settings.title');
     const set = (id, k) => { const el = document.getElementById(id); if (el) el.textContent = T(k); };
-    set('headTitle', 'settings.title');
     set('tabDownload', 'settings.tabDownload');
     set('tabAppearance', 'settings.tabAppearance');
     set('tabAdvanced', 'settings.tabAdvanced');
@@ -304,9 +310,6 @@
     const mirrorEl = document.getElementById('mirror');
     mirrorEl.placeholder = T('settings.mirrorPlaceholder');
     mirrorEl.setAttribute('aria-label', T('settings.mirrorAria'));
-    const xEl = document.getElementById('xBtn');
-    xEl.title = T('common.close');
-    xEl.setAttribute('aria-label', T('common.close'));
   }
   let cur = null;
 
@@ -486,7 +489,7 @@
     }
     A.close();
   }
-  document.getElementById('xBtn').addEventListener('click', closeGuarded);
+  // ✕ 与 Esc 共用同一守卫(关闭回调已在 winShell 的 onClose 落地,T-5)
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuarded(); });
 
   A.onShow(apply);

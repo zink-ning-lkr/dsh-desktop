@@ -46,7 +46,7 @@
   .tlist { display: none; flex: 1; min-height: 0; flex-direction: column; gap: 6px; padding: var(--sp-2) 10px var(--sp-3); overflow-y: auto; }
   .trow {
     display: flex; gap: var(--sp-3); align-items: flex-start; padding: 10px var(--sp-3);
-    border: 1px solid var(--c-border); border-radius: var(--radius-l); background: var(--c-bg1);
+    border: 1px solid var(--c-border); border-radius: var(--radius-card); background: var(--c-bg1);
     box-shadow: var(--c-elev-1); /* 卡片与窗底分层:列表滚动时行边界可辨 */
     /* 深澜:左缘 4px 状态色带(进行中=澜光,完成按 type 变色)——列表第一眼按色可扫 */
     border-left: 4px solid var(--c-brand);
@@ -105,24 +105,24 @@
   }
   .hist-clear:hover { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); border-color: color-mix(in srgb, var(--c-brand-hi) 55%, transparent); }
   .hist-clear:active { background: color-mix(in srgb, var(--c-brand-hi) 18%, transparent); }
-  /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
-  .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
+  /* Win11 Acrylic:材质样式在 ui.css §5(窗口外壳层),本页只加类名 */
   /* 进度条动效的 reduced-motion 分支随样式一并上移至 ui.css */
 </style>
 </head>
 <body>
 <div class="win" role="main">
   <div class="win-head" id="head">
-    <span class="ico" id="ico" aria-hidden="true"></span>
-    <span class="t" id="title" aria-live="polite">…</span>
-    <button class="hmbtn" id="bgBtn">
+    <!-- 三件套(ico/title/✕)由 ui-kit.winShell 构造(T-5):结构与接线单一来源;
+         本页只保留「后台」按钮这一特有插槽,winShell 的 beforeClose 参数把它排到 ✕ 之前 -->
+    <button class="hmbtn" id="bgBtn" type="button">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 12.5V7M8 12.5V3.5M13.5 12.5V7"/></svg><span id="bgLabel"></span>
     </button>
-    <button class="win-close" id="xBtn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
   </div>
   <div class="activity" id="activity">
     <div class="detail" id="detail"></div>
-    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div class="fill indet" id="fill"></div></div>
+    <!-- #bar 只是插入槽:真正携带 role=progressbar/aria-* 的节点由 ui-kit.progressBar 构造后挂入
+         (此前外壳自带 role,导致进度条套进度条的非法嵌套,读屏可能重复播报) -->
+    <div class="bar" id="bar"><div class="fill indet" id="fill"></div></div>
     <div class="meta"><span id="pct"></span><span id="size"></span></div>
   </div>
   <div class="result" id="result" role="alertdialog" aria-labelledby="rtitle" aria-describedby="rdetail">
@@ -143,25 +143,31 @@
   // 动态文案走 i18n 文案表(v0.6.0):preload 同步拉取快照,缺失回退 key
   const T = (k, p) => window.__i18n.t(k, p);
   // 「后台」按钮文案/提示入表(ST-3):tooltip 精确到行为(最小化到任务栏,非"dsh 转后台")
-  // 头部/列表区其余文案也在本块统一入表(阶段 0 收尾 X5):此前 ✕、进度条、任务列表的
-  // title/aria-label 以中文字面量写在标签属性里,属渲染层硬编码;xBtn 的两处动态改写
-  // (renderHead / 列表模式)仍在原位,此处只保证首帧即有可用标签。
+  // 头部三件套(ico/title/✕)由 winShell 构造(T-5):结构、初始文案、关闭回调一处落地。
+  // 返回句柄供每帧更新 —— title 的 aria-live 是本页特有的增量(进度帧不改文本时无播报)
+  const shell = K.winShell(document.getElementById('head'), {
+    title: T('status.title'),
+    close: T('status.cancelClose'),
+    onClose: () => {
+      if (listMode) { S.cancelAll(); return; }
+      (cur && cur.mode === 'result' ? S.close() : S.cancel());
+    },
+    beforeClose: [document.getElementById('bgBtn')],
+  });
+  shell.title.setAttribute('aria-live', 'polite');
   {
     const bg = document.getElementById('bgBtn');
     const tip = T('status.backgroundTip');
     bg.title = tip;
     bg.setAttribute('aria-label', tip);
     document.getElementById('bgLabel').textContent = T('status.background');
-    const x = document.getElementById('xBtn');
-    x.title = T('status.cancelClose');
-    x.setAttribute('aria-label', T('status.cancelClose'));
-    document.getElementById('bar').setAttribute('aria-label', T('status.progress'));
     document.getElementById('tlist').setAttribute('aria-label', T('status.listLabel'));
   }
   let cur = null;   // 单任务模式的当前载荷(头部 ✕ 语义判定)
   let listMode = false;
   let histOpen = false;
   let lastViewKey = ''; // 上帧视图键(result/act/list):仅视图切换帧聚焦安全控件,进度帧不打扰焦点
+  let lastFitKey = '';  // 上次回报给主进程的行集合指纹:见 renderTasks(P-3,免去每帧跨进程测量)
   // 列表行的 roving tabindex 宿主(阶段 2 X4):让整份列表在 Tab 序里只占一格。
   // Enter 不在这里接管——焦点本就在行内控件上,原生 button 自己完成"主操作";
   // 本层只补两件浏览器不给的事:↑↓/Home/End 的行间移动,以及 Delete 的行级取消/关闭。
@@ -174,6 +180,8 @@
       return true;
     },
   });
+  // listNav 返回 { sync, rows, destroy }:拆除闭包在页面卸载时释放(X-7)——reload 后监听不残留
+  window.addEventListener('beforeunload', () => nav.destroy());
 
   /* -------- 共享语义构件:实现已上移至 ui-kit.js --------
      进度条/按钮行/结果圆标/聚焦主按钮原先是"9 个页面各写一份"中的一份,现统一走 L3 构件;
@@ -193,7 +201,7 @@
   function focusSafeDefault() {
     const bg = document.getElementById('bgBtn');
     if (bg && bg.style.display !== 'none') { bg.focus(); return; }
-    document.getElementById('xBtn')?.focus();
+    shell.close?.focus();
   }
 
   /* -------- 单任务视图(与旧版逐行一致,像素级兼容) --------
@@ -210,10 +218,11 @@
     document.getElementById('result').style.display = isRes ? 'flex' : 'none';
     document.getElementById('tlist').style.display = 'none';
     document.getElementById('bgBtn').style.display = isRes ? 'none' : '';
-    document.getElementById('ico').innerHTML = isRes ? (RES[p.type || 'info'] || RES.info) : (ACT[p.mode] || ACT.check);
-    document.getElementById('title').textContent = p.title || '';
-    document.getElementById('xBtn').title = isRes ? T('status.close') : T('status.cancelClose');
-    document.getElementById('xBtn').setAttribute('aria-label', isRes ? T('status.close') : T('status.cancelClose'));
+    shell.ico.innerHTML = isRes ? (RES[p.type || 'info'] || RES.info) : (ACT[p.mode] || ACT.check);
+    shell.title.textContent = p.title || '';
+    const xTip = isRes ? T('status.close') : T('status.cancelClose');
+    shell.close.title = xTip;
+    shell.close.setAttribute('aria-label', xTip);
     if (isRes) {
       const type = p.type || 'info';
       document.getElementById('result').className = 'result';
@@ -239,18 +248,12 @@
   /* -------- 多任务列表(任务中心) --------
      阶段 2(C3 + X4):行的骨架只建一次,此后每帧只改变化了的字段(keyed diff,见 ui-kit.keyedList),
      行内控件退出 Tab 序、由 listNav 的 roving tabindex 接管(↑↓/Home/End + Enter/Delete)。
-     这两件事必须同批落地:全量重建会把行节点整个换掉,任何在此之上的焦点管理都会被冲掉。 */
-  function fmtPct(t, has) {
-    return t.pct || (has ? t.progress.toFixed(1) + '%' : (t.spin ? T('status.wait') : ''));
-  }
+     这两件事必须同批落地:全量重建会把行节点整个换掉,任何在此之上的焦点管理都会被冲掉。
+     进度文案/按钮行走上方共享构件(fmtPct / fillButtons),本区不再各写一份。 */
   // 只在值真的变了才写 DOM:进度帧 150ms 一次,无脑赋值会每帧重建文本节点
   function setText(node, v) {
     const s = v == null ? '' : String(v);
     if (node && node.textContent !== s) node.textContent = s;
-  }
-  function fillButtons(container, t, cls) {
-    container.className = cls;
-    return K.buttonRow(container, t.buttons || [], (b) => S.action(t.id, b.id));
   }
 
   // 行骨架:一次建好 .lico/.lbody/.ltitle/.lx 四个稳定件,其余(详情/进度条/按钮行)按形态增删
@@ -393,11 +396,12 @@
     document.getElementById('result').style.display = 'none';
     const list = document.getElementById('tlist');
     list.style.display = 'flex';
-    document.getElementById('ico').innerHTML = ACT.check;
-    setText(document.getElementById('title'), act.length ? T('status.titleActive', { n: act.length }) : T('status.title'));
+    shell.ico.innerHTML = ACT.check;
+    setText(shell.title, act.length ? T('status.titleActive', { n: act.length }) : T('status.title'));
     document.getElementById('bgBtn').style.display = act.length ? '' : 'none';
-    document.getElementById('xBtn').title = T('status.closeAll');
-    document.getElementById('xBtn').setAttribute('aria-label', T('status.closeAll'));
+    const xTip = T('status.closeAll');
+    shell.close.title = xTip;
+    shell.close.setAttribute('aria-label', xTip);
     K.keyedList(list, listSpecs(tasks), (spec) => {
       if (spec.kind === 'row') return buildRow(spec.t);
       if (spec.kind === 'hist') {
@@ -445,6 +449,7 @@
     const h = document.querySelector('#tlist .hist');
     if (h) { h.classList.toggle('open', open); h.setAttribute('aria-expanded', open ? 'true' : 'false'); }
     nav.sync(); // 折叠/展开改变了可见行集合
+    S.rendered(); // 展开/折叠改变了列表自然高度,同样要回报一次(不依赖下一帧:进度帧只在行集合变化时才回报)
   }
 
   function renderTasks(tasks) {
@@ -452,8 +457,18 @@
     // 单任务走旧单视图(像素级兼容 186/250 两档),多任务走列表。
     // 阶段 1 X1 起本窗不再兼任 toast 宿主:瞬时提示由独立的通知宿主(toast.html)承载,
     // 因此这里不必再为"孤儿 toast"单开一条列表路径——列表里出现的每一行都是真实任务。
-    if (tasks.length === 1) { listMode = false; render(tasks[0]); }
-    else { listMode = true; renderList(tasks); S.rendered(); } // 渲染完成回报:主进程按真实内容高度微调窗口(P1-1)
+    if (tasks.length === 1) { listMode = false; lastFitKey = ''; render(tasks[0]); }
+    else {
+      listMode = true;
+      renderList(tasks);
+      // 渲染完成回报:主进程按真实内容高度微调窗口(P1-1)。
+      // 只在「行集合」变化时回报 —— 主进程收到后要 executeJavaScript 注入一段遍历整列表的测量脚本,
+      // 而本函数由 150ms 一帧的进度推送驱动,每帧回报等于每秒 7 次跨进程 DOM 测量。
+      // 行集合指纹 = 进行中数 + 完成数 + 历史是否展开(三者决定列表的自然高度)。
+      const act = tasks.reduce((n, t) => n + (t.done ? 0 : 1), 0);
+      const key = act + '|' + (tasks.length - act) + '|' + histOpen;
+      if (key !== lastFitKey) { lastFitKey = key; S.rendered(); }
+    }
     // 视图切换帧(ST-1):把焦点交给安全默认控件。进度帧 150ms 一次全量重渲染,
     // 必须凭 viewKey 变化判帧,否则焦点被钉死在 bgBtn 上,用户 Tab 不出去
     const viewKey = listMode ? 'list' : (cur && cur.mode === 'result' ? 'result' : 'act');
@@ -466,10 +481,7 @@
   document.getElementById('bgBtn').addEventListener('click', () => S.background());
   // 单任务:活动态 ✕ = 取消并关闭,结果态 ✕ = 仅关闭;多任务列表:✕ = 取消全部未完成任务并关闭
   // (列表关闭不再直接丢弃运行中任务——那会让下载/安装成为不可见且不可取消的孤儿,P0-1)
-  document.getElementById('xBtn').addEventListener('click', () => {
-    if (listMode) { S.cancelAll(); return; }
-    (cur && cur.mode === 'result' ? S.close() : S.cancel());
-  });
+  // 点击回调已在 winShell 的 onClose 落地(与头部结构同源,T-5)
   // Esc 语义梯度(P1-4):存在进行中任务时 Esc = 挂后台(安全离开,不打断任务);
   // 仅剩结果/历史时 Esc = 关窗。✕ 按钮保持「显式取消」语义——破坏性操作必须是看着 ✕ 的主动行为
   document.addEventListener('keydown', (e) => {
@@ -477,7 +489,7 @@
     const hasActive = listMode
       ? [...document.querySelectorAll('#tlist .trow:not(.done)')].length > 0
       : !!(cur && cur.mode !== 'result');
-    if (hasActive) S.background(); else document.getElementById('xBtn').click();
+    if (hasActive) S.background(); else shell.close.click();
   });
   S.onTasks(renderTasks);
 </script>

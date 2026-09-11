@@ -28,9 +28,9 @@
    srOnly      视觉隐藏但读屏可读的文本节点
    keyedList   按 key 复用节点重建列表(阶段 2 修 C3:150ms 全量重建)
    listNav     列表行 roving tabindex(阶段 2 修 X4:↑↓/Home/End + Enter/Delete)
+   winShell    窗口头部三件套(阶段 3 T-5:图标槽 + 标题 + 关闭按钮)
 
    ---- 明确暂不提供(避免死代码,待消费方出现时再落地) ----
-   winShell : 辅助窗统一外壳属阶段 3(窗口模型归一),届时四窗一并改造;
    field    : 表单行属阶段 3(accel → settings 三分区)。 */
 (function () {
   'use strict';
@@ -313,7 +313,57 @@
     return el('span', { class: 'sr-only', text: text == null ? '' : String(text) });
   }
 
+  /* ---------- 窗口头部三件套(阶段 3 T-5):.win-head 的图标槽 + 标题 + 关闭按钮 ----------
+     收编 status/report/settings/welcome 四页手写的同一结构与同一段接线
+     (填 title/aria-label + 绑关闭回调)。样式仍走 ui.css 公共 .win-head/.ico/.t/.win-close,
+     页面继续用 --head-pad 等令牌微调;返回 { ico, title, close } 句柄供高频更新
+     (status 每帧换图标/标题、随模式换关闭按钮可访问名)。
+       opts.icon        SVG 字符串(仓库内受控图标,innerHTML 白名单)
+                        或 { img: src, logo?: true }(品牌小图;logo=true 时带 data-logo,
+                        由 ui-theme.js 按主题换黑白版)
+       opts.title       初始标题文本
+       opts.close       false = 不建关闭按钮(welcome 页无 ✕)
+                         字符串 = 初始可访问名(title 与 aria-label 同步)
+       opts.onClose     关闭按钮点击回调(各窗关闭语义不同,由调用方裁决)
+       opts.beforeClose 节点数组:追加在关闭按钮之前的额外插槽(status 的「后台」按钮)。
+                         传入的节点从原位挪到 close 之前,保证三件套顺序不被页面残留子节点打乱 */
+  function winShell(head, opts) {
+    const o = opts || {};
+    const ico = el('span', { class: 'ico', attrs: { 'aria-hidden': 'true' } });
+    if (typeof o.icon === 'string') ico.innerHTML = o.icon;
+    else if (o.icon && o.icon.img) {
+      const img = el('img', { src: o.icon.img, alt: '' });
+      if (o.icon.logo) img.setAttribute('data-logo', '');
+      ico.appendChild(img);
+    }
+    const title = el('span', { class: 't' });
+    if (o.title != null) title.textContent = String(o.title);
+    const close = o.close === false ? null : el('button', {
+      class: 'win-close', type: 'button',
+      html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+    });
+    if (close) {
+      if (o.close != null) {
+        const c = String(o.close);
+        close.title = c;
+        close.setAttribute('aria-label', c);
+      }
+      if (typeof o.onClose === 'function') close.addEventListener('click', o.onClose);
+    }
+    if (head) {
+      head.insertBefore(ico, head.firstChild); // 图标/标题固定居左,不被页面残留子节点挤走
+      head.insertBefore(title, ico.nextSibling);
+    }
+    if (close) {
+      if (head) head.appendChild(close);
+      for (const n of o.beforeClose || []) {
+        if (n && n.parentNode === head) head.insertBefore(n, close); // 插槽节点挪到 ✕ 之前
+      }
+    }
+    return { ico, title, close };
+  }
+
   window.UI_KIT = {
-    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, srOnly, keyedList, listNav,
+    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, srOnly, keyedList, listNav, winShell,
   };
 })();

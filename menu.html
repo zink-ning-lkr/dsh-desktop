@@ -248,6 +248,11 @@
   });
 
   window.__menu.onShow(({ items, w, margin }) => {
+    // typeahead 复位(X-4):视图每次开合都是新实例,但本变量在窗口存活期内是模块级的 ——
+    // 上次菜单在 500ms 缓冲窗内被关掉时,残留的前缀会与这次的击键拼接,跳到非预期条目
+    clearTimeout(typeTimer);
+    typeBuf = '';
+    sel = -1;
     panel.style.width = w + 'px';
     panel.style.left = margin + 'px';
     panel.style.top = margin + 'px';

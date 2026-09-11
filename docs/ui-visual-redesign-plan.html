@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH Desktop 视觉重设计方案 · 深澜 DEEP TIDE</title>
+<style>
+  :root {
+    --c-bg0:#0b0f1d; --c-bg1:#111628; --c-bg2:#1a2138; --c-bg3:#232c4a;
+    --c-border:#262f4d; --c-border-hi:#35406b;
+    --c-fg0:#e8ecf8; --c-fg1:#c6cde0; --c-fg2:#8b95b0; --c-fg3:#5f6884;
+    --c-brand:#4d6bfe; --c-brand-hi:#7aa1ff; --c-brand-deep:#3b5bdb; --c-vio:#8b5cf6;
+    --c-ok:#34d399; --c-warn:#fbbf24; --c-err:#f87171;
+    --r-s:6px; --r-m:10px; --r-l:16px; --r-pill:999px;
+    --font: 15px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    --mono: 12.5px/1.65 "Cascadia Mono",Consolas,monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:linear-gradient(180deg,#0d1224 0%, var(--c-bg0) 320px); color:var(--c-fg1); font:var(--font); padding:0 0 100px; }
+  .wrap { max-width:1160px; margin:0 auto; padding:0 32px; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:var(--c-border); border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--c-border-hi); }
+
+  header { border-bottom:1px solid var(--c-border); background:
+    radial-gradient(1200px 500px at 20% -20%, #1b2a5e55, transparent 60%),
+    radial-gradient(900px 420px at 85% -10%, #3b5bdb33, transparent 55%),
+    linear-gradient(180deg,#121830,#0b0f1d); padding:60px 0 44px; }
+  header .kicker { font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--c-brand-hi); font-weight:600; }
+  h1 { font-size:32px; line-height:1.25; color:var(--c-fg0); margin:12px 0 10px; font-weight:650; letter-spacing:-.01em; }
+  h1 .cn { color:var(--c-brand-hi); }
+  header .lead { color:var(--c-fg2); font-size:14px; }
+  header .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
+  .pill { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--c-border); background:var(--c-bg1); color:var(--c-fg2); }
+  .pill.on { color:var(--c-brand-hi); border-color:#4d6bfe66; background:#4d6bfe1a; }
+  .pill.warn { color:var(--c-warn); border-color:#fbbf2444; background:#fbbf2414; }
+  .pill.ok { color:var(--c-ok); border-color:#34d39944; background:#34d39914; }
+  .pill.break { color:var(--c-err); border-color:#f8717144; background:#f8717114; }
+
+  section { margin-top:60px; }
+  h2 { font-size:23px; color:var(--c-fg0); font-weight:650; margin-bottom:8px; letter-spacing:-.005em;
+       padding-bottom:12px; border-bottom:1px solid var(--c-border); display:flex; align-items:baseline; gap:14px; }
+  h2 .no { font:var(--mono); font-size:13px; color:var(--c-brand); flex:none; }
+  h3 { font-size:17px; color:var(--c-fg0); font-weight:650; margin:32px 0 10px; }
+  h4 { font-size:14px; color:var(--c-fg0); font-weight:650; margin:22px 0 8px; }
+  p { margin:10px 0; color:var(--c-fg1); }
+  p.lead { font-size:15.5px; }
+  ul,ol { margin:10px 0 10px 24px; }
+  li { margin:5px 0; }
+  a { color:var(--c-brand-hi); text-decoration:none; }
+  strong { color:var(--c-fg0); font-weight:650; }
+  em { font-style:normal; color:var(--c-warn); }
+  code { font:var(--mono); background:var(--c-bg2); border:1px solid var(--c-border); border-radius:var(--r-s);
+         padding:1px 6px; color:var(--c-brand-hi); font-size:12px; white-space:nowrap; }
+  .mono { font:var(--mono); }
+  .muted { color:var(--c-fg2); }
+  .dim { color:var(--c-fg3); }
+
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:13px; }
+  th { text-align:left; font-weight:650; color:var(--c-fg0); background:var(--c-bg1);
+       padding:9px 12px; border:1px solid var(--c-border); font-size:12px; letter-spacing:.02em; }
+  td { padding:9px 12px; border:1px solid var(--c-border); vertical-align:top; color:var(--c-fg1); }
+  tbody tr:nth-child(even) td { background:#11162866; }
+  td.k { color:var(--c-fg0); font-weight:650; white-space:nowrap; }
+  td.warn { color:var(--c-warn); }
+
+  .card { background:var(--c-bg1); border:1px solid var(--c-border); border-radius:var(--r-l); padding:18px 20px; margin:14px 0; }
+  .card.hi { border-color:#4d6bfe66; background:linear-gradient(180deg,#4d6bfe14,#111628); }
+  .card.risk { border-color:#f8717155; background:linear-gradient(180deg,#f871710d,#111628); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media (max-width:900px){ .grid2,.grid3{ grid-template-columns:1fr; } .wrap{padding:0 18px;} }
+
+  .issue { border:1px solid var(--c-border); border-left:3px solid var(--c-err); border-radius:var(--r-m);
+           background:var(--c-bg1); padding:14px 18px; margin:12px 0; }
+  .issue.mid { border-left-color:var(--c-warn); }
+  .issue.low { border-left-color:var(--c-brand); }
+  .issue .hd { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .issue .id { font:var(--mono); font-size:11.5px; color:var(--c-fg2); background:var(--c-bg2);
+               border:1px solid var(--c-border); border-radius:var(--r-s); padding:1px 7px; }
+  .issue .ttl { font-size:14.5px; font-weight:650; color:var(--c-fg0); }
+  .sev { font-size:11px; padding:1px 8px; border-radius:999px; margin-left:auto; }
+  .sev.p0 { color:var(--c-err); background:#f8717118; border:1px solid #f8717140; }
+  .sev.p1 { color:var(--c-warn); background:#fbbf2418; border:1px solid #fbbf2440; }
+  .sev.p2 { color:var(--c-brand-hi); background:#4d6bfe18; border:1px solid #4d6bfe40; }
+
+  .swatch { display:inline-flex; align-items:center; gap:8px; font:var(--mono); font-size:11.5px; margin:4px 10px 4px 0; }
+  .swatch i { width:26px; height:26px; border-radius:8px; border:1px solid #ffffff1f; display:inline-block; flex:none; }
+  .swatch b { color:var(--c-fg0); font-weight:600; }
+  .swatch span { color:var(--c-fg3); }
+
+  .toc { columns:2; column-gap:32px; }
+  @media (max-width:860px){ .toc{columns:1;} }
+  .toc a { display:block; padding:5px 0; font-size:13.5px; border-bottom:1px solid #1a213866; }
+  .toc a span { font:var(--mono); font-size:11.5px; color:var(--c-fg3); margin-right:8px; }
+
+  .kbd { font:var(--mono); font-size:11px; border:1px solid var(--c-border-hi); border-bottom-width:2px;
+         border-radius:6px; padding:1px 6px; background:var(--c-bg2); color:var(--c-fg1); white-space:nowrap; }
+
+  .spec { border:1px solid var(--c-border); border-radius:var(--r-l); background:var(--c-bg1); padding:14px 18px; margin:12px 0; }
+  .spec .st { font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--c-brand-hi); font-weight:650; margin-bottom:8px; }
+
+  .mock { border:1px solid var(--c-border); border-radius:var(--r-l); background:var(--c-bg0);
+          padding:20px; margin:14px 0; overflow-x:auto; }
+  .mock pre { font:var(--mono); font-size:11.5px; line-height:1.55; color:var(--c-fg2); }
+  .mock .cap { font-size:12px; color:var(--c-fg2); margin-top:10px; text-align:center; }
+  .mk { color:var(--c-brand-hi); } .mo { color:var(--c-ok); } .mw { color:var(--c-warn); } .me { color:var(--c-err); }
+
+  .phase { display:flex; gap:14px; align-items:flex-start; border:1px solid var(--c-border); border-radius:var(--r-m);
+           background:var(--c-bg1); padding:14px 18px; margin:10px 0; }
+  .phase .tag { flex:none; font:var(--mono); font-size:11.5px; font-weight:650; padding:3px 10px; border-radius:999px;
+                background:#4d6bfe1a; color:var(--c-brand-hi); border:1px solid #4d6bfe40; }
+  .phase .tag.g { background:#34d39914; color:var(--c-ok); border-color:#34d39940; }
+  .phase .tag.y { background:#fbbf2414; color:var(--c-warn); border-color:#fbbf2440; }
+  .phase .body { flex:1; }
+  .phase .body .t { font-size:13.5px; font-weight:650; color:var(--c-fg0); }
+  .phase .body .d { font-size:12.5px; color:var(--c-fg2); margin-top:4px; line-height:1.65; }
+  .phase .body .d code { font-size:11.5px; }
+  hr.s { border:none; border-top:1px solid var(--c-border); margin:26px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">DSH Desktop · Visual Redesign Proposal</div>
+    <h1><span class="cn">深澜</span>视觉体系(DEEP TIDE)——桌面壳界面视觉重设计方案</h1>
+    <p class="lead">基线版本 <code>v0.8.2</code> · 覆盖 12 个界面/视图、6 类弹窗、约 60 个按钮/交互控件 · 颠覆许可:可删改功能逻辑、可完全推翻现有风格</p>
+    <div class="meta">
+      <span class="pill on">方向:品牌化「深海」重构(备选 3 个方向见 §2)</span>
+      <span class="pill">令牌层换肤 + 逐页重绘 + 按钮体系重建</span>
+      <span class="pill warn">破坏项:圆角/色板/动效全量变更</span>
+      <span class="pill break">保护项:30px 命令栏高 · 窗口尺寸契约 · IPC 信道 · build.files 白名单</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ 00 摘要 ============ -->
+<section id="s0" style="margin-top:40px">
+  <h2><span class="no">00</span>结论摘要</h2>
+  <p class="lead">现有界面的<strong>工程质量极高</strong>(令牌化、深浅双主题、A11y、UITEST 像素契约、懒创建内存治理),但<strong>视觉气质是「GitHub 皮肤」而非「DSH 品牌」</strong>:色板逐字复刻 GitHub Dark/Light、命令栏 30px 内塞进 10 个控件、辅助窗五窗五种布局范式、全部按钮只有一种 30px 规格、动效零性格。</p>
+
+  <div class="grid3">
+    <div class="card hi">
+      <h4 style="margin-top:0">主张一:色板从「GitHub 灰黑」转向「深海冷调」</h4>
+      <p style="font-size:13px;margin:0">基底由 <code>#0d1117</code>(纯灰黑)改为冷调深海军蓝 <code>#0b0f1d</code>,文字带冷白,边框带蓝灰——所有令牌名不变,只换值。品牌蓝紫 <code>#4d6bfe → #7aa1ff</code> 渐变成为唯一强调色,语义色换用现代高饱和四色(青/琥珀/玫红)。改动面收敛在 <code>ui.css</code> 一处。</p>
+    </div>
+    <div class="card hi">
+      <h4 style="margin-top:0">主张二:每个界面有自己的「角色」,不再五窗一貌</h4>
+      <p style="font-size:13px;margin:0">命令栏=信息中枢、任务中心=卡片流、对话框=聚焦弹层、设置窗=分区表单、报告窗=诊断仪表、欢迎/加载=品牌舞台。逐页给出布局、材质、动效、逐按钮规格(§4 十二节)。</p>
+    </div>
+    <div class="card hi">
+      <h4 style="margin-top:0">主张三:按钮从「一种 30px」升级为「五档规格体系」</h4>
+      <p style="font-size:13px;margin:0">主操作(渐变)/ 次级(描边)/ 幽灵(文字)/ 危险(红系)/ 图标(三档尺寸),每档定义 4 态(hover/active/disabled/focus)+ 品牌化按压与光晕(§5)。</p>
+    </div>
+  </div>
+
+  <h4>目录</h4>
+  <div class="card">
+    <nav class="toc">
+      <a href="#s1"><span>01</span>现状视觉诊断(12 界面逐个 + 10 项问题)</a>
+      <a href="#s2"><span>02</span>设计方向:深澜(DEEP TIDE)与三个备选</a>
+      <a href="#s3"><span>03</span>设计令牌层重构(色板/字体/圆角/阴影/动效/图标)</a>
+      <a href="#s4"><span>04</span>逐界面设计(命令栏/把手/菜单/面板/toast/任务中心/对话框/设置/报告/欢迎/加载/托盘)</a>
+      <a href="#s5"><span>05</span>按钮体系重建(五档规格 + 逐按钮规格表)</a>
+      <a href="#s6"><span>06</span>功能逻辑增删改建议(用户许可范围内)</a>
+      <a href="#s7"><span>07</span>分阶段落地与 UITEST/契约影响</a>
+      <a href="#s8"><span>08</span>验收自检清单</a>
+    </nav>
+  </div>
+</section>
+
+<!-- ============ 01 现状诊断 ============ -->
+<section id="s1">
+  <h2><span class="no">01</span>现状视觉诊断</h2>
+  <p class="lead">逐界面盘点「现在长什么样、问题在哪」。诊断结论是 §4 每个界面新设计的依据。</p>
+
+  <h3>1.1 十二个界面清单(现状)</h3>
+  <table>
+    <tr><th>界面</th><th>载体</th><th>现状视觉构成</th><th>关键尺寸契约</th></tr>
+    <tr><td class="k">命令栏</td><td>titlebarView 30px</td><td>三段式:☰+鲸鱼+工作目录 / 命令入口胶囊 / 状态簇(点+双徽标+主题)+窗口键</td><td>高 30px,按钮 24×24,关闭 44px</td></tr>
+    <tr><td class="k">下拉把手</td><td>revealTabView</td><td>96×26 圆角条 + 下箭头,hover 加深</td><td>96×26,感应区 280×34</td></tr>
+    <tr><td class="k">主菜单</td><td>menuPopupView 264px</td><td>分组树:6 组小标题(24px)+19 条目(32px,图标15+标签+快捷键/✓)+底部「所有命令…」</td><td>宽 264+24,item 32 / sec 24 / sep 9</td></tr>
+    <tr><td class="k">命令面板</td><td>paletteView 560px</td><td>输入行 56(放大镜+输入+键帽)+结果行 36×8+底部提示 30</td><td>560 宽,行高 36,最多 8 行</td></tr>
+    <tr><td class="k">通知宿主</td><td>toastWin 360px</td><td>右上角透明窗,卡片条目:左缘 3px 色带+15px 图标+单行文本+动作/✕</td><td>宽 360,最多 3 条</td></tr>
+    <tr><td class="k">任务中心</td><td>statusWin 410px</td><td>头部(图标+标题+后台+✕)+单任务活动/结果视图 / 多任务卡片列表+折叠历史</td><td>410 宽,186/250 单任务,列表 ≤460</td></tr>
+    <tr><td class="k">通用对话框</td><td>dialogWin 460px</td><td>居中弹层:40px 大圆标+标题+消息+detail 下沉面板+脚区按钮行;modal</td><td>宽 460,min 200</td></tr>
+    <tr><td class="k">设置窗</td><td>settingsWin 520px</td><td>三分区 tabs(下载/外观/高级)+滑杆+输入+choice 按钮组+路径行+内存表</td><td>宽 520,自适应高</td></tr>
+    <tr><td class="k">错误报告</td><td>reportWin 760px</td><td>红徽标胶囊+结论名+cause 块+建议列表+日志预览(行号/err-warn 高亮/仅错误行)+脚区动作与取证按钮</td><td>760×600,可缩放</td></tr>
+    <tr><td class="k">欢迎页</td><td>welcomeWin 480px</td><td>win-head+居中 hero(72px logo+h1+sub)+40px 全宽主按钮+hint+foot(托盘说明+退出)</td><td>宽 480,自适应高</td></tr>
+    <tr><td class="k">加载页</td><td>dshView file:// 页</td><td>居中 56px logo 呼吸+双环 spinner+阶段文字+4 光点+底部 logtail+慢启动操作行</td><td>占满 dshView</td></tr>
+    <tr><td class="k">托盘菜单</td><td>trayMenuWin 264px</td><td>复用 menu 渲染器:只读状态行+7 条目,无分组</td><td>宽 264+24</td></tr>
+  </table>
+
+  <h3>1.2 十个视觉问题(按优先级)</h3>
+  <div class="issue">
+    <div class="hd"><span class="id">V1</span><span class="ttl">色板是 GitHub 皮肤,不是 DSH 品牌</span><span class="sev p0">P0</span></div>
+    <p>深色 6 个底色(<code>#0d1117/#161b22/#21262d/#30363d/#e6edf3/#8b949e</code>)与浅色 6 个底色逐字复刻 GitHub;唯一品牌痕迹是 <code>#4d6bfe</code> 按钮与 <code>#8b5cf6</code> 进度副色。用户看到的是「又一个 GitHub 风工具」,与 DeepSeek 品牌(深蓝+鲸鱼)零关联。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V2</span><span class="ttl">30px 命令栏信息过载</span><span class="sev p0">P0</span></div>
+    <p>一条栏里:☰、鲸鱼、DSH、工作目录(最长 46vw)、命令入口胶囊、服务点、任务徽标、更新徽标、主题钮、收起、最小化、最大化、关闭——13 个元素。工作目录与命令入口在 960-1200px 区间互相挤压,<960px 命令入口整体消失(只能靠 Ctrl+K)。状态点 8px 圆点,语义全靠颜色,色弱用户无法区分。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V3</span><span class="ttl">辅助窗「五窗一貌」,布局范式各自为政</span><span class="sev p0">P0</span></div>
+    <p>dialog 居中弹层、status 顶部进度、settings 分区表单、report 顶部诊断、welcome 居中 hero——头部都是同一个 .win-head,但内容区五种范式。用户在不同窗之间切换时没有一致的「信息阅读顺序」。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V4</span><span class="ttl">按钮只有一种 30px 规格</span><span class="sev p1">P1</span></div>
+    <p>.btn 单一规格 + 5 个变体(primary/success/danger/danger-ghost/默认)。行内只有 status 有小按钮(26px)。没有文字按钮/图标按钮档位,「清除镜像」用 danger-ghost 却无图标,「刷新内存」是裸文本按钮。视觉权重无法表达操作层级。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V5</span><span class="ttl">动效零性格,全是保守 fade/slide</span><span class="sev p1">P1</span></div>
+    <p>入场动画 = opacity + 位移(菜单/面板/toast/窗口),全部 0.16-0.24s;唯一有性格的是加载页鲸鱼呼吸与进度条 sheen。没有任何品牌化动效(光波、涟漪、渐变流动),reduced-motion 之外的观感「没有记忆点」。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V6</span><span class="ttl">Win11 材质只试点不铺开,且配合保守</span><span class="sev p1">P1</span></div>
+    <p>acrylic/mica 只覆盖 status/dialog/settings/report 四窗;菜单/面板/toast/托盘仍是纯色卡片。材质窗的 <code>--win-bg</code> 只做到 55-62% 透明度,圆角 10px,自绘阴影直接去掉——玻璃感不完整。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V7</span><span class="ttl">图标描边规范不统一</span><span class="sev p1">P1</span></div>
+    <p>menu/cmdbar/toast 族 stroke-width 1.3,result/activity 族 1.6-1.7,linecap 有的 round 有的 butt;同是 16 viewBox 的图标在 15px 与 13px 间混用(palette.search 13px)。放大后粗细不齐、端点形态不一。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V8</span><span class="ttl">信息密度与层级:日志/表单偏挤,主窗偏空</span><span class="sev p1">P1</span></div>
+    <p>report 日志 12px 等宽、设置窗 12px 表单、toast 12px 单行——密集区域字号压到极限;而主窗 1440px 宽只有 30px 命令栏 + dsh 页面,壳层几乎隐形。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V9</span><span class="ttl">状态反馈分散在三种载体,风格不一</span><span class="sev p2">P2</span></div>
+    <p>就地反馈(inline-feedback 文本)、toast(卡片)、系统通知——同是「已保存」类反馈,三种长相。对话框 detail 面板、设置窗 .cmd 卡片、报告 cause 块,三处都是「下沉面板」但圆角/底色各写各的。</p>
+  </div>
+  <div class="issue">
+    <div class="hd"><span class="id">V10</span><span class="ttl">欢迎/加载两扇品牌门面最朴素</span><span class="sev p2">P2</span></div>
+    <p>首启欢迎页与启动加载页是用户对 DSH 的第一印象,却只是「居中 logo + 一段文字」;没有品牌渐变、没有玻璃、没有鲸鱼叙事。</p>
+  </div>
+</section>
+
+<!-- ============ 02 方向 ============ -->
+<section id="s2">
+  <h2><span class="no">02</span>设计方向:深澜(DEEP TIDE)</h2>
+
+  <h3>2.1 四个候选方向</h3>
+  <table>
+    <tr><th>方向</th><th>气质</th><th>代表参照</th><th>优点</th><th>风险</th><th>结论</th></tr>
+    <tr>
+      <td class="k">A · 深澜 深海冷调<br><span class="muted">(推荐)</span></td>
+      <td>深海蓝黑基底 + 品牌蓝紫光 + 波光动效</td>
+      <td>DeepSeek 品牌 / Linear 冷调深色</td>
+      <td>与品牌强关联;色板改动收敛在令牌层;浅色=海面晨光,双主题叙事完整</td>
+      <td>偏离 GitHub 系后对比度需重验;视觉「冷」,部分用户可能不喜</td>
+      <td><strong style="color:var(--c-ok)">推荐</strong></td>
+    </tr>
+    <tr>
+      <td class="k">B · 全玻璃拟态</td>
+      <td>Mica/Acrylic 全铺,半透明分层,大圆角</td>
+      <td>Windows 11 Fluent / macOS Sonoma</td>
+      <td>系统原生感强,Win11 上惊艳</td>
+      <td>Win10 降级差异大;模糊在低端机有 CPU 成本;截图/UITEST 不稳</td>
+      <td>作为 A 的渐进增强,不单独成体系</td>
+    </tr>
+    <tr>
+      <td class="k">C · 极简单色</td>
+      <td>中性灰白、大留白、字体层级驱动</td>
+      <td>Vercel / Arc / Linear 浅色</td>
+      <td>高级、克制、对比度好把控</td>
+      <td>与「开发者工具」气质重叠;品牌感弱;深色用户无感</td>
+      <td>作为浅色主题的底子</td>
+    </tr>
+    <tr>
+      <td class="k">D · 终端/命令行美学</td>
+      <td>mono 字体主导、终端绿、极密</td>
+      <td>Warp / Neovim 生态</td>
+      <td>与 dsh 开发者身份契合</td>
+      <td>对非开发者用户不友好;长期使用视觉疲劳</td>
+      <td>作为「开发者模式」可选皮肤,本轮不做</td>
+    </tr>
+  </table>
+
+  <h3>2.2 深澜体系的五个设计原则</h3>
+  <ol>
+    <li><strong>品牌即底色</strong>:色板从 GitHub 灰黑转向深海冷调蓝黑;唯一强调色 = DeepSeek 蓝紫渐变。任何界面一眼认出「这是 DSH,不是别的壳」。</li>
+    <li><strong>光从海底来</strong>:深色界面用「上冷下深」的微渐变表达光线;强调元素带品牌光晕(glow);进度/加载用波光(现有 sheen 升级为品牌蓝紫流光)。</li>
+    <li><strong>每窗有角色</strong>:十二界面各定一种布局范式(§4),窗口之间信息阅读顺序一致(头→内容→脚)。</li>
+    <li><strong>层级靠「层」不靠「线」</strong>:用圆角+半透明分层+冷调阴影表达浮起,减少对 1px 边框的依赖;Win11 材质作渐进增强。</li>
+    <li><strong>动效有记忆点</strong>:三档时长保留,但每个关键动效给一个品牌签名(菜单滑入带光晕、面板回弹、toast 波光尾迹、状态点呼吸)。全程尊重 <code>prefers-reduced-motion</code>。</li>
+  </ol>
+
+  <div class="card hi">
+    <h4 style="margin-top:0">一句话主张</h4>
+    <p style="margin:0;font-size:15px;color:var(--c-fg0);line-height:1.8">
+      「把 DSH 从 <em>GitHub 皮肤</em> 变成 <strong>深海里的光</strong>」——色板冷调化、玻璃铺开、按钮五档化、每窗有角色,
+      用品牌蓝紫作为整座应用唯一的光源,让十二个界面共用同一套「深海」叙事。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 03 令牌层 ============ -->
+<section id="s3">
+  <h2><span class="no">03</span>设计令牌层重构</h2>
+  <p class="lead">原则:令牌<strong>名字一个不改</strong>(全仓页面引用零改动),只改 <code>ui.css</code> 里的值。以下均为新值。</p>
+
+  <h3>3.1 色板 · 深色(深海)</h3>
+  <div class="card">
+    <h4 style="margin-top:0">基底(冷调蓝黑)</h4>
+    <span class="swatch"><i style="background:#0b0f1d"></i><b>--c-bg0</b> <span>#0b0f1d 海底</span></span>
+    <span class="swatch"><i style="background:#111628"></i><b>--c-bg1</b> <span>#111628 礁岩</span></span>
+    <span class="swatch"><i style="background:#1a2138"></i><b>--c-bg2</b> <span>#1a2138 暗礁</span></span>
+    <span class="swatch"><i style="background:#262f4d"></i><b>--c-border</b> <span>#262f4d 深水线</span></span>
+    <span class="swatch"><i style="background:#35406b"></i><b>--c-border-hi</b> <span>#35406b 水光线</span></span>
+    <h4>文字(冷白)</h4>
+    <span class="swatch"><i style="background:#e8ecf8"></i><b>--c-fg0</b> <span>#e8ecf8 月光</span></span>
+    <span class="swatch"><i style="background:#c6cde0"></i><b>--c-fg1</b> <span>#c6cde0 天光</span></span>
+    <span class="swatch"><i style="background:#8b95b0"></i><b>--c-fg2</b> <span>#8b95b0 波光</span></span>
+    <span class="swatch"><i style="background:#5f6884"></i><b>--c-fg3</b> <span>#5f6884 深波</span></span>
+    <h4>强调(唯一光源 = 品牌蓝紫)</h4>
+    <span class="swatch"><i style="background:#4d6bfe"></i><b>--c-brand</b> <span>#4d6bfe 深澜蓝</span></span>
+    <span class="swatch"><i style="background:#7aa1ff"></i><b>--c-brand-hi</b> <span>#7aa1ff 澜光</span></span>
+    <span class="swatch"><i style="background:#7b5cff"></i><b>渐变端</b> <span>#7b5cff 澜紫(渐变副端)</span></span>
+    <span class="swatch"><i style="background:#8b5cf6"></i><b>--c-progress-accent</b> <span>#8b5cf6 进度副色(保留)</span></span>
+    <h4>语义色(现代高饱和,深底可读)</h4>
+    <span class="swatch"><i style="background:#34d399"></i><b>--c-ok</b> <span>#34d399 磷光绿</span></span>
+    <span class="swatch"><i style="background:#fbbf24"></i><b>--c-warn</b> <span>#fbbf24 珊瑚金</span></span>
+    <span class="swatch"><i style="background:#f87171"></i><b>--c-err</b> <span>#f87171 赤潮红</span></span>
+    <span class="swatch"><i style="background:#c42b1c"></i><b>--c-close-hover</b> <span>#c42b1c 关闭红(保留,Windows 规范)</span></span>
+    <p class="muted" style="font-size:12.5px">对比度校验(深底):fg1 #c6cde0 on bg0 #0b0f1d ≈ 13.5:1;fg2 #8b95b0 ≈ 7.4:1;ok/warn/err 均 ≥ 4.5:1(12px 文字下限)。</p>
+  </div>
+
+  <h3>3.2 色板 · 浅色(晨澜,海面)</h3>
+  <div class="card">
+    <span class="swatch"><i style="background:#f5f7fc"></i><b>--c-bg0</b> <span>#f5f7fc 海面雾</span></span>
+    <span class="swatch"><i style="background:#ffffff"></i><b>--c-bg1</b> <span>#ffffff 晨光</span></span>
+    <span class="swatch"><i style="background:#e9edf6"></i><b>--c-bg2</b> <span>#e9edf6 浅浪</span></span>
+    <span class="swatch"><i style="background:#d7deef"></i><b>--c-border</b> <span>#d7deef 岸线</span></span>
+    <span class="swatch"><i style="background:#c2cce6"></i><b>--c-border-hi</b> <span>#c2cce6 岸线亮</span></span>
+    <span class="swatch"><i style="background:#1a2138"></i><b>--c-fg0</b> <span>#1a2138 墨蓝</span></span>
+    <span class="swatch"><i style="background:#35406b"></i><b>--c-fg2</b> <span>#35406b 青蓝</span></span>
+    <span class="swatch"><i style="background:#3b5bdb"></i><b>--c-brand</b> <span>#3b5bdb 深澜蓝(浅底加深)</span></span>
+    <span class="swatch"><i style="background:#0969da"></i><b>--c-brand-hi</b> <span>#0969da</span></span>
+    <span class="swatch"><i style="background:#1a7f37"></i><b>--c-ok</b> <span>#1a7f37</span></span>
+    <span class="swatch"><i style="background:#9a6700"></i><b>--c-warn</b> <span>#9a6700</span></span>
+    <span class="swatch"><i style="background:#d1242f"></i><b>--c-err</b> <span>#d1242f</span></span>
+    <p class="muted" style="font-size:12.5px">浅色沿用「海面晨光」叙事:冷白底 + 青蓝文字 + 深澜蓝强调,与深色共用同一套结构令牌。</p>
+  </div>
+
+  <h3>3.3 圆角 / 阴影 / 层级 / 动效</h3>
+  <table>
+    <tr><th>令牌</th><th>旧值</th><th>新值</th><th>说明</th></tr>
+    <tr><td class="k">--radius-ctl / card / panel / win</td><td>6 / 8 / 10 / 10</td><td><strong>8 / 12 / 16 / 16</strong></td><td>整体 +2~6px,浮层与窗口大圆角形成「深海气泡」语言</td></tr>
+    <tr><td class="k">--c-panel-shadow</td><td>0 10px 32px rgba(0,0,0,.5)</td><td>0 14px 44px rgba(8,14,40,.55)</td><td>冷调投影,带深蓝而非纯黑</td></tr>
+    <tr><td class="k">--c-elev-1/2/3</td><td>黑投影</td><td>冷调:0 1px 2px rgba(8,14,40,.4) / 0 14px 44px… / 0 20px 60px…</td><td>层级序列同步冷调</td></tr>
+    <tr><td class="k">--dur-fast/mid/slow</td><td>.12/.18/.24</td><td><strong>.14/.20/.28</strong></td><td>略放慢给光晕动效留出感知窗口</td></tr>
+    <tr><td class="k">--ease-out</td><td>cubic-bezier(.2,.9,.3,1)</td><td>cubic-bezier(.16,1,.3,1)</td><td>更强的减速曲线,浮层「落定」感</td></tr>
+    <tr><td class="k">--c-hover / active</td><td>rgba(127,127,127,.22/.36)</td><td>rgba(122,161,255,.14) / .22</td><td>悬停底从「灰」变「澜光蓝」,浅色主题自动派生</td></tr>
+    <tr><td class="k">--c-sel-bg</td><td>#1f6feb2e</td><td>#4d6bfe33(深)/ #3b5bdb1f(浅)</td><td>选中态带品牌色</td></tr>
+    <tr><td class="k">--c-win-bg / panel-bg</td><td>rgba(22,27,34,.98/.97)</td><td>rgba(17,22,40,.92) 深 / rgba(255,255,255,.94) 浅</td><td>为玻璃材质预留透明度</td></tr>
+    <tr><td class="k">--c-reveal-bg</td><td>rgba(13,17,23,.78)</td><td>rgba(17,22,40,.88)</td><td>把手底色同步冷调</td></tr>
+  </table>
+
+  <h3>3.4 字体</h3>
+  <div class="card">
+    <p><strong>--font-ui</strong> 保持 <code>Segoe UI + Microsoft YaHei</code>(Windows 安全栈,禁止外链字体)。新增两个展示级字栈:</p>
+    <ul>
+      <li><code>--font-display: "Bahnschrift", "Segoe UI", "Microsoft YaHei", sans-serif</code> —— 标题/欢迎页/报告结论名用 <strong>Bahnschrift SemiBold</strong>(Win10+ 内置的现代几何无衬线,数字与西文有性格,中文回落 YaHei)。</li>
+      <li><code>--font-mono</code> 保持 <code>Cascadia Mono</code>;日志/路径/命令/内存等一切等宽场景统一 <code>font-variant-numeric: tabular-nums</code>(已有 .num,补到日志行号、设置数值框)。</li>
+    </ul>
+  </div>
+
+  <h3>3.5 图标体系重绘</h3>
+  <div class="card">
+    <p>统一规范(全族):<strong>viewBox 16、渲染 15×15、stroke-width 1.5、stroke-linecap/join = round</strong>;24 viewBox 的 result/activity 族统一 stroke-width 1.7 + round。重绘范围:</p>
+    <ul>
+      <li>menu 族 19 枚:端点全部圆化,曲线更柔(放大镜、文件夹、箭头等),<code>palette.search</code> 的 13px 归一到 15px。</li>
+      <li>新增 <code>status</code> 族 4 枚(§4.6 任务中心卡片用:进行中=波光、完成=磷光、失败=赤潮、安装=齿轮)。</li>
+      <li>品牌签名:加载页/欢迎页鲸鱼 logo 换用 <code>deepseek-whale-color.svg</code>(彩色源文件已存在于 assets,现用于品牌展示场景)。</li>
+      <li>图标 hover 动效统一:「选中/hover 时图标右移 1px + 变澜光色」(菜单/面板已有此行为,扩展为全仓图标按钮的规范)。</li>
+    </ul>
+  </div>
+
+  <h3>3.6 玻璃材质策略(Win11 渐进增强)</h3>
+  <div class="card">
+    <table>
+      <tr><th>界面</th><th>现状</th><th>新策略</th></tr>
+      <tr><td class="k">菜单 / 命令面板 / 托盘菜单</td><td>纯色卡片</td><td>Win11:改 <code>backgroundMaterial:'acrylic'</code> 窗口 + 页内 <code>--c-panel-bg</code> 降到 82% 透明度,大圆角 16 + 冷调投影;Win10 回落实色</td></tr>
+      <tr><td class="k">status / dialog / settings / report</td><td>acrylic/mica 已试点</td><td>统一口径:材质窗透明度 深 78% / 浅 85%,<code>--win-shadow</code> 保留冷调投影(不再一刀切去掉),圆角统一 16</td></tr>
+      <tr><td class="k">toast / 下拉把手</td><td>纯色</td><td>toast 条目改半透明玻璃卡(母窗透明,条目自身 <code>backdrop-filter</code> 不可用——保持纯色 + 内高光);把手保留半透明</td></tr>
+      <tr><td class="k">加载页 / 欢迎页</td><td>纯色全屏</td><td>全屏品牌渐变背景(§4.10/4.11),不依赖系统材质</td></tr>
+    </table>
+    <p class="muted" style="font-size:12.5px;margin-bottom:0">注:toast 的条目无法使用 backdrop-filter(宿主窗是透明窗,条目后面没有可模糊的内容),故 toast 条目用「纯色 + 内高光 + 状态色带」表达,与 §4.5 一致。</p>
+  </div>
+</section>
+
+<!-- ============ 04 逐界面 ============ -->
+<section id="s4">
+  <h2><span class="no">04</span>逐界面设计</h2>
+  <p class="lead">每个界面给出:角色定位 · 布局 · 材质 · 动效 · 该界面内每个按钮的新规格(详细按钮规格汇总见 §5)。</p>
+
+  <!-- 4.1 命令栏 -->
+  <h3>4.1 命令栏(titlebar.html · 30px 高度保持)</h3>
+  <div class="mock">
+<pre>┌──────────────────────────────────────────────────────────────────────────┐
+│  ☰  🐋 DSH  ▸ 工作目录…          [ ⌕ 搜索或跳转 Ctrl+K ]      ● [⇥2][⇡1][◐]  ─ □ ✕ │
+│  菜单    标识区(可拖拽)            命令入口(居中)             状态簇     窗口键  │
+└──────────────────────────────────────────────────────────────────────────┘
+   菜单按钮     logo+名+目录(点击复制)    胶囊:澜光描边+放大镜    点+光晕  徽标渐变  主题    收起/最小化/最大化/关闭
+</pre>
+    <div class="cap">命令栏角色:信息中枢。30px 高度是 UITEST 硬契约,不动;结构(三段式)保留,视觉全量升级。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>现状</th><th>新设计</th></tr>
+    <tr><td class="k">☰ 菜单按钮</td><td>32×24,hover 灰底</td><td>hover 底改澜光蓝 <code>--c-hover</code>;展开态 <code>.active</code> 用品牌渐变底 + 白图标;图标重绘圆角线</td></tr>
+    <tr><td class="k">鲸鱼 logo + DSH</td><td>16px 白鲸 + 文字</td><td>18px 彩色鲸鱼(assets 已有 <code>deepseek-whale-color.svg</code>),文字用 --font-display SemiBold;采样浅底时换黑版(逻辑不变)</td></tr>
+    <tr><td class="k">工作目录按钮</td><td>文本行,46vw 截断,点击复制</td><td>前加 13px folder 图标;hover 文字变澜光色 + 下划线;截断保留(46vw 契约不动);复制成功 toast 不变</td></tr>
+    <tr><td class="k">命令入口胶囊</td><td>20px 高,1px 灰描边</td><td>22px 高,pill 圆角,澜光描边(<code>--c-brand-hi 40%</code>),放大镜变澜光色,hover 淡澜光底 + 轻微上浮 1px;键帽升级(§5 图标钮规格);断点策略见 §6-改3</td></tr>
+    <tr><td class="k">服务状态点</td><td>8px 圆点,纯色</td><td>9px 圆点 + 同色 5px 光晕 ring(<code>box-shadow: 0 0 0 3px 色值 22%</code>);err 态呼吸脉冲(1.6s,reduced-motion 关闭);title/播报逻辑不变</td></tr>
+    <tr><td class="k">任务徽标 / 更新徽标</td><td>24×24 灰按钮 + 蓝色角标</td><td>角标改品牌渐变底(#4d6bfe→#7b5cff)+ 白字 10.5px;任务数 >99 显示 99+ 不变;按钮 hover 澜光底;更新徽标点角标带光晕</td></tr>
+    <tr><td class="k">主题按钮</td><td>24×24 图标</td><td>图标重绘(半日半月的浅色版);hover 澜光底;循环逻辑不变</td></tr>
+    <tr><td class="k">收起按钮</td><td>34×24 上箭头</td><td>箭头 hover 上移 1px(已有)保留;图标圆角化</td></tr>
+    <tr><td class="k">最小化 / 最大化 / 关闭</td><td>44×24,关闭 hover 红</td><td>关闭 hover 红保留(Windows 规范);最小/最大 hover 澜光底;最大化/还原图标形态不变</td></tr>
+  </table>
+
+  <!-- 4.2 下拉把手 -->
+  <h3>4.2 下拉把手(reveal-tab.html · 96×26 保持)</h3>
+  <div class="card">
+    <p>角色:收拢态的唯一恢复入口。新设计:</p>
+    <ul>
+      <li>底色 <code>--c-reveal-bg</code> 冷调半透明(§3.3),圆角 <code>0 0 14px 14px</code>(比现状 11px 更圆)。</li>
+      <li>箭头改澜光色(<code>--c-brand-hi</code>),hover 箭头下移 1px + 底变 <code>--c-reveal-bg-hover</code>。</li>
+      <li>首次演示(3s 呼吸)保留,呼吸光晕改为「澜光描边扩散」:hover/hint 时 1px <code>--c-brand-hi 45%</code> 描边 + 光晕,替代纯 opacity 呼吸,更可发现。</li>
+    </ul>
+  </div>
+
+  <!-- 4.3 菜单 -->
+  <h3>4.3 主菜单 / 托盘菜单(menu.html)</h3>
+  <div class="mock">
+<pre>┌────────────────────────────────────┐
+│ 工作区                                │  ← sec 小标题:澜光短横线 + 字距
+│  ▸ 打开工作目录…            Ctrl+O    │  ← 图标 15px 圆角线,选中右移变澜光
+│  ⌂ 打开 dsh 数据目录                   │
+│ 服务                                  │
+│  ↻ 重启 dsh 服务          Ctrl+Shift+R │
+│  🌐 在浏览器中打开                     │
+│ 更新                                  │
+│  ⤓ 检查更新…(当前 v0.8.2)             │
+│  ───────────────────────              │
+│  ⌕ 所有命令…               Ctrl+K      │  ← 底部入口:澜光渐变底行
+└────────────────────────────────────┘
+</pre>
+    <div class="cap">菜单角色:常用入口。宽 264 契约建议放宽至 288(见 §6-改4),此项需同步 menuHeight/MENU_W 与 uitest。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">面板</td><td>Win11 玻璃(§3.6);大圆角 16;冷调投影;入场:0.18s 下坠 + 光晕淡入(保留 <code>prefers-reduced-motion</code> 分支)</td></tr>
+    <tr><td class="k">分组小标题 .sec</td><td>左侧加 3px 澜光竖线(圆头),文字 11px/600/字距 .08em 不变,行高 24px 契约不动</td></tr>
+    <tr><td class="k">条目 .item</td><td>32px 行高不动;hover/选中底改 <code>--c-sel-bg</code>(带澜光);图标 hover 右移 1px + 变澜光(保留);快捷键列压暗但保留</td></tr>
+    <tr><td class="k">勾选项 ✓</td><td>✓ 改澜光色圆底徽标(10px 圆 + ✓),替代裸文本</td></tr>
+    <tr><td class="k">危险项(退出)</td><td>hover 底改赤潮红 12% + 图标变红;左侧 3px 红条(色弱可辨)</td></tr>
+    <tr><td class="k">底部「所有命令…」</td><td>渐变分隔线(澜光 25%→透明)+ 该行 hover 用澜光渐变底 10%</td></tr>
+    <tr><td class="k">托盘只读状态行</td><td>前加 9px 状态点(带光晕,颜色随 trayState)+ 文字,整体 opacity .85</td></tr>
+  </table>
+
+  <!-- 4.4 命令面板 -->
+  <h3>4.4 命令面板(palette.html · 560px 宽保持)</h3>
+  <div class="mock">
+<pre>┌────────────────────────────────────────────┐
+│ ⌕  输入命令或搜索…                  Ctrl+K   │  ← 输入行 56px:聚焦时澜光描边+光晕
+├────────────────────────────────────────────┤
+│ 常用                                        │  ← 空查询置顶「常用」区
+│  ▸ 重启 dsh 服务     服务     Ctrl+Shift+R  │
+│  ▸ 检查更新…         更新                   │
+│  ☐ 关闭时最小化到托盘 ✓  外观与行为         │  ← 勾选项 ✓ 澜光徽标
+│  …(≤8 行)                                   │
+├────────────────────────────────────────────┤
+│ ↑↓ 选择 · Enter 执行 · Esc 关闭              │  ← 提示行 30px,澜光渐变分隔
+└────────────────────────────────────────────┘
+</pre>
+    <div class="cap">面板角色:全量命令的搜索入口。宽度 560 契约不动(与 PALETTE_W 对应)。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">输入行</td><td>聚焦态:1px <code>--c-brand</code> 描边 + 4px 澜光光晕(<code>box-shadow: 0 0 0 3px #4d6bfe22</code>);放大镜图标 15px 圆角线;占位符冷调</td></tr>
+    <tr><td class="k">结果行 .prow</td><td>36px 行高不动;选中态:底 <code>--c-sel-bg</code> + 左侧 3px 澜光圆头竖线;图标 hover 右移;分组标签与快捷键压暗保留</td></tr>
+    <tr><td class="k">键帽 .pkbd</td><td>圆角 6px 保留,底色 bg2,文字 10.5px,悬停澜光描边</td></tr>
+    <tr><td class="k">底部提示行</td><td>上缘 1px 渐变线(澜光 30%→透明);文字 11px</td></tr>
+    <tr><td class="k">空态</td><td>「没有匹配的命令」加 36px 高留白 + 居中,图标用灰放大镜</td></tr>
+  </table>
+
+  <!-- 4.5 toast -->
+  <h3>4.5 通知宿主(toast.html · 360px 宽保持)</h3>
+  <div class="mock">
+<pre>┌──────────────────────────────┐
+│ ▌✓ 已复制工作目录路径          ✕ │  ← 左缘 4px 状态色带(圆头),图标 15px
+│ ▌⚠ dsh 本体安装超时     查看   ✕ │  ← 动作按钮:文字按钮 + hover 淡色底
+└──────────────────────────────┘
+</pre>
+    <div class="cap">toast 角色:不抢焦点、不挡点击的瞬时/常驻反馈。宽度 360、最多 3 条、点击穿透逻辑全部不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">条目 .titem</td><td>左缘色带 3px→<strong>4px 圆头</strong>;底色换 <code>--c-panel-bg</code> 新值(冷调);保留 1px 内高光;圆角 12</td></tr>
+    <tr><td class="k">图标 .tico</td><td>15px 圆角线重绘;err 态图标加微脉冲(1.6s)</td></tr>
+    <tr><td class="k">动作按钮 .tact</td><td>文字按钮规范(§5 幽灵钮):状态色文字 + hover 淡色底 14%;加 24px 最小点击目标</td></tr>
+    <tr><td class="k">✕ .tclose</td><td>24×24,hover 澜光底;仅 persistent/action 条目显示(逻辑不动)</td></tr>
+    <tr><td class="k">入场</td><td>右滑 12px + 淡入(已有)+ 光晕尾迹(<code>filter: drop-shadow(0 0 10px 状态色 35%)</code> 首帧)</td></tr>
+  </table>
+
+  <!-- 4.6 任务中心 -->
+  <h3>4.6 任务中心(status.html · 410px 宽保持)</h3>
+  <div class="mock">
+<pre>┌────────────────────────────┐
+│ ⬇ 正在下载 v0.8.3…   后台  ✕ │  ← 头部:图标+标题+后台+✕
+│ 当前 v0.8.2                   │
+│ ▓▓▓▓▓▓▓░░░░░░░ 63%           │  ← 进度条:品牌蓝紫渐变+sheen(已有)
+│ 23 / 36 MB · 2.1 MB/s         │
+│ ┌────────────────────────┐   │
+│ │▌ 下载更新 0.8.3      ✕ │   │  ← 多任务卡片:左缘状态色带+玻璃卡
+│ │ 63% ▓▓▓▓▓▓ 23/36 MB   │   │
+│ └────────────────────────┘   │
+│ ▸ 已完成 2 项                 │  ← 历史折叠:计数胶囊
+└────────────────────────────┘
+</pre>
+    <div class="cap">任务中心角色:双通道更新/下载/安装的并存列表。窗口宽 410 与 186/250/460 高度契约不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">头部 .win-head</td><td>图标改澜光色(已有 color 变体);标题 14px/650;后台按钮改幽灵钮带下载图标;✕ 走公共 .win-close</td></tr>
+    <tr><td class="k">单任务活动视图</td><td>detail 13px 冷灰;进度条 6px 保留(渐变 + sheen 已是品牌签名);meta 数字 tabular-nums</td></tr>
+    <tr><td class="k">结果视图</td><td>46px 大圆标升级:渐变底 + 同色光晕(pop 动画保留);标题 --font-display;按钮行走主/次/危险规范</td></tr>
+    <tr><td class="k">任务卡片 .trow</td><td>圆角 8→12;左缘 3px 状态色带(进行中=澜光、成功=磷光、失败=赤潮、警告=珊瑚);底色玻璃化(材质窗内用 88% 透明);阴影冷调 elev-1</td></tr>
+    <tr><td class="k">行内按钮 .lbtns</td><td>26px 小按钮(§5 次级小号);行 ✕ 24px hover 澜光底;Delete 键语义保留</td></tr>
+    <tr><td class="k">历史折叠行 .hist</td><td>hover 澜光淡底;计数改 14px 胶囊(<code>N 项</code>,澜光描边);展开三角改澜光色</td></tr>
+  </table>
+
+  <!-- 4.7 对话框 -->
+  <h3>4.7 通用对话框(dialog.html · 460px 宽保持)</h3>
+  <div class="mock">
+<pre>┌──────────────────────────┐
+│  ⓘ  退出确认               │  ← 40px 大圆标:渐变底+光晕
+│      退出会中断安装…        │  ← 消息 13px/1.6
+│      ┌──────────────┐     │
+│      │ 强制中断可能… │     │  ← detail:等宽下沉面板 12px
+│      └──────────────┘     │
+│            [ 取消 ] [ 退出 ]│  ← 主=取消(primary),危险=退出
+└──────────────────────────┘
+</pre>
+    <div class="cap">对话框角色:聚焦决策。modal 语义、队列化、Enter/Esc 契约、位次契约全部不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">窗口 .win</td><td>玻璃化(§3.6)+ 圆角 16;入场动画保留(scale+上移)+ 首帧澜光描边光晕</td></tr>
+    <tr><td class="k">大圆标 .big</td><td>40px;四态底色改新语义色 14% 透明 + 同色 8px 光晕;success pop / error shake 保留;info/warning 加轻微缩放入场</td></tr>
+    <tr><td class="k">标题/消息</td><td>标题 15px/650(--font-display);消息 13px/1.6 冷灰;detail 面板:等宽字体、bg0 深底、圆角 12、左缘 2px 品牌线(信息型)或 2px 红(告警型,按 type)</td></tr>
+    <tr><td class="k">按钮行</td><td>主/次/危险三档(§5);等宽 88px 契约不动;聚焦主按钮逻辑不动</td></tr>
+  </table>
+
+  <!-- 4.8 设置窗 -->
+  <h3>4.8 设置窗(settings.html · 520px 宽保持)</h3>
+  <div class="mock">
+<pre>┌──────────────────────────────────────┐
+│ ⚙ 设置                              ✕ │
+│ [更新与下载][外观与行为][高级]           │  ← tabs:选中=澜光底线+650
+│ ──────────────────────────────────────│
+│ 多线程分段下载                桌面端更新 │  ← sec-t:标题+标签胶囊
+│ ●━━━━━━━━━━●━━━  并发 6 段             │  ← 滑杆:品牌渐变 track + 光晕 thumb
+│ 镜像源(可选)                            │
+│ [ https://… ] [保存镜像][清除]          │
+│ npm config set registry…   [复制命令]   │
+│ ──────────────────────────────────────│
+│ 改动即时保存到 config.json     ✓ 已保存  │  ← foot:note + inline-feedback
+└──────────────────────────────────────┘
+</pre>
+    <div class="cap">设置窗角色:分区表单。三分区 tabs、acc: 三条 IPC 契约、自适应高度全部不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">tabs</td><td>选中态:澜光底线 2px + 文字 650 + 微上浮;hover 澜光淡底;标签切换加 0.18s 内容淡入</td></tr>
+    <tr><td class="k">滑杆 input[type=range]</td><td>放弃原生 accent-color,自定义:track 6px 圆角 bg2,已选区品牌渐变;thumb 16px 澜光圆钮 + hover 光晕(webkit-slider-thumb 两伪元素)</td></tr>
+    <tr><td class="k">数值框 .seg-n</td><td>圆角 10;数字用 tabular-nums + --font-display;当前值高亮澜光</td></tr>
+    <tr><td class="k">输入框</td><td>聚焦:澜光描边 + 2px 光晕;等宽字体保持</td></tr>
+    <tr><td class="k">标签胶囊 .tag</td><td>澜光描边胶囊(已有形态)保留;「可选」降为冷灰胶囊区分主标签</td></tr>
+    <tr><td class="k">choice 按钮组</td><td>选中态:品牌渐变底 12% + 澜光描边 + 文字澜光(已有)→ 升级为渐变底 + 内高光;未选中 hover 澜光淡底</td></tr>
+    <tr><td class="k">命令卡片 .cmd / 路径行</td><td>统一「代码卡」规范:bg0 深底 + 圆角 12 + 左缘 2px 澜光线 + 等宽;复制按钮幽灵钮带复制图标</td></tr>
+    <tr><td class="k">内存表 / 脚区</td><td>dt 冷灰、dd 数值等宽;total 行澜光加粗;foot 顶部渐变分隔线;inline-feedback 保留</td></tr>
+  </table>
+
+  <!-- 4.9 报告窗 -->
+  <h3>4.9 错误报告窗(report.html · 760px 保持)</h3>
+  <div class="mock">
+<pre>┌────────────────────────────────────────────────────┐
+│ 🐋 DSH 错误报告 — 启动诊断                    ✕     │
+│ [启动失败] dsh 第三方插件与当前版本不兼容             │  ← 状态横幅:渐变底+白字胶囊+结论名
+│ ┌──────────────────────────────────────┐          │
+│ │ dsh 升级后,旧版第三方插件…(原因正文)   │          │  ← cause 卡:bg1 下沉+左缘色线
+│ └──────────────────────────────────────┘          │
+│ • 先定位下方报错中的插件名…                          │  ← 建议列表:澜光 • 圆点
+│ • 编辑 cordis.patch.yml 加 disabled: true           │
+│ 关键日志预览   12/87 行    [仅错误行]               │  ← 行号+计数+分段 toggle
+│ ┌──────────────────────────────────────┐          │
+│ │ 0001 [12:00:01] dsh web 启动…         │          │
+│ │ 0002 ✕ plugin tree failed…            │          │  ← err 行:赤潮字+左线
+│ └──────────────────────────────────────┘          │
+│      [重启 dsh][退出]          D:\…dsh-error-….txt [日志文件][复制][导出] │
+└────────────────────────────────────────────────────┘
+</pre>
+    <div class="cap">报告窗角色:诊断仪表。窗口 760×600 可缩放、mica、行号/仅错误行功能全部保留。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">状态横幅(替换 .badge + .name 并排)</td><td>badge 升级为横幅:左侧胶囊(启动失败=赤潮渐变底白字/进程退出=珊瑚金)+ 右侧结论名 --font-display 16px;底色:赤潮红 8% 渐变 + 左缘 4px 色线;整条可换肤(浅色自动)</td></tr>
+    <tr><td class="k">cause 卡</td><td>bg1 + 圆角 12 + 左缘 3px 语义色线(按结论类型);max-height 88px 契约不动</td></tr>
+    <tr><td class="k">建议列表</td><td>• 改 8px 澜光圆点(色弱下仍可辨);行距 1.6 保持</td></tr>
+    <tr><td class="k">日志区</td><td>等宽 12px/1.6 保持;行号列 4ch 不变、颜色 fg3;err/warn 行左线+色字保留;背景 bg0 深底圆角 12;toggle 改分段控件(§5 幽灵钮按下态:澜光描边)</td></tr>
+    <tr><td class="k">脚区</td><td>动作组(重试 primary / 退出 danger)居左、取证组(日志/复制/导出 次级钮带图标)居右;路径 note 冷灰;位置契约(RPT-1)不动</td></tr>
+  </table>
+
+  <!-- 4.10 欢迎页 -->
+  <h3>4.10 欢迎页(welcome.html · 480px 保持)</h3>
+  <div class="mock">
+<pre>┌────────────────────────────────┐
+│ 🐋 DSH Desktop                  │  ← win-head(拖拽)
+│          ╭────────╮            │
+│        ╭─│  鲸鱼  │─╮          │  ← 96px 彩色鲸鱼:澜光光晕呼吸
+│        ╰─│(渐变底)│─╯          │
+│  欢迎使用 DSH Desktop            │  ← h1 --font-display 20px
+│  以桌面应用的方式运行 dsh 本体…    │
+│  ┌──────────────────────┐      │
+│  │   选择工作目录          │      │  ← 40px 全宽:品牌渐变+光晕
+│  └──────────────────────┘      │
+│  工作目录决定文件与会话的归属…     │
+│  🐳 点「关闭」默认收进托盘…   [退出]│  ← foot:tray-note+退出
+└────────────────────────────────┘
+</pre>
+    <div class="cap">欢迎页角色:品牌第一触点。窗口宽 480、自适应高、wl: 契约全部不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">背景</td><td>全窗径向渐变:中心澜光蓝 12% → 深海黑;浅色主题自动换晨光渐变(浅蓝 10% → 白)</td></tr>
+    <tr><td class="k">鲸鱼 logo</td><td>72→96px;用彩色鲸鱼源图;光晕呼吸动画(loading 的 breathe 规格升级:scale 1↔1.04 + 光晕 18↔34px);reduced-motion 关闭</td></tr>
+    <tr><td class="k">主按钮</td><td>40px 全宽品牌渐变(蓝→澜紫)+ 白字 + 光晕;hover 亮度 1.1(已有 .btn.primary 规则);焦点环反色</td></tr>
+    <tr><td class="k">foot</td><td>托盘说明图标改彩色鲸鱼小图标;退出按钮次级;顶部渐变分隔线</td></tr>
+  </table>
+
+  <!-- 4.11 加载页 -->
+  <h3>4.11 加载页(loading.html)</h3>
+  <div class="mock">
+<pre>┌──────────────────────────────────────────────┐
+│                                              │
+│            ╭────────╮                        │
+│            │  鲸鱼   │    ← 72px 彩色鲸鱼呼吸  │
+│            ╰────────╯                        │
+│             ( 双环 spinner )                 │
+│        启动 dsh web 服务…                     │  ← 阶段文字 14px
+│         ● ● ● ●                             │  ← 4 光点:已完成=澜光实心+光晕
+│  (首次启动可能需要安装依赖,耗时较长)              │
+│  ───────────────────────────────────────────│
+│  [查看日志] [重试] [取消并退出]                 │  ← 慢启动 15s 自助行(3 档按钮)
+│  dsh web: http://127.0.0.1:…                 │  ← 底部 logtail 玻璃条
+└──────────────────────────────────────────────┘
+</pre>
+    <div class="cap">加载页角色:启动叙事。占满 dshView;setStage/pushLog/showSlowActions 三个桥不动。</div>
+  </div>
+  <table>
+    <tr><th>元素</th><th>新设计</th></tr>
+    <tr><td class="k">背景</td><td>全屏径向渐变(澜光 10% → 深海黑)+ 底部一条 40% 透明「海平线」渐变;浅色自动换晨光</td></tr>
+    <tr><td class="k">鲸鱼 + 双环</td><td>鲸鱼 56→72px 彩色源图;双环 spinner 保留(品牌蓝紫双环已是好签名),外环加光晕</td></tr>
+    <tr><td class="k">阶段光点 .dots</td><td>6px 圆点:已完成 = 澜光实心 + 2px 光晕 + 微脉冲;未完成 = 深波灰;四段与 setStage 契约不动</td></tr>
+    <tr><td class="k">慢启动自助行</td><td>三档按钮:查看日志(次级)/重试(primary 渐变)/取消并退出(danger-ghost);亮出时从底部滑入 0.24s;聚焦重试逻辑不动</td></tr>
+    <tr><td class="k">logtail</td><td>玻璃条:bg1 78% + 圆角 12 + 澜光 1px 描边 + 等宽 11px;单行截断保留</td></tr>
+  </table>
+
+  <!-- 4.12 托盘菜单 -->
+  <h3>4.12 托盘菜单(复用 menu.html)</h3>
+  <div class="card">
+    <p>与主菜单同套升级(§4.3),差异:宽 264 契约不动(托盘 264+24);首行只读状态行升级为「状态点(带光晕,随 trayState 变色)+ dsh v0.1.2 · 运行中 · 已运行 3 分钟」;无分组小标题,行间发丝线保留。</p>
+  </div>
+</section>
+
+<!-- ============ 05 按钮体系 ============ -->
+<section id="s5">
+  <h2><span class="no">05</span>按钮体系重建</h2>
+  <p class="lead">从「一种 .btn」升级为「五档规格 + 状态契约」。类名沿用既有(<code>.btn / .primary / .danger / .danger-ghost / .success</code>),<strong>新增</strong> <code>.btn.ghost</code>(幽灵文字钮)与 <code>.btn.icon</code>(图标钮三档)。所有按钮遵循同一状态契约。</p>
+
+  <h3>5.1 五档规格</h3>
+  <table>
+    <tr><th>档位</th><th>尺寸</th><th>视觉</th><th>用途示例</th><th>状态</th></tr>
+    <tr><td class="k">主操作 Primary</td><td>高 30(决策行 88px 等宽)</td><td>品牌渐变(蓝→澜紫)+ 白字 + 澜光光晕</td><td>选择工作目录 / 重试 / 现在更新 / 保存镜像</td><td>hover 亮度 1.1;active 缩放 .97 + 光晕收拢;disabled 中性化;focus 反色环</td></tr>
+    <tr><td class="k">次级 Secondary(.btn 默认)</td><td>高 30</td><td>bg2 底 + 1px 边框 + 冷白字</td><td>日志文件 / 复制报告 / 刷新 / 稍后</td><td>hover 底变 bg2→border;active .97;disabled 中性化</td></tr>
+    <tr><td class="k">幽灵 Ghost(新增)</td><td>高 26~30</td><td>透明底 + 状态色/澜光文字;hover 同色 12% 淡底</td><td>toast 动作钮 / 设置 choice 未选中 / 「仅错误行」toggle</td><td>aria-pressed=true 时:澜光描边 + 文字澜光(开关语义);active 底色加深</td></tr>
+    <tr><td class="k">危险 Danger / Danger-ghost</td><td>高 30</td><td>实心 = 赤潮渐变白字;幽灵 = 红描边红字,hover 红 12% 底</td><td>退出 / 仍然退出 / 清除镜像 / 取消并退出</td><td>同上四态;实心 focus 反色环</td></tr>
+    <tr><td class="k">图标钮 Icon(新增)</td><td>24 / 26 / 30 三档</td><td>透明底 + 15px 圆角线图标;hover 澜光淡底</td><td>24=命令栏状态簇/行内✕/toast✕;26=行内小动作;30=窗头动作</td><td>hover 图标变澜光 + 右移/上移 1px(按方向);active 底加深</td></tr>
+  </table>
+
+  <h3>5.2 状态契约(所有按钮统一)</h3>
+  <div class="card">
+    <ul>
+      <li><strong>hover</strong>:底/描边/文字三态联动(不再只有底色变化);主操作亮度上提。</li>
+      <li><strong>active</strong>:scale(.97) 保留 + 光晕收拢 60%(按压即「光被按进去」)。</li>
+      <li><strong>disabled</strong>:一律中性化(现有规则保留),剥离渐变与光晕。</li>
+      <li><strong>focus-visible</strong>:现有反色环契约保留;幽灵钮 focus 用澜光环。</li>
+      <li><strong>图标动效</strong>:图标钮 hover 时图标位移 1px(方向语义:动作钮右移、关闭类左移、收起上移)。</li>
+      <li><strong>加载中态(新增)</strong>:按钮可携带 <code>.busy</code> —— 文字前 12px 旋转小环 + 按钮禁用化(报告窗「重试」点击后到窗口重建前的防重复)。</li>
+    </ul>
+  </div>
+
+  <h3>5.3 逐按钮规格总表(全部界面)</h3>
+  <table>
+    <tr><th>界面</th><th>按钮</th><th>档位</th><th>规格要点</th></tr>
+    <tr><td rowspan="10">命令栏</td><td>☰ 菜单</td><td>Icon 24</td><td>展开态:品牌渐变底白图标</td></tr>
+    <tr><td>工作目录</td><td>Ghost 24</td><td>folder 图标 + 文本;hover 澜光 + 下划线</td></tr>
+    <tr><td>命令入口胶囊</td><td>Ghost 22 胶囊</td><td>澜光描边;放大镜;键帽</td></tr>
+    <tr><td>任务徽标</td><td>Icon 24</td><td>渐变数字角标(99+ 上限)</td></tr>
+    <tr><td>更新徽标</td><td>Icon 24</td><td>澜光点角标 + 光晕</td></tr>
+    <tr><td>主题</td><td>Icon 24</td><td>半日半月图标;hover 澜光</td></tr>
+    <tr><td>收起</td><td>Icon 24(宽 34)</td><td>上箭头;hover 上移</td></tr>
+    <tr><td>最小化</td><td>Icon 24(宽 44)</td><td>hover 澜光淡底</td></tr>
+    <tr><td>最大化/还原</td><td>Icon 24(宽 44)</td><td>双图标切换逻辑不动</td></tr>
+    <tr><td>关闭</td><td>Icon 24(宽 44)</td><td>hover 红底白图标(Windows 规范,保留)</td></tr>
+    <tr><td rowspan="3">菜单</td><td>条目(19)</td><td>Ghost 32 行</td><td>图标 hover 右移变澜光;勾选 ✓ 澜光圆徽;危险项红系</td></tr>
+    <tr><td>底部「所有命令…」</td><td>Ghost 32 行</td><td>渐变分隔 + 澜光行底</td></tr>
+    <tr><td>托盘状态行</td><td>只读</td><td>状态点 + 文字,opacity .85</td></tr>
+    <tr><td rowspan="2">命令面板</td><td>结果行(≤8)</td><td>Ghost 36 行</td><td>选中:澜光竖线 + 高亮底;勾选项 ✓ 澜光徽</td></tr>
+    <tr><td>键帽(非按钮)</td><td>—</td><td>bg2 底 6px 圆角,hover 澜光描边</td></tr>
+    <tr><td rowspan="2">toast</td><td>动作钮</td><td>Ghost 24</td><td>状态色文字 + hover 12% 底</td></tr>
+    <tr><td>✕</td><td>Icon 24</td><td>仅 persistent/action 条目显示</td></tr>
+    <tr><td rowspan="5">任务中心</td><td>后台</td><td>Ghost 26</td><td>下载图标 + 文字;hover 澜光</td></tr>
+    <tr><td>头部 ✕</td><td>Icon 24(.win-close)</td><td>hover 红底(公共)</td></tr>
+    <tr><td>行内按钮组</td><td>Secondary 26 小号</td><td>行内密度;等宽不适用</td></tr>
+    <tr><td>行内 ✕</td><td>Icon 24</td><td>hover 澜光;Delete 键语义保留</td></tr>
+    <tr><td>历史折叠行</td><td>Ghost 28 行</td><td>三角 + 计数胶囊</td></tr>
+    <tr><td rowspan="3">对话框</td><td>主按钮</td><td>Primary 30</td><td>等宽 88px;Enter 直达(逻辑不动)</td></tr>
+    <tr><td>取消/次按钮</td><td>Secondary 30</td><td>Esc 回落(逻辑不动)</td></tr>
+    <tr><td>破坏性按钮</td><td>Danger 30</td><td>如「仍然退出」「清除」</td></tr>
+    <tr><td rowspan="8">设置窗</td><td>分区 tab</td><td>Ghost 28</td><td>选中:澜光底线 + 650</td></tr>
+    <tr><td>保存镜像</td><td>Primary 30</td><td>等宽</td></tr>
+    <tr><td>清除</td><td>Danger-ghost 30</td><td>红描边红字</td></tr>
+    <tr><td>复制命令</td><td>Secondary 26</td><td>复制图标 + 文字</td></tr>
+    <tr><td>主题/关闭/浏览器 choice</td><td>Ghost 30</td><td>选中:渐变底 12% + 澜光描边(aria-pressed)</td></tr>
+    <tr><td>复制配置/日志路径</td><td>Secondary 26</td><td>复制图标</td></tr>
+    <tr><td>刷新内存</td><td>Ghost 26</td><td>刷新图标 + 文字</td></tr>
+    <tr><td>✕</td><td>Icon 24(.win-close)</td><td>关闭护栏逻辑不动</td></tr>
+    <tr><td rowspan="5">报告窗</td><td>重试(主)</td><td>Primary 30</td><td>.busy 加载态候选</td></tr>
+    <tr><td>退出</td><td>Danger 30</td><td>danger 样式 + 退出图标</td></tr>
+    <tr><td>日志文件/复制/导出</td><td>Secondary 30</td><td>带图标(文档/复制/下载)</td></tr>
+    <tr><td>仅错误行</td><td>Ghost 26</td><td>aria-pressed 切换;文案即状态(保留)</td></tr>
+    <tr><td>✕</td><td>Icon 24(.win-close)</td><td>—</td></tr>
+    <tr><td rowspan="2">欢迎页</td><td>选择工作目录</td><td>Primary 40 全宽</td><td>品牌渐变 + 光晕;首焦点(逻辑不动)</td></tr>
+    <tr><td>退出</td><td>Secondary 30</td><td>—</td></tr>
+    <tr><td rowspan="3">加载页</td><td>查看日志</td><td>Secondary 30</td><td>—</td></tr>
+    <tr><td>重试</td><td>Primary 30</td><td>慢启动亮出时聚焦(逻辑不动)</td></tr>
+    <tr><td>取消并退出</td><td>Danger-ghost 30</td><td>—</td></tr>
+  </table>
+</section>
+
+<!-- ============ 06 功能增删改 ============ -->
+<section id="s6">
+  <h2><span class="no">06</span>功能逻辑增删改建议</h2>
+  <p class="lead">用户许可范围内(可删改功能逻辑)。每条标注:改动内容 / 契约影响 / 建议(做/不做/可选)。</p>
+
+  <table>
+    <tr><th>#</th><th>改动</th><th>理由</th><th>契约影响</th><th>建议</th></tr>
+    <tr>
+      <td class="k">改1</td>
+      <td>命令栏状态点升级:9px 圆点 + 同色光晕 ring;err 态呼吸脉冲</td>
+      <td>V2:8px 裸点在 24px 盒内太弱;光晕让「运行/启动/停止」第一眼可读,呼吸让崩溃可察觉</td>
+      <td>无(纯 CSS + 类名不变)</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改2</td>
+      <td>菜单/面板/toast/托盘 Win11 玻璃化(backgroundMaterial + 页内透明度)</td>
+      <td>V6:材质统一,五窗一貌→玻璃家族</td>
+      <td>main.js 四处 new 窗加 backgroundMaterial;Win10 自动降级;无 UITEST 破坏</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改3</td>
+      <td>命令入口胶囊断点策略:<960px 从「整钮隐藏」改为「图标钮常显」(56px 宽)</td>
+      <td>V2:主窗 minWidth 960,断点 959 是死代码(永远到不了);图标版让窄窗仍有可视入口,不依赖 Ctrl+K 记忆</td>
+      <td>titlebar.html 断点 CSS + uitest cmdbar 断言微调</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改4</td>
+      <td>主菜单宽 264 → 288(图标+标签+快捷键更舒展)</td>
+      <td>V3:264 下长条目(「检查更新…(当前 v0.8.2)」)截断明显;288 容纳 15px 图标 + 4 字差</td>
+      <td>MENU_W、menuHeight 相关常量、uitest menu 断言;托盘菜单保持 264 不动</td>
+      <td><strong style="color:var(--c-warn)">可选</strong>(收益与 UITEST 改动成本权衡,可留到 V1 末批)</td>
+    </tr>
+    <tr>
+      <td class="k">改5</td>
+      <td>任务中心新增「清空历史」:历史折叠行旁小按钮,一键丢弃全部完成项</td>
+      <td>V8:完成项只增不减(需逐条 ✕),长期运行历史堆积</td>
+      <td>新增 st:clear-done IPC + status.html + i18n 键;UITEST 新增断言</td>
+      <td><strong style="color:var(--c-warn)">可选</strong>(建议做,但属功能新增,若本轮纯视觉可砍)</td>
+    </tr>
+    <tr>
+      <td class="k">改6</td>
+      <td>报告窗动作按钮加 .busy 加载态(重试点击后按钮转圈防重复)</td>
+      <td>重试→bootDsh 期间窗口即关,实际无重复点击窗口;收益小</td>
+      <td>ui-kit 加 busy 构件</td>
+      <td>不做(本轮砍)</td>
+    </tr>
+    <tr>
+      <td class="k">改7</td>
+      <td>对话框 detail 面板按 type 着色(信息=澜光线/告警=珊瑚线/错误=赤潮线)</td>
+      <td>V9:detail 面板三种长相统一为一种 + 语义色线</td>
+      <td>无(纯 CSS)</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改8</td>
+      <td>toast 动作钮/✕ 从「无最小尺寸」补齐 24px 最小点击目标</td>
+      <td>V4:现状 .tact padding 6px 高度 24px 已达;✕ 24×24 已达——补 aria-pressed 与悬停态即可</td>
+      <td>无</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改9</td>
+      <td>滑杆放弃 accent-color 改全自定义(渐变 track + 光晕 thumb)</td>
+      <td>V4/V7:原生滑杆 thumb 在深浅主题下无法精细控制,与品牌脱节</td>
+      <td>settings.html 内联样式 + 浏览器前缀伪元素;UITEST 无滑杆外观断言</td>
+      <td><strong style="color:var(--c-ok)">做</strong></td>
+    </tr>
+    <tr>
+      <td class="k">改10</td>
+      <td>删除/合并:报告窗 cause 卡与建议列表间的 sec-label「处理建议」保留;命令栏 .cluster 发丝线保留</td>
+      <td>维持信息架构,本轮不动功能增减</td>
+      <td>—</td>
+      <td>不做(维持)</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ============ 07 分阶段 ============ -->
+<section id="s7">
+  <h2><span class="no">07</span>分阶段落地与 UITEST/契约影响</h2>
+  <p class="lead">四批推进,每批 = 改动 + 离线验证(selftest/探针)+ 提版本号 + 提交。硬约束(违反会出事)与契约影响列在末尾。</p>
+
+  <div class="phase">
+    <span class="tag g">V0</span>
+    <div class="body">
+      <div class="t">令牌层换肤(纯值替换,零结构)</div>
+      <div class="d">ui.css:色板/圆角/阴影/动效/悬停色/选中色 全量换值;ui-icons.js 全族重绘(统一 1.5 描边 + round);新增 --font-display、--c-glow-* 光晕令牌。<strong>风险:全仓视觉突变,但任何断言都不应红</strong>(几何契约不动)。出口:selftest 13 静态组 + 4 探针全绿。</div>
+    </div>
+  </div>
+  <div class="phase">
+    <span class="tag">V1</span>
+    <div class="body">
+      <div class="t">浮层家族升级(菜单/面板/toast/托盘/把手)</div>
+      <div class="d">menu.html 分组小标题竖线+危险项红条;palette 聚焦光环+选中竖线;toast 色带/动作钮/toast 光晕;reveal-tab 澜光;Win11 玻璃铺开(改4 菜单加宽可选)。<strong>注意 menuHeight/MENU_W 若改需同步 uitest</strong>。出口:menu 探针 31 项 + palette/toast 运行时用例。</div>
+    </div>
+  </div>
+  <div class="phase">
+    <span class="tag y">V2</span>
+    <div class="body">
+      <div class="t">辅助窗四件套(任务中心/对话框/设置/报告)</div>
+      <div class="d">status 卡片色带+历史胶囊+清空历史(可选);dialog 圆标光晕+detail 语义色线;settings 滑杆自定义+choice 渐变选中;report 状态横幅+分段 toggle。<strong>改3 命令栏断点修正放本批一并回归</strong>。出口:status 46 / windows 40 / report 16 探针 + 新增断言。</div>
+    </div>
+  </div>
+  <div class="phase">
+    <span class="tag">V3</span>
+    <div class="body">
+      <div class="t">品牌门面(欢迎/加载)+ 收尾</div>
+      <div class="d">welcome/loading 渐变背景+彩色鲸鱼+光晕;全仓动效微调;验收截图(深浅双主题 × 关键界面)。出口:全部探针 + 打包预检 16 项。</div>
+    </div>
+  </div>
+
+  <h3>7.1 不可动硬约束(违反会出事)</h3>
+  <div class="card risk">
+    <ul style="margin-bottom:0">
+      <li><strong>禁止 ES module</strong>:页面走 file://,全部共享层保持经典 script + IIFE + window.*。</li>
+      <li><strong>CSP 不放松</strong>:无外部 CDN/字体(新增字栈只能用系统内置 Bahnschrift/Segoe UI)。</li>
+      <li><strong>build.files 白名单</strong>:新增文件(如有)必须逐条加入 package.json。</li>
+      <li><strong>UITEST 几何契约</strong>:命令栏高 30、status 186/250、menu item 32/sec 24/sep 9、dialog min 200、面板 560/行 36——除非同提交改断言,否则不许动。</li>
+      <li><strong>IPC 信道与载荷</strong>:acc:get/set/close、st:、dl:、rp:、tb:、m:、pt:、nt:、wl:、boot: 全部保持;新增 IPC 只能新增不能改签名。</li>
+      <li><strong>进度帧 150ms</strong>:status 列表必须保持 keyed diff(listNav/keyedList 不动)。</li>
+      <li><strong>安全面</strong>:trustedEvent 首行校验、dsh-preload 对远程页零暴露、文本一律 textContent——视觉改动不得引入 innerHTML 注入面。</li>
+      <li><strong>点击穿透与焦点</strong>:toast 的 setIgnoreMouseEvents、菜单/面板 blur 收起、焦点陷阱、aria-activedescendant 全部保持。</li>
+    </ul>
+  </div>
+
+  <h3>7.2 建议版本口径</h3>
+  <p>视觉重构属「新功能」量级(改动面全仓),建议 V0 完成后提 <code>0.9.0</code>,V1-V3 按 <code>0.9.x</code> 递增;若用户希望整体一次落地,也可合并为一次 <code>1.0.0</code>(破坏性视觉变更)。</p>
+</section>
+
+<!-- ============ 08 验收 ============ -->
+<section id="s8">
+  <h2><span class="no">08</span>验收自检清单</h2>
+  <div class="card">
+    <table>
+      <tr><th>项</th><th>验收标准</th></tr>
+      <tr><td class="k">品牌识别</td><td>关闭文字只看界面 3 秒,能说出这是 DSH/DeepSeek 系应用(深澜蓝紫 + 鲸鱼)</td></tr>
+      <tr><td class="k">双主题</td><td>深色「深海」/浅色「晨澜」在全部 12 界面无死白/死黑、无对比度 < 4.5:1 的正文(除装饰性 fg3)</td></tr>
+      <tr><td class="k">按钮体系</td><td>五档规格在全部界面就位;任一按钮 hover/active/disabled/focus 四态可辨;图标钮位移方向符合语义</td></tr>
+      <tr><td class="k">动效</td><td>reduced-motion 开启时全部动效关闭;关键动效(菜单/面板/结果/进度)有品牌签名;无掉帧(60fps)</td></tr>
+      <tr><td class="k">契约</td><td>selftest 全绿;四探针全绿;新增断言覆盖每批改动;打包预检 16 项通过</td></tr>
+      <tr><td class="k">A11y</td><td>既有 63+ 条 A11y 声明无一回退(landmark/aria/焦点陷阱/keyshortcuts);新增控件补齐 aria-pressed/aria-label</td></tr>
+      <tr><td class="k">真机目视</td><td>Win11(玻璃)+ Win10(降级)各过一遍:toast 穿透、菜单点击、面板 Ctrl+K、收托盘恢复、下载进度、错误报告导出</td></tr>
+    </table>
+  </div>
+
+  <hr class="s">
+  <p class="muted">本方案为<strong>视觉重设计提案</strong>,尚未改任何代码。方向(§2)、令牌值(§3)、逐界面设计(§4)、按钮规格(§5)、功能增减(§6)待评审;批准后按 §7 分批实施。</p>
+</section>
+
+</div>
+</body>
+</html>

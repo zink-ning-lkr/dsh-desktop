@@ -36,8 +36,7 @@
   .detail.warning { border-left-color: var(--c-warn); }
   .detail.error { border-left-color: var(--c-err); }
   .foot { flex: none; display: flex; justify-content: flex-end; gap: var(--sp-2); padding: 2px var(--sp-5) 18px; }
-  /* Win11 Acrylic(v0.6.1):系统材质透出——底色半透明、去自绘大阴影 */
-  .win.acrylic { --win-bg: color-mix(in srgb, var(--c-win-bg) 55%, transparent); --win-shadow: none; }
+  /* Win11 Acrylic:材质样式在 ui.css §5(窗口外壳层),本页只加类名 */
 </style>
 </head>
 <body>
@@ -64,7 +63,9 @@
   // 焦点陷阱(阶段 0 修复 X3):主进程已补 modal:true 阻断主窗输入,此处收口窗口内焦点,
   // 防止 Tab 跑到窗口外或落到不可见元素。窗口为隐藏复用,陷阱随页面生命周期只装一次即可
   // (每次查询都是实时选择器,不持有节点引用)。
-  K.focusTrap(document.querySelector('.win'));
+  // 返回的解除闭包保存并在页面卸载时释放(X-7):页面将来若被 reload,监听不残留
+  const releaseTrap = K.focusTrap(document.querySelector('.win'));
+  window.addEventListener('beforeunload', () => releaseTrap());
 
   function render(p) {
     payload = p;

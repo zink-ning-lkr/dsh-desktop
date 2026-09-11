@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
 <script src="ui-icons.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
   /* 四周留白容纳阴影。12px 必须与主进程 PALETTE_MARGIN 一致,否则面板会被裁边 */
@@ -92,6 +93,7 @@
 </div>
 <script>
   const P = window.__palette;
+  const K = window.UI_KIT; // 复合构件走共享层:结果列表用 keyedList 复用节点(P-5)
   const T = (k, p) => window.__i18n.t(k, p);
   const ICONS = window.UI_ICONS.menu; // 图标按条目 id 取用(与菜单同一张表),内部白名单、innerHTML 注入安全
   document.getElementById('qIco').innerHTML = window.UI_ICONS.palette.search;
@@ -110,6 +112,9 @@
   pal.setAttribute('aria-label', T('palette.region'));
   list.setAttribute('aria-label', T('palette.results'));
   q.setAttribute('placeholder', T('palette.placeholder'));
+  // 可访问名(X-2):placeholder 按规范不能充当组合框的名字(它只是提示,且输入后消失),
+  // 此前读屏聚焦只会念「组合框」而不说明这是搜什么的
+  q.setAttribute('aria-label', T('palette.searchLabel'));
   hint.textContent = T('palette.hint');
 
   let items = [];     // 全部命令(主进程下发)
@@ -182,65 +187,82 @@
 
   function run(id) { P.run(id); }
 
-  function renderRows() {
-    list.textContent = '';
-    if (headText) {
+  /* 结果行渲染:keyed 复用(与任务中心同一构件 K.keyedList)。
+     原实现每次击键 list.textContent = '' 全量重建 —— 行数 ≤8 时开销可忽略,但会冲掉滚动位置
+     与 CSS 过渡,更要紧的是同一代码库里不该并存两种对立做法(阶段 2 为任务列表引入 keyed 复用,
+     理由正是"全量重建会冲掉滚动/动画/未提交输入/焦点")。
+     与 status 同一纪律:语义从节点上读(dataset.id / 当前位置),不从建行时的闭包读 ——
+     节点会被复用到另一条命令上,闭包里的下标与 id 都会过期。 */
+  function rowSpecs() {
+    const out = [];
+    if (headText) out.push({ k: 'sec', kind: 'sec' });
+    if (!view.length) out.push({ k: 'empty', kind: 'empty' });
+    else view.forEach((it, i) => out.push({ k: 'r:' + it.id, kind: 'row', it, i }));
+    return out;
+  }
+  function buildRow(spec) {
+    if (spec.kind === 'sec') {
       const sec = document.createElement('div');
       sec.className = 'psec';
       sec.setAttribute('role', 'presentation'); // 分节标题只是视觉分组,不占导航位
-      sec.textContent = headText;
-      list.appendChild(sec);
+      return sec;
     }
-    if (!view.length) {
+    if (spec.kind === 'empty') {
       const empty = document.createElement('div');
       empty.className = 'pempty';
       empty.setAttribute('role', 'presentation');
-      empty.textContent = T('palette.empty');
-      list.appendChild(empty);
-      select(0, false);
-      report();
-      return;
+      return empty;
     }
-    view.forEach((it, i) => {
-      const row = document.createElement('div');
-      row.className = 'prow';
-      row.id = 'po-' + i;
-      row.setAttribute('role', 'option');
-      row.setAttribute('aria-selected', 'false');
-      const ico = document.createElement('span');
-      ico.className = 'pico';
-      ico.setAttribute('aria-hidden', 'true');
-      ico.innerHTML = ICONS[it.id] || '';
-      const lbl = document.createElement('span');
-      lbl.className = 'plbl';
-      lbl.textContent = it.label; // 文本一律 textContent:label 里拼着版本号/内存数等运行时值
-      const grp = document.createElement('span');
-      grp.className = 'pgrp';
-      grp.textContent = it.groupLabel;
-      row.append(ico, lbl, grp);
-      // 勾选项(设置类):读屏器要能报"已开启/已关闭",故把状态写进 aria-label 而不是只画个勾
-      if (it.checked !== null) {
-        const chk = document.createElement('span');
-        chk.className = 'pchk';
-        chk.setAttribute('aria-hidden', 'true');
-        chk.textContent = '✓';
-        row.appendChild(chk);
-      }
-      if (it.accel) {
-        const acc = document.createElement('span');
-        acc.className = 'pacc';
-        // 并入 aria-label,避免读屏器把快捷键逐字母读出来
-        acc.setAttribute('aria-hidden', 'true');
-        acc.textContent = it.accel;
-        row.appendChild(acc);
-      }
-      row.setAttribute('aria-label', it.label
-        + (it.checked !== null ? ' ' + T(it.checked ? 'palette.on' : 'palette.off') : '')
-        + (it.accel ? ' ' + it.accel : ''));
-      row.addEventListener('mouseenter', () => select(i, false)); // 悬停与键盘共用同一份选中态
-      row.addEventListener('click', () => run(it.id));
-      list.appendChild(row);
+    const row = document.createElement('div');
+    row.className = 'prow';
+    row.dataset.id = spec.it.id; // 语义真值在节点上:节点被复用时 click 仍打向它当前代表的命令
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', 'false');
+    const ico = document.createElement('span');
+    ico.className = 'pico';
+    ico.setAttribute('aria-hidden', 'true');
+    const lbl = document.createElement('span');
+    lbl.className = 'plbl';
+    const grp = document.createElement('span');
+    grp.className = 'pgrp';
+    // 勾选项(设置类):读屏器要能报"已开启/已关闭",故把状态写进 aria-label 而不是只画个勾
+    const chk = document.createElement('span');
+    chk.className = 'pchk';
+    chk.setAttribute('aria-hidden', 'true');
+    chk.textContent = '✓';
+    const acc = document.createElement('span');
+    acc.className = 'pacc';
+    acc.setAttribute('aria-hidden', 'true'); // 快捷键并入 aria-label,避免读屏器逐字母读出
+    row.append(ico, lbl, grp, chk, acc);
+    // 悬停与键盘共用同一份选中态:下标现算(节点是复用的,建行时的 i 会过期)
+    row.addEventListener('mouseenter', () => {
+      const k = Array.prototype.indexOf.call(list.querySelectorAll('.prow'), row);
+      if (k >= 0) select(k, false);
     });
+    row.addEventListener('click', () => run(row.dataset.id));
+    return row;
+  }
+  function updateRow(node, spec) {
+    if (spec.kind === 'sec') { node.textContent = headText; return; }
+    if (spec.kind === 'empty') { node.textContent = T('palette.empty'); return; }
+    const it = spec.it;
+    node.id = 'po-' + spec.i; // aria-activedescendant 指向它,下标随过滤结果变,故每帧重写
+    node.dataset.id = it.id;
+    node.querySelector('.pico').innerHTML = ICONS[it.id] || '';
+    node.querySelector('.plbl').textContent = it.label; // 文本一律 textContent:label 里拼着版本号/内存数等运行时值
+    node.querySelector('.pgrp').textContent = it.groupLabel;
+    const chk = node.querySelector('.pchk');
+    chk.style.display = it.checked !== null ? '' : 'none';
+    const acc = node.querySelector('.pacc');
+    acc.style.display = it.accel ? '' : 'none';
+    acc.textContent = it.accel || '';
+    node.setAttribute('aria-label', it.label
+      + (it.checked !== null ? ' ' + T(it.checked ? 'palette.on' : 'palette.off') : '')
+      + (it.accel ? ' ' + it.accel : ''));
+  }
+
+  function renderRows() {
+    K.keyedList(list, rowSpecs(), buildRow, updateRow);
     select(0, false);
     report();
   }

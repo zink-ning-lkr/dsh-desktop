@@ -44,7 +44,6 @@
     "cancelRow": "取消此项:",
     "done": "已完成 {n} 项",
     "clearDone": "清空",
-    "clearDoneTip": "清空已完成的历史记录(进行中任务不受影响)",
     "progress": "进度",
     "background": "后台",
     "backgroundTip": "最小化到任务栏,完成时通知",
@@ -72,9 +71,7 @@
     "checkUpdateCurrent": "检查更新…(当前 v{v})",
     "checkDshUpdate": "检查 dsh 本体更新…(当前 v{v})",
     "checkDshUpdatePlain": "检查 dsh 本体更新",
-    "downloadAccel": "下载加速设置…",
     "shortcuts": "键盘快捷键…",
-    "autoOpenBrowser": "自动打开浏览器",
     "closeToTray": "关闭时最小化到托盘",
     "appearance": "外观:{mode}",
     "appearanceAuto": "跟随系统",
@@ -114,6 +111,7 @@
     "region": "命令面板",
     "results": "命令结果",
     "placeholder": "输入命令或搜索…",
+    "searchLabel": "命令搜索",
     "empty": "没有匹配的命令",
     "open": "搜索或跳转…",
     "hint": "↑↓ 选择 · Enter 执行 · Esc 关闭",
@@ -124,8 +122,7 @@
   "toast": {
     "region": "通知",
     "dismiss": "关闭通知",
-    "view": "查看",
-    "viewDetail": "查看详情"
+    "view": "查看"
   },
   "dlg": {
     "ok": "好的",
@@ -243,9 +240,7 @@
     "exportedFlash": "报告已导出",
     "logOnlyErrors": "仅错误行",
     "logShowAll": "显示全部",
-    "logMeta": "{shown}/{total} 行",
-    "logFilteredHint": "已过滤非错误行",
-    "logLines": "日志"
+    "logMeta": "{shown}/{total} 行"
   },
   "settings": {
     "title": "设置",

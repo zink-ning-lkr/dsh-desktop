@@ -8,6 +8,7 @@
 <title></title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
     font: var(--font-ui); }
@@ -47,12 +48,12 @@
 <body>
 <div class="win" role="main">
   <div class="win-head">
-    <span class="ico"><img src="assets/deepseek-whale-color.svg" alt=""></span>
-    <span class="t">DSH Desktop</span>
+    <!-- 三件套由 ui-kit.winShell 构造(T-5):本页无关闭按钮(close:false),只有品牌小图 + 静态标题 -->
   </div>
   <div class="hero">
     <div class="hero-in">
-      <img src="assets/deepseek-whale-color.svg" alt="DSH">
+      <!-- 装饰图:紧邻 <h1>,再给 alt 会让读屏先念一遍品牌名再念标题(X-6) -->
+      <img src="assets/deepseek-whale-color.svg" alt="">
       <h1 id="h1"></h1>
       <p class="sub" id="sub"></p>
     </div>
@@ -73,6 +74,12 @@
   const W = window.__welcome;
   // 文案表(X-2 第二批);sub 为仓库内受控文案(仅含 <b>/<br>),用 innerHTML
   const T = (k, p) => window.__i18n.t(k, p);
+  // 头部三件套由 winShell 构造(T-5):品牌小图(彩色鲸鱼,纯装饰 alt="")+ 静态标题;无关闭按钮
+  window.UI_KIT.winShell(document.querySelector('.win-head'), {
+    icon: { img: 'assets/deepseek-whale-color.svg' },
+    title: 'DSH Desktop',
+    close: false,
+  });
   document.title = T('welcome.title');
   document.getElementById('h1').textContent = T('welcome.heading');
   document.getElementById('sub').innerHTML = T('welcome.subHtml');

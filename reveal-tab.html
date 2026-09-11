@@ -16,7 +16,7 @@
     background: var(--c-reveal-bg);
     border: 1px solid color-mix(in srgb, var(--c-brand-hi) 30%, transparent);
     border-top: none;
-    border-radius: 0 0 14px 14px; /* 深澜:圆角 11→14,加澜光描边更可发现 */
+    border-radius: 0 0 var(--radius-panel) var(--radius-panel); /* 深澜:加澜光描边更可发现;圆角归到面板档令牌 */
     color: var(--c-brand-hi);     /* 箭头澜光色 */
     cursor: default;
     user-select: none;
@@ -54,7 +54,7 @@
   body.hint { animation: breathe 1.2s ease-in-out 3; }
   @keyframes breathe {
     0%, 100% { opacity: .55; border-color: color-mix(in srgb, var(--c-brand-hi) 18%, transparent); }
-    50% { opacity: 1; border-color: color-mix(in srgb, var(--c-brand-hi) 65%, transparent); box-shadow: 0 2px 14px -2px rgba(77, 107, 254, .5); }
+    50% { opacity: 1; border-color: color-mix(in srgb, var(--c-brand-hi) 65%, transparent); box-shadow: 0 2px 14px -2px color-mix(in srgb, var(--c-brand) 50%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) { body, body.hint { animation: none; } }
 </style>

@@ -157,7 +157,7 @@
 </head>
 <body>
 <main>
-  <button id="menuBtn" title="" aria-label="" aria-haspopup="menu" aria-expanded="false">
+  <button id="menuBtn" type="button" title="" aria-label="" aria-haspopup="menu" aria-expanded="false">
     <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
       <line x1="2" y1="3.5" x2="12" y2="3.5"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="2" y1="10.5" x2="12" y2="10.5"/>
     </svg>
@@ -192,17 +192,17 @@
     <button class="cbtn" id="themeBtn" type="button"></button>
   </div>
   <div class="cap">
-    <button id="collapseBtn" title="" aria-label="">
+    <button id="collapseBtn" type="button" title="" aria-label="">
       <svg viewBox="0 0 11 11"><path d="M1.5 7.5 L5.5 3.5 L9.5 7.5" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
     </button>
-    <button id="minBtn" title="" aria-label="">
+    <button id="minBtn" type="button" title="" aria-label="">
       <svg viewBox="0 0 11 11"><line x1="1" y1="9.5" x2="10" y2="9.5" stroke="currentColor" stroke-width="1"/></svg>
     </button>
-    <button id="maxBtn" title="" aria-label="">
+    <button id="maxBtn" type="button" title="" aria-label="">
       <svg id="icoMax" viewBox="0 0 11 11"><rect x="1" y="1" width="9" height="9" fill="none" stroke="currentColor"/></svg>
       <svg id="icoRestore" viewBox="0 0 11 11" style="display:none"><rect x="0.5" y="2.5" width="8" height="8" fill="none" stroke="currentColor"/><path d="M2.5 2.5 V0.5 H10.5 V8.5 H8.5" fill="none" stroke="currentColor"/></svg>
     </button>
-    <button id="closeBtn" title="" aria-label="">
+    <button id="closeBtn" type="button" title="" aria-label="">
       <svg viewBox="0 0 11 11"><path d="M1 1 L10 10 M10 1 L1 10" stroke="currentColor" stroke-width="1.1"/></svg>
     </button>
   </div>
@@ -222,6 +222,10 @@
   setTip('minBtn', T('titlebar.minimize'));
   setTip('maxBtn', T('titlebar.maximize'));
   setTip('closeBtn', T('common.close'));
+  // 主题钮自首帧起就可见(不像任务/更新徽标默认 hidden),但它的名字此前只在第一次
+  // tb:status 到达时才写入 —— 在那之前它是 Tab 序里一个没有名字的按钮(X-5)。
+  // 先给一个与 auto 模式一致的初始名,后续推送按当前模式覆盖。
+  setTip('themeBtn', T('menu.appearance', { mode: T('menu.appearanceAuto') }));
   // 中段命令入口(阶段 2):图标走 palette 域(与面板输入行同一个放大镜),
   // 标签/徽标/提示全部来自文案表与主进程下发的平台前缀
   $('cmdIco').innerHTML = window.UI_ICONS.palette.search;
@@ -288,8 +292,10 @@
   let sampled = false; // 已收到页面采样:此后 logo 完全由采样亮度决定,不再跟随主题属性
   const setLogo = (light) => { logo.src = 'assets/' + (light ? 'whale-black.png' : 'deepseek-whale-color.svg'); };
   setLogo(document.documentElement.hasAttribute('data-theme'));
-  new MutationObserver(() => { if (!sampled) setLogo(document.documentElement.hasAttribute('data-theme')); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  // 主题属性变化观察:采样到达前的兜底。disconnect 挂在卸载时(X-7):reload 后观察者不残留
+  const themeObs = new MutationObserver(() => { if (!sampled) setLogo(document.documentElement.hasAttribute('data-theme')); });
+  themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  window.addEventListener('beforeunload', () => themeObs.disconnect());
   $('menuBtn').onclick = () => t.openMenu();
   $('minBtn').onclick = () => t.minimize();
   $('maxBtn').onclick = () => t.toggleMaximize();

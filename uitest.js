@@ -255,6 +255,18 @@ function runUitest(d) {
       .map((s) => s.slice(6, -2))
       .filter((id) => !declared.has(id));
     t('cmd-no-orphan', orphans.length === 0);
+    // 图标键 ↔ 命令 id(v1.0.1 补):menu.html / palette.html 都按条目 id 取 ICONS[it.id],
+    // 键名漂移的表现是"这一项图标槽恒空白"——不报错、不崩,只是看起来像图标没加载出来。
+    // v0.8.1 的深链改造就漏了一处(download-accel → settings-download 只改了命令 id)。
+    // 合成项(open-palette / tray-status)是主进程拼进菜单的界面入口,不属注册表,故列入白名单。
+    const iconSrc = read('ui-icons.js');
+    const menuBlock = (iconSrc.match(/const menu = \{([\s\S]*?)\n  \};/) || [, ''])[1];
+    const iconKeys = new Set([...menuBlock.matchAll(/^\s*'([a-z-]+)':/gm)].map((m) => m[1]));
+    for (const m of iconSrc.matchAll(/menu\['([a-z-]+)'\]\s*=/g)) iconKeys.add(m[1]); // 复用别族图形的别名
+    const synthetic = ['open-palette', 'tray-status'];
+    const noIcon = cmds.list.filter((c) => !iconKeys.has(c.id)).map((c) => c.id);
+    const deadIcon = [...iconKeys].filter((k) => !declared.has(k) && !synthetic.includes(k));
+    t('icon-keys-sync', noIcon.length === 0 && deadIcon.length === 0);
     // 分组名/分类名合法,且每个分组都能取到标题(缺键会在菜单与面板里渲染成 cmd.groupXxx 裸键)
     t('cmd-groups', cmds.groups.length >= 4
       && cmds.list.every((c) => cmds.groups.includes(c.group) && cmds.KINDS.includes(c.kind))
@@ -271,7 +283,7 @@ function runUitest(d) {
     // 托盘菜单也接注册表(加速键/勾选态不再各写一份)
     t('cmd-tray-linked', /function trayMenuItems\(\)[\s\S]{0,900}?commands\.labelOf/.test(main));
     const bad = ck.filter((s) => s.endsWith(':FAIL'));
-    d.log(`UITEST cmd ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}${missing.length ? ` 缺执行分支:${missing.join(',')}` : ''}${orphans.length ? ` 孤儿分支:${orphans.join(',')}` : ''}${bare.length ? ` 裸键:${bare.join(',')}` : ''}`);
+    d.log(`UITEST cmd ${bad.length ? 'FAIL' : 'PASS'} ${ck.join(' ')}${missing.length ? ` 缺执行分支:${missing.join(',')}` : ''}${orphans.length ? ` 孤儿分支:${orphans.join(',')}` : ''}${bare.length ? ` 裸键:${bare.join(',')}` : ''}${noIcon.length ? ` 无图标:${noIcon.join(',')}` : ''}${deadIcon.length ? ` 死图标:${deadIcon.join(',')}` : ''}`);
   }, 2598, 'cmd-static');
   // ⓠ 命令面板静态契约(阶段 2):面板是"全量命令清单"的唯一出口,三处静默故障:
   //    ① 高度常量与渲染层的行高/行数上限脱节 → 面板底部被裁或留一大片空白;
@@ -289,7 +301,7 @@ function runUitest(d) {
     const files = JSON.parse(read('package.json')).build.files;
     t('palette-lazy', /function ensurePaletteView\(/.test(main) && /function destroyPaletteView\(/.test(main) && /function syncPaletteBounds\(/.test(main));
     // 载具必须是主窗内视图:面板要接收鼠标,独立窗会与主窗脱帧;而 toast 必须独立窗才谈得上穿透
-    t('palette-view', /paletteView = new WebContentsView\(/.test(main) && /addChildView\(paletteView\)/.test(main));
+    t('palette-view', /paletteView = createAuxView\(/.test(main) && /addChildView\(paletteView\)/.test(main));
     // 常量 ↔ 渲染层严格配对:高度公式的加数/乘数/上限,任一处单改就会错位
     t('palette-consts', /PALETTE_W = 560/.test(main) && /PALETTE_ROW_H = 36/.test(main)
       && /PALETTE_MAX_ROWS = 8/.test(main) && /PALETTE_INPUT_H = 56/.test(main)
@@ -303,10 +315,9 @@ function runUitest(d) {
     t('palette-key-bound', /bindPaletteKey\(titlebarView\.webContents\)/.test(main) && /bindPaletteKey\(dshView\.webContents\)/.test(main));
     t('palette-ipc', ['pt:show', 'pt:run', 'pt:close', 'pt:height']
       .every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
-    // trustedEvent 是每个新 IPC handler 的准入门槛;回程三个通道一个都不能漏,
-    // 且必须校验 sender(面板视图可能已被销毁重建,只认当前实例)
-    t('palette-trusted', (main.match(/ipcMain\.on\('pt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!trustedEvent\(e\)/g) || []).length === 3
-      && (main.match(/e\.sender [!=]== paletteView\.webContents/g) || []).length === 3);
+    // 身份校验是每个新 IPC handler 的准入门槛;回程三个通道一个都不能漏,
+    // 且必须认当前实例(面板视图可能已被销毁重建)——fromWin 内含 trustedEvent + 同一性判定
+    t('palette-trusted', (main.match(/ipcMain\.on\('pt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!fromWin\(e, paletteView\)\) return;/g) || []).length === 3);
     // 命令出口唯一:面板只回传 id,执行仍归 runCommand(与菜单/托盘/命令栏同源)
     t('palette-run-command', /ipcMain\.on\('pt:run'[\s\S]{0,700}?runCommand\(key\)/.test(main));
     // 命令栏中段入口:按钮 + 桥 + 三分支断点(≥1200 全称 / 960–1200 图标 / <960 隐藏)
@@ -426,8 +437,8 @@ function runUitest(d) {
     t('size-accel-ping', /function reportH\(\)/.test(accel) && /reportH\(\);/.test(accel) && /rendered: \(\) => ipcRenderer\.send\('acc:rendered'\)/.test(aPre));
     t('size-welcome-handler', /ipcMain\.on\('wl:rendered'/.test(main) && /fitWindowToContent\(welcomeWin, WELCOME_H_EXPR/.test(main));
     t('size-accel-handler', /ipcMain\.on\('acc:rendered'/.test(main) && /fitWindowToContent\(settingsWin, SETTINGS_H_EXPR/.test(main));
-    t('size-handler-trusted', /!trustedEvent\(e\) \|\| !welcomeWin \|\| e\.sender !== welcomeWin\.webContents/.test(main)
-      && /!trustedEvent\(e\) \|\| !settingsWin \|\| e\.sender !== settingsWin\.webContents/.test(main));
+    // 尺寸回填通道必须验发送方身份:只验 file: 协议的话,任一同协议页面都能改别的窗口尺寸
+    t('size-handler-trusted', /fromWin\(e, welcomeWin\)/.test(main) && /fromWin\(e, settingsWin\)/.test(main));
     t('size-handler-max', /max: maxContentHeight\(welcomeWin\)/.test(main) && /max: maxContentHeight\(settingsWin\)/.test(main));
     t('size-min-floor', /const WELCOME_MIN_H = 360;/.test(main) && /const SETTINGS_MIN_H = 320;/.test(main));
     // 欢迎页必须量内层 .hero-in:量被 flex:1 拉伸的 .hero 会得到窗口高度,回填就成了自我确认
@@ -539,7 +550,10 @@ function runUitest(d) {
     t('toast-ipc', ['nt:render', 'nt:hover', 'nt:action', 'nt:close', 'nt:height']
       .every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
     // trustedEvent 是每个新 IPC handler 的准入门槛(方案 §10 质量门槛),四个回程通道一个都不能漏
-    t('toast-trusted', (main.match(/ipcMain\.on\('nt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!trustedEvent\(e\)/g) || []).length === 4);
+    t('toast-trusted', (main.match(/ipcMain\.on\('nt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!fromWin\(e, toastWin\)/g) || []).length === 4);
+    // 身份校验回归锁(A-3):旧写法「只验 file: 协议」一旦复活,任一同协议页面就能调别窗的高权限动作
+    // (rp:export 会弹原生保存框并写文件、st:cancel-* 会中止任务)。全仓不得再出现裸协议的入站守卫。
+    t('ipc-identity-all', !/if \(!trustedEvent\(e\)\) return/.test(main));
     // 通知出口唯一:旧 notifyToast 若复活,说明有一条反馈绕开了路由裁决
     t('toast-single-entry', /function notify\(text, opts\)/.test(main) && !/notifyToast\s*\(/.test(main));
     // 常量与方案 5.4 一致:360 宽 / 最多 3 条 / 默认 2200ms
@@ -694,12 +708,13 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'flip'), 4600);
   uiStep(() => d.log(`UITEST h-result=${d.statusWin?.getContentSize()[1]}(期望 250,确定按钮可见)`), 4700, 'h-result-verify');
   // 结果态 ✕ = 仅关闭
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 5000, 'result-x');
+  // ✕ 由 ui-kit.winShell 构造(T-5,无 id):按公共类定位
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 5000, 'result-x');
   uiStep(() => d.log(`UITEST result-x win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 5300, 'result-x-verify');
   // 活动态 ✕ = 取消并关闭
   uiStep(() => d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true }), 5800, 'check2');
   uiStep(() => d.log(`UITEST h-activity=${d.statusWin?.getContentSize()[1]}(期望 186)`), 5950, 'h-activity-verify');
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 6100, 'cancel-click');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 6100, 'cancel-click');
   uiStep(() => { const ok = !d.statusWin; d.log(`UITEST cancel2 win=${!!d.statusWin} → ${ok ? 'PASS' : 'FAIL'}`); }, 6400, 'cancel-verify');
   // 下载 → 进度 → 结果
   uiStep(() => d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '' }), 7000, 'dl-show');
@@ -811,7 +826,7 @@ function runUitest(d) {
     "process.stdout.write('hanging...\\n');setInterval(()=>{},1000);");
   uiStep(() => { process.env.DSH_UITEST_FAKE_NPM = path.join(d.app.getPath('userData'), 'fake-npm-ok.js'); d.installDshUpdate('9.9.9'); hookWin(d.statusWin, 'status'); }, 15200, 'dsh-install-ok');
   // P1-1 任务中心:前置流程已 ✕ 关闭(注册表清空),此时仅安装任务一项 → 单任务模式(与旧版像素兼容)
-  uiStep(() => readDom(d.statusWin, '(()=>{const single=document.getElementById("activity").style.display!=="none";const t=document.getElementById("title").textContent;return (single&&t.includes("正在安装"))?"PASS 单任务模式":"FAIL single="+single+" t="+t})()', 'install-title'), 15500);
+  uiStep(() => readDom(d.statusWin, '(()=>{const single=document.getElementById("activity").style.display!=="none";const t=document.querySelector(".win-head .t").textContent;return (single&&t.includes("正在安装"))?"PASS 单任务模式":"FAIL single="+single+" t="+t})()', 'install-title'), 15500);
   // 安装完成:唯一任务转完成态 → 单任务结果视图(#rtitle 含"dsh 更新完成")
   uiStep(() => readDom(d.statusWin, '(()=>{const t=document.getElementById("rtitle").textContent;const shown=document.getElementById("result").style.display!=="none";return (shown&&t.includes("dsh 更新完成"))?"PASS":"FAIL shown="+shown+" t="+t})()', 'install-result'), 17400);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 17600, 'install-later');
@@ -824,7 +839,7 @@ function runUitest(d) {
   // ⑪ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流(瞬时提示已改由 X1 通知宿主承载)
   uiStep(() => { d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '', __origin: 'desktop' }); }, 23450, 'tc-dl');
   uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); }, 23600, 'tc-install');
-  uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const t=document.getElementById("title").textContent;return (rows.length===2&&act===2&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" t="+t})()', 'tc-list'), 23950);
+  uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const t=document.querySelector(".win-head .t").textContent;return (rows.length===2&&act===2&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" t="+t})()', 'tc-list'), 23950);
   uiStep(() => { const h = d.statusWin?.getContentSize()[1] || 0; d.log(`UITEST tc-h=${h}(期望 >186 列表加高) → ${h > 186 ? 'PASS' : 'FAIL'}`); }, 24000, 'tc-h');
   // v0.6.1 Acrylic 铺开:status 窗的 .win.acrylic 类必须与 Win11 判定一致
   uiStep(() => { const want = d.isWin11(); readDom(d.statusWin, `(()=>{const m=document.querySelector(".win").classList.contains("acrylic");return (m===${want})?"PASS acrylic="+m:"FAIL acrylic="+m+" want=${want}"})()`, 'status-acrylic'); }, 24100);
@@ -833,7 +848,7 @@ function runUitest(d) {
   // 行级取消 dsh 任务:desktop 下载任务必须不受影响(旧单槽模型无法表达,互斥链已删)
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('[...document.querySelectorAll("#tlist .trow:not(.done) .lx")][1].click()').catch(() => {}); }, 24200, 'tc-cancel-one');
   uiStep(() => readDom(d.statusWin, '(()=>{const ts=[...document.querySelectorAll("#tlist .trow .ltitle")].map(e=>e.textContent);const hasDl=ts.some(s=>s.includes("下载"));const hasDsh=ts.some(s=>s.includes("dsh 本体"));return (hasDl&&!hasDsh)?"PASS":"FAIL "+ts.join("|")})()', 'tc-narrow'), 24500);
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 24700, 'tc-close');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 24700, 'tc-close');
   uiStep(() => d.log(`UITEST tc-close win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 24900, 'tc-close-verify');
   // ⑪' 通知宿主(阶段 1 X1):状态窗已卸下 toast 职责,瞬时提示改由独立的透明窗承载。
   //     这一组把三件事一起锁住:①窗口按需创建且条目渲染正确;②悬停真的延长了驻留
@@ -865,7 +880,7 @@ function runUitest(d) {
     d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' });
   }, 25800, 'cancel-all-prep');
   uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); }, 25950, 'cancel-all-second');
-  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 26100, 'cancel-all-click');
+  uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 26100, 'cancel-all-click');
   uiStep(() => {
     const ok = !d.statusWin && d.updatesState.manualCheckDropped && d.updatesState.dshManualCheckDropped;
     d.log(`UITEST cancel-all win=${!!d.statusWin}(期望 false) desktopDrop=${d.updatesState.manualCheckDropped} dshDrop=${d.updatesState.dshManualCheckDropped}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`);
@@ -957,7 +972,7 @@ function runUitest(d) {
       `(()=>{const attr=document.documentElement.getAttribute("data-theme")||"";const want=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"";return (attr===want)?"PASS attr="+attr:"FAIL attr="+attr+" want="+want})()`);
     d.log(`UITEST dom theme-auto-dom ${dom || 'FAIL 超时'}`);
   }, 31400, 'theme-3');
-  uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.getElementById("xBtn").click()').catch(() => {}); }, 32700, 'theme-report-close');
+  uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 32700, 'theme-report-close');
   uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 32950, 'theme-report-close-verify');
   // ⑬ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
   uiStep(() => { d.showWelcome(); }, 33100, 'welcome-open');
