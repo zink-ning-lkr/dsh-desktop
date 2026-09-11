@@ -38,6 +38,11 @@
     overflow-x: hidden;
   }
   @keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+  /* 滚动条「悬停显现」(第六轮):菜单是纯鼠标浮层,矮屏钳制出的长滚动条默认接近隐形,
+     鼠标在菜单内时才清晰——滚动条只在需要时打扰,不再是一整条深色竖轨 */
+  .panel::-webkit-scrollbar-thumb { background: transparent; }
+  .panel:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--c-border) 55%, transparent); }
+  .panel:hover::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
   /* 行高 32px(--ctl-h + 2):菜单是纯点击目标,命中区不小于标准按钮;
      .item /.sec /.sep 三种行高与主进程 menuHeight() 的 MENU_ITEM_H / MENU_SEC_H / MENU_SEP_H
      严格对应,改此处必须同步改那里(单改一处只有"菜单最后一项点不到"这一种表现,极难归因) */
@@ -54,7 +59,8 @@
     line-height: var(--lh-ctrl);
     transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     animation: itemIn .18s ease backwards;
-    animation-delay: calc(var(--i, 0) * 8ms);
+    /* 级联步长 5ms、封顶 100ms(H-3):17 项时 85ms 落位完成,打开即用;「逐项落位」风格不变 */
+    animation-delay: calc(min(var(--i, 0), 20) * 5ms);
   }
   @keyframes itemIn { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
   .item:hover, .item.sel { background: var(--c-sel-bg); color: var(--c-sel-fg); }

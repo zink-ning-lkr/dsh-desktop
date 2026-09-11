@@ -199,9 +199,16 @@
 /* ---- 公共:盒模型重置(各窗口页面原本各自重复同一段) ---- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* ---- 公共:滚动条 ---- */
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 4px; }
+/* ---- 公共:滚动条(第六轮降噪) ----
+   6px 细条 + 半透明 thumb:可滚动区(菜单/命令面板/设置/日志/任务列表)的滚动条退为
+   「淡色细线」,不再用 8px 实色整轨抢占内容区视觉;悬停 thumb 加深。
+   菜单等纯鼠标浮层在此基础上做「悬停菜单才显现」(见 menu.html)。 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--c-border) 55%, transparent);
+  border-radius: 3px;
+  transition: background var(--dur-fast);
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
 
 /* ---- 公共:键盘焦点环(all:unset/透明背景按钮后必须有可见焦点,a11y) ----

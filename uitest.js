@@ -760,13 +760,13 @@ function runUitest(d) {
     const flag = !!d.loadConfig().handleHintShown;
     const ok = d.handleHintActive === false && w === 0 && flag;
     d.log(`UITEST s3-hint-off active=${d.handleHintActive} w=${w}(期望 0) flag=${flag}(期望 true,已落盘) → ${ok ? 'PASS' : 'FAIL'}`);
-  }, 12900, 's3-hint-off');
-  uiStep(() => d.toggleTitlebar(true, false), 12920, 's3-restore');
+  }, 13070, 's3-hint-off'); // 顺延 +170ms(第六轮 H-1):演示到期后先播 170ms 淡出再归零
+  uiStep(() => d.toggleTitlebar(true, false), 13090, 's3-restore');
   uiStep(() => {
     const cfg = d.loadConfig();
     if (s3Orig === undefined) delete cfg.handleHintShown; else cfg.handleHintShown = s3Orig;
     d.saveConfig(cfg);
-  }, 12950, 's3-flag-restore');
+  }, 13120, 's3-flag-restore');
   // ③ 对话框队列化(P2-1):D1 在屏期间调 D2 → D2 入队不顶掉;D1 回程后接续展示 D2
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
   // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
@@ -795,29 +795,29 @@ function runUitest(d) {
   }, 12050);
   uiStep(() => readDom(d.reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
   // ⑤ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
-  uiStep(() => d.showMenuPopup(), 13000, 'menu-open');
-  uiStep(() => d.log(`UITEST menu-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13300, 'menu-open-verify');
-  uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13500, 'menu-toggle-close');
-  uiStep(() => d.log(`UITEST menu-toggled-close destroyed=${!d.menuPopupView}(期望 true,P0-2 关闭即销毁) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 13750, 'menu-close-verify');
-  uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13900, 'menu-toggle-open');
-  uiStep(() => d.log(`UITEST menu-toggled-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14150, 'menu-reopen-verify');
+  uiStep(() => d.showMenuPopup(), 13200, 'menu-open'); // +200ms:s3-restore(13090)先完成,菜单不再被 toggleTitlebar 的 closeMenuPopup 误关
+  uiStep(() => d.log(`UITEST menu-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13500, 'menu-open-verify');
+  uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13700, 'menu-toggle-close');
+  uiStep(() => d.log(`UITEST menu-toggled-close destroyed=${!d.menuPopupView}(期望 true,P0-2 关闭即销毁) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 13950, 'menu-close-verify');
+  uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 14100, 'menu-toggle-open');
+  uiStep(() => d.log(`UITEST menu-toggled-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14350, 'menu-reopen-verify');
   // ⑤' 对话框高度自适应:长 detail(下载加速设置)必须加高窗口,按钮不被推出
   uiStep(() => d.showDialog({
     type: 'info', title: '下载加速设置', width: 540,
     message: '桌面端更新已默认启用多线程分段下载;仍慢时可配置镜像源,或为 npm 切换国内镜像。',
     detail: `【桌面端】在配置文件中加入镜像根目录(目录内需含 latest.yml 与安装包,文件名与 GitHub Release 资产一致):\n  "downloadMirror": "https://镜像根目录/",\n配置文件位置:\n  ${d.configPath()}\n\n【dsh 本体】执行下面命令改用国内 npm 镜像:\n  npm config set registry https://registry.npmmirror.com\n\n提示:镜像源不稳定时,下载会自动回退官方源,不影响更新。`,
     buttons: [{ label: '好的', primary: true }],
-  }), 14300, 'accel-dialog');
+  }), 14450, 'accel-dialog'); // +150ms:等 menu 段(14350)检查完再弹模态,菜单不被抢焦点误关
   uiStep(() => {
     const s = d.dialogWin?.getContentSize();
     const ok = !!s && s[0] === 540 && s[1] >= 260;
     d.log(`UITEST accel-h=${s?.[1]}(期望 540 宽且高≥260,原 220 会遮按钮) → ${ok ? 'PASS' : 'FAIL'}`);
-  }, 14600, 'accel-size-verify');
+  }, 14750, 'accel-size-verify');
   uiStep(() => readDom(d.dialogWin, '(()=>{const r=document.querySelector("#foot button").getBoundingClientRect();return r.bottom<=innerHeight+1?`VISIBLE bottom=${Math.round(r.bottom)}/h=${innerHeight}`:`CLIPPED bottom=${Math.round(r.bottom)}/h=${innerHeight}`})()', 'accel-btn'), 14700);
   // v0.6.3 服务页挂载断言: 若已在 http 服务页, 必须真实挂载(bodyLen>500), 不得是 431/空文档空白
   // (桌面端空白而浏览器正常的回归锁);若仍在 file:// 启动页(慢启动), 容忍跳过
   uiStep(() => readDom(d.dshView, '(()=>{const h=location.href;const bl=document.body?document.body.innerHTML.length:0;if(h.startsWith("file:"))return "PASS 尚在启动页(容忍)";return bl>500?"PASS 服务页已挂载 bodyLen="+bl:"FAIL 服务页空白 bodyLen="+bl+" href="+h.slice(0,60)})()', 'svc-mount'), 9500);
-  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 14900, 'accel-close');
+  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 15050, 'accel-close');
   // ⑥ dsh 本体安装(修复点:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
   //    成功路径:假 npm 输出两行后正常退出 0 → 应出现"dsh 更新完成"结果窗
   fs.writeFileSync(path.join(d.app.getPath('userData'), 'fake-npm-ok.js'),

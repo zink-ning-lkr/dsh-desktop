@@ -206,8 +206,35 @@ function forceViewRelayout() {
 // ---------- 把手浮现:标题栏隐藏期间轮询鼠标位置,靠近顶部中央才显示 ----------
 const HANDLE_ZONE = { w: 280, h: 34 }; // 基础感应区(比把手本身大;上浮后按 1.5 倍迟滞,防闪烁)
 const HANDLE_W = 96, HANDLE_H = 26; // 把手本体尺寸(高 ≥24px 最小点击目标;原 64×20 偏小且易漏触)
+const HANDLE_FADE_MS = 170;       // 退场淡出(H-1):渲染层 opacity 过渡完成后才归零 bounds
+const HANDLE_MIN_DWELL_MS = 250;  // 最小驻留(H-2):出现后短时间内的移出不触发消失(划过不闪断)
+const HANDLE_OUT_FRAMES = 2;      // 移出连续确认帧数(H-2):单帧抖动不翻转状态
 let handlePoll = null;
 let handleShown = false; // 迟滞状态记忆:已上浮后扩大判定区再收,避免边界抖动
+let handleShownAt = 0;   // 最近一次出现的时刻(最小驻留判定基准)
+let outFrames = 0;       // 连续区外帧计数(需连续 HANDLE_OUT_FRAMES 帧才消失)
+let handleFadeTimer = null; // 退场淡出未决定时器(出现路径取消它,退场路径等待它)
+
+// 把手退场淡出(H-1):先让渲染层播放 opacity 过渡,动画结束后再归零 bounds——
+// 与出现路径(取消未决淡出 + 恢复完整尺寸)对称,进出一样平滑,不再「啪」地截断。
+// 定时器回调做双重检查:淡出期间重新出现(handleShown 为真)或视图已销毁时直接放弃,
+// 由对应路径接管,不会出现「淡出到一半又把消失的把手拉回来」的竞态。
+function beginHandleFade() {
+  if (handleFadeTimer || !revealTabView || revealTabView.webContents.isDestroyed()) return;
+  try { revealTabView.webContents.send('tb:handle-fade', true); } catch { /* 竞态 */ }
+  handleFadeTimer = setTimeout(() => {
+    handleFadeTimer = null;
+    if (handleShown || !revealTabView || revealTabView.webContents.isDestroyed()) return;
+    try { revealTabView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    try { revealTabView.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
+  }, HANDLE_FADE_MS);
+}
+function cancelHandleFade() {
+  if (!handleFadeTimer) return;
+  clearTimeout(handleFadeTimer);
+  handleFadeTimer = null;
+  try { revealTabView?.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
+}
 
 // ---------- 首次收起的把手演示(S3) ----------
 // 问题:收起标题栏后,恢复入口只在鼠标进入顶部中央感应区时才浮现。这个机制本身很扎实
@@ -246,9 +273,9 @@ function endHandleHint() {
   handleHintActive = false;
   clearTimeout(handleHintTimer);
   handleHintTimer = null;
-  try { revealTabView?.webContents.send('tb:handle-hint', false); } catch { /* 竞态 */ }
-  revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   handleShown = false;
+  try { revealTabView?.webContents.send('tb:handle-hint', false); } catch { /* 竞态 */ }
+  beginHandleFade(); // 演示到期/还原:淡出归零而非瞬时截断(H-1)
   markHandleHintSeen();
 }
 
@@ -280,6 +307,7 @@ function destroyRevealTab() {
 function startHandlePolling() {
   if (handlePoll) return;
   handleShown = false;
+  outFrames = 0;
   ensureRevealTab(); // 收起态:确保把手视图存在(可见性由轮询中的 bounds 控制)
   // S3:仅首次收起时演示一次;之后完全交回"悬停才浮现"
   if (!loadConfig().handleHintShown) beginHandleHint();
@@ -296,12 +324,22 @@ function startHandlePolling() {
       const inZone = p.x >= cx - zw / 2 && p.x <= cx + zw / 2
         && p.y >= b.y && p.y <= b.y + zh;
       if (inZone) {
-        handleShown = true;
+        outFrames = 0;
+        if (!handleShown) { // 首次进入:取消未决淡出,立即恢复完整形态(出现与退场对称)
+          handleShown = true;
+          handleShownAt = Date.now();
+          cancelHandleFade();
+        }
         const [w] = mainWindow.getContentSize();
         revealTabView.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
       } else if (handleShown) {
+        // 防抖振(H-2):① 出现后 HANDLE_MIN_DWELL_MS 内的移出不生效(划过不闪断);
+        // ② 需连续 HANDLE_OUT_FRAMES 帧区外才消失(单帧抖动不翻转状态)
+        if (Date.now() - handleShownAt < HANDLE_MIN_DWELL_MS) return;
+        if (++outFrames < HANDLE_OUT_FRAMES) return;
+        outFrames = 0;
         handleShown = false;
-        revealTabView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+        beginHandleFade(); // 淡出归零:与出现动画对称(H-1)
       }
     } catch { /* 窗口销毁等 */ }
   }, 80);
