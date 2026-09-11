@@ -8,6 +8,7 @@
 <title>DSH</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-i18n.js"></script>
 <script src="ui-icons.js"></script>
 <script src="ui-kit.js"></script>
 <style>
@@ -122,7 +123,7 @@
     <div class="detail" id="detail"></div>
     <!-- #bar 只是插入槽:真正携带 role=progressbar/aria-* 的节点由 ui-kit.progressBar 构造后挂入
          (此前外壳自带 role,导致进度条套进度条的非法嵌套,读屏可能重复播报) -->
-    <div class="bar" id="bar"><div class="fill indet" id="fill"></div></div>
+    <div class="bar" id="bar"></div>
     <div class="meta"><span id="pct"></span><span id="size"></span></div>
   </div>
   <div class="result" id="result" role="alertdialog" aria-labelledby="rtitle" aria-describedby="rdetail">

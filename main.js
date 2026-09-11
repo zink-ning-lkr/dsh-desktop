@@ -50,20 +50,12 @@ process.on('uncaughtException', (err) => {
     core.log(`未捕获异常: ${err.stack || err}`);
     core.flushLog(); // 日志缓冲即时刷盘,保证崩溃现场进入 dsh-web.log
   } catch (e) { /* 日志系统未就绪,忽略 */ }
-  // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径
+  // 生成错误报告落盘(不弹窗,避免打扰);仅当 app 已就绪且能取到路径。
+  // isReady 为真 ⇒ 模块级绑定(含 buildReportCtx 引用的常量)均已初始化,可安全调用
   try {
     if (app.isReady()) {
-      const core = require('./core');
-      const dshProc = require('./dsh-process');
-      const snap = dshProc.getBootSnapshot();
-      const ctx = {
-        app, screen, phase: 'uncaught', error: err, code: null, buf: snap.buf,
-        logFile: core.logFile, crashFile: core.crashFilePath(), configPath: core.configPath(),
-        workspace: core.loadConfig().workspace, userData: app.getPath('userData'),
-        dshBin: dshProc.findDshBinSafe(), nodeExe: dshProc.findNodeSafe(), args: snap.args,
-        elapsedMs: snap.startedAt ? Date.now() - snap.startedAt : null,
-      };
-      try { diagnostics.buildReport(ctx); } catch (e2) { core.log(`诊断落盘失败: ${e2.message}`); }
+      try { diagnostics.buildReport(buildReportCtx('uncaught', err, null, null)); }
+      catch (e2) { try { require('./core').log(`诊断落盘失败: ${e2.message}`); } catch { /* 日志系统未就绪 */ } }
     }
   } catch (e3) { /* 模块加载期 app 未就绪等,忽略 */ }
   // 记录完毕主动退出:走 app.quit() 会触发 before-quit 正常清理(dsh 子进程树 + 日志);
@@ -161,17 +153,14 @@ function chromeBgColor() {
 }
 let dshView = null;
 let titlebarView = null;
-let revealTabView = null;
-let menuPopupView = null;
+// 浮层视图(revealTab / menuPopup / palette / shortcutsPopup)由 makeLazyView 统一管理,
+// 不再各自持有裸变量;当前实例经 <名字>.view 读取
 let barVisible = true;
 let barBeforeFullscreen = true; // 进全屏前的标题栏可见性:退出全屏时恢复原状(而非强制显示)
 let barBeforeHtmlFullscreen = true; // dsh 页面内元素全屏(HTML5)前的标题栏可见性:退出时恢复
 let currentBarH = TITLEBAR_H;
 let barAnim = null;
 let menuClosedAt = 0; // 弹层最后关闭时刻:防"点按钮关闭→blur 先关→点击又打开"的抖动
-let menuQueued = null; // 菜单页未加载完成时排队的载荷(极快点击首帧不丢失)
-let paletteView = null; // 命令面板(阶段 2):与菜单弹层同一套懒创建 / 关闭即销毁
-let paletteQueued = null; // 面板页未加载完成时排队的载荷
 let paletteH = 0; // 渲染层上报的面板内容高度(0 = 尚未量到,用输入行高度兜底)
 
 function layoutViews() {
@@ -181,7 +170,7 @@ function layoutViews() {
   titlebarView.setBounds({ x: 0, y: 0, width: w, height: currentBarH });
   dshView.setBounds({ x: 0, y: currentBarH, width: w, height: Math.max(0, h - currentBarH) });
   // 把手默认隐藏,由 handlePoll 检测到鼠标靠近顶部中央时再浮现
-  revealTabView?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  revealTab.view?.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   // 通知宿主贴主窗右上角,主窗尺寸/命令栏高度一变就必须跟着走(X1)。
   // 挂在这里而不是各处 resize 分支:layoutViews 已是"任何几何变化都要调一次"的汇合点
   syncToastBounds();
@@ -222,19 +211,20 @@ let handleFadeTimer = null; // 退场淡出未决定时器(出现路径取消它
 // 注意:归零后**不清除**渲染层的 .fade(保持 opacity:0)——下次出现时由 cancelHandleFade
 // 移除 .fade 触发 140ms 淡入;若此处清除,出现路径就没有淡入过渡了。
 function beginHandleFade() {
-  if (handleFadeTimer || !revealTabView || revealTabView.webContents.isDestroyed()) return;
-  try { revealTabView.webContents.send('tb:handle-fade', true); } catch { /* 竞态 */ }
+  const v = revealTab.view;
+  if (handleFadeTimer || !v || v.webContents.isDestroyed()) return;
+  try { v.webContents.send('tb:handle-fade', true); } catch { /* 竞态 */ }
   handleFadeTimer = setTimeout(() => {
     handleFadeTimer = null;
-    if (handleShown || !revealTabView || revealTabView.webContents.isDestroyed()) return;
-    try { revealTabView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    if (handleShown || !revealTab.view || revealTab.view.webContents.isDestroyed()) return;
+    try { revealTab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
   }, HANDLE_FADE_MS);
 }
 // 出现路径统一入口:清除未决淡出定时器 + 渲染层 .fade(触发淡入)。
 // 无论淡出是否未决都必须 send false —— 残留的 .fade(上次淡出完成未清)不除则把手透明不可见
 function cancelHandleFade() {
   if (handleFadeTimer) { clearTimeout(handleFadeTimer); handleFadeTimer = null; }
-  try { revealTabView?.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
+  try { revealTab.view?.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
 }
 
 // ---------- 首次收起的把手演示(S3) ----------
@@ -256,15 +246,15 @@ function markHandleHintSeen() {
 }
 
 function beginHandleHint() {
-  if (handleHintActive || !mainWindow || !revealTabView) return;
+  if (handleHintActive || !mainWindow || !revealTab.view) return;
   handleHintActive = true;
   handleShown = true; // 与轮询共用同一份"已上浮"记忆:演示结束交回轮询时不会先闪一下
   cancelHandleFade(); // 清除可能的残留 .fade(上次淡出完成未清):演示把手必须立即可见
   const [w] = mainWindow.getContentSize();
   // 演示期间由本函数独占 bounds:轮询看到 handleHintActive 会直接跳过(见 startHandlePolling),
   // 否则鼠标一移开就会被 80ms 轮询收走,3s 驻留根本走不完
-  revealTabView.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
-  const wc = revealTabView.webContents;
+  revealTab.view.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
+  const wc = revealTab.view.webContents;
   // 视图可能仍在加载(document 未就绪时 send 会被丢弃):加载完成钩子里补发一次
   if (!wc.isLoading()) { try { wc.send('tb:handle-hint', true); } catch { /* 竞态 */ } }
   handleHintTimer = setTimeout(endHandleHint, HANDLE_HINT_MS);
@@ -276,40 +266,27 @@ function endHandleHint() {
   clearTimeout(handleHintTimer);
   handleHintTimer = null;
   handleShown = false;
-  try { revealTabView?.webContents.send('tb:handle-hint', false); } catch { /* 竞态 */ }
+  try { revealTab.view?.webContents.send('tb:handle-hint', false); } catch { /* 竞态 */ }
   beginHandleFade(); // 演示到期/还原:淡出归零而非瞬时截断(H-1)
   markHandleHintSeen();
 }
 
-// 下拉把手懒创建(内存优化 P0-1):只有标题栏收起时才需要这个 96×26 的视图,
-// 展开时销毁——避免一个几乎空白的渲染进程常驻(典型 50-90MB)
+// 下拉把手:懒创建 + 收起即销毁(内存优化 P0-1),样板与实例见 makeLazyView 小节;
+// backgroundThrottling:false 的取值理由见该实例的注释
 function ensureRevealTab() {
   if (!mainWindow) return;
-  if (revealTabView && !revealTabView.webContents.isDestroyed()) return;
-  // 下拉把手:懒创建 + 收起即销毁(内存优化 P0-1);与标题栏共用 preload。
-  // backgroundThrottling:false —— 收起态把手是 0 尺寸视图,渲染被 Chromium 后台节流后,
-  // setBounds 恢复 96×26 的首帧会掉帧,「出现那一下卡」(第七轮 H-1)
-  revealTabView = createAuxView({
-    file: 'reveal-tab.html', preload: 'titlebar-preload.js',
-    props: { webPreferences: { backgroundThrottling: false } },
-  });
+  if (revealTab.exists()) return;
+  revealTab.open();
   // S3:首次收起与把手视图创建是同一时刻发生的,提示可能在 document 就绪前就置位了 ——
   // 加载完成补发一次(捕获局部引用:此间视图可能已被销毁重建)
-  const v = revealTabView;
+  const v = revealTab.view;
+  if (!v) return;
   v.webContents.once('did-finish-load', () => {
     if (!handleHintActive || !v.webContents || v.webContents.isDestroyed()) return;
     try { v.webContents.send('tb:handle-hint', true); } catch { /* 竞态 */ }
   });
-  mainWindow.contentView.addChildView(revealTabView);
-  layoutViews();
 }
-function destroyRevealTab() {
-  if (!revealTabView) return;
-  const v = revealTabView;
-  revealTabView = null;
-  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
-  try { v.webContents.close(); } catch { /* 已销毁 */ }
-}
+function destroyRevealTab() { revealTab.destroy(); }
 
 function startHandlePolling() {
   if (handlePoll) return;
@@ -319,7 +296,7 @@ function startHandlePolling() {
   // S3:仅首次收起时演示一次;之后完全交回"悬停才浮现"
   if (!loadConfig().handleHintShown) beginHandleHint();
   handlePoll = setInterval(() => {
-    if (!mainWindow || !mainWindow.isVisible() || !revealTabView || barVisible || currentBarH > 0) return; // 收托盘后台时不空转
+    if (!mainWindow || !mainWindow.isVisible() || !revealTab.view || barVisible || currentBarH > 0) return; // 收托盘后台时不空转
     if (handleHintActive) return; // 演示期间 bounds 归提示独占,轮询不得插手
     try {
       const p = screen.getCursorScreenPoint();
@@ -338,7 +315,7 @@ function startHandlePolling() {
           cancelHandleFade();
         }
         const [w] = mainWindow.getContentSize();
-        revealTabView.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
+        revealTab.view.setBounds({ x: Math.floor(w / 2 - HANDLE_W / 2), y: 0, width: HANDLE_W, height: HANDLE_H });
       } else if (handleShown) {
         // 防抖振(H-2):① 出现后 HANDLE_MIN_DWELL_MS 内的移出不生效(划过不闪断);
         // ② 需连续 HANDLE_OUT_FRAMES 帧区外才消失(单帧抖动不翻转状态)
@@ -1065,8 +1042,9 @@ function showStatusResult(p, onAction, nonIntrusive) {
     return;
   }
   asResult();
-  if (!ensureStatusWindow()) { statusQueued = true; }
-  else {
+  // 窗口不存在则创建:statusQueued 由 ensureStatusWindow 内部置位,
+  // 加载完成后 did-finish-load 统一补发,这里不重复赋值
+  if (ensureStatusWindow()) {
     // 有其他进行中任务:结果只入列表不抢焦点;否则正常聚焦
     const hasActive = [...statusTasks.values()].some((t) => !t.done);
     pushTasks({ focus: !hasActive });
@@ -1221,6 +1199,91 @@ function createAuxView({ file, preload, props = {} }) {
   view.webContents.loadFile(path.join(__dirname, file)).catch(() => {});
   return view;
 }
+
+// ---------- 懒创建浮层视图统一管理(内存策略 P0-1/P0-2 的公共样板) ----------
+// revealTab / menuPopup / palette / shortcutsPopup 四套此前各写一份
+// ensure*/destroy*/失焦收起/载荷排队,样板只留这一份:差异(页面文件/失焦行为/载荷频道)
+// 由构造参数表达,浮层侧保留既有函数名,调用点与 uitest 依赖注入面不变。
+function makeLazyView({ file, preload, props = {}, onBlur = null, onQueuedLoad = null }) {
+  let view = null;   // 当前视图实例(关闭即销毁置空)
+  let queued = null; // 视图加载中排队的载荷,did-finish-load 统一补发
+
+  // 懒创建:不存在(或已销毁)才建;已存在直接复用
+  const open = () => {
+    if (!mainWindow) return null;
+    if (view && !view.webContents.isDestroyed()) return view;
+    view = createAuxView({ file, preload, props });
+    if (onBlur) {
+      // 失焦即收起(点浮层外 = 关掉),键盘焦点还给 dsh 页面的动作由 onBlur 回调负责
+      view.webContents.on('blur', () => { if (view && view.getBounds().width > 0) onBlur(); });
+    }
+    // 首帧加载完成时补发排队载荷(极快打开不会出现空面板)
+    view.webContents.on('did-finish-load', () => {
+      if (queued && view && view.getBounds().width > 0) {
+        const q = queued;
+        queued = null;
+        if (onQueuedLoad) onQueuedLoad(q);
+      }
+    });
+    mainWindow.contentView.addChildView(view); // 后 add 的位于最上层
+    layoutViews();
+    return view;
+  };
+
+  // 载荷发送:视图加载中则排队(did-finish-load 补发),否则直达
+  const send = (channel, payload) => {
+    if (!view || view.webContents.isDestroyed()) return;
+    if (view.webContents.isLoading()) { queued = payload; return; }
+    queued = null;
+    view.webContents.send(channel, payload);
+  };
+
+  // 关闭即销毁,释放渲染进程;排队载荷一并作废
+  const destroy = () => {
+    if (!view) return;
+    const v = view;
+    view = null;
+    queued = null;
+    try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
+    try { v.webContents.close(); } catch { /* 已销毁 */ }
+  };
+
+  // 是否在屏(宽度 > 0 才算已展开;新创建未设 bounds 前宽度为 0)
+  const isOpen = () => !!view && view.getBounds().width > 0;
+  // 视图是否存在(含未展开/0 尺寸状态,如收起态的把手)
+  const exists = () => !!view && !view.webContents.isDestroyed();
+
+  return {
+    get view() { return view; },
+    open, send, destroy, isOpen, exists,
+  };
+}
+
+// 下拉把手:收起标题栏才需要,展开时销毁(内存优化 P0-1,见 ensureRevealTab)。
+// backgroundThrottling:false —— 收起态把手是 0 尺寸视图,渲染被 Chromium 后台节流后,
+// setBounds 恢复 96×26 的首帧会掉帧,「出现那一下卡」(第七轮 H-1)
+const revealTab = makeLazyView({
+  file: 'reveal-tab.html', preload: 'titlebar-preload.js',
+  props: { webPreferences: { backgroundThrottling: false } },
+});
+// 主菜单弹层:点开才创建、关闭即销毁
+const menuPopup = makeLazyView({
+  file: 'menu.html', preload: 'menu-preload.js',
+  onBlur: () => closeMenuPopup(true),
+  onQueuedLoad: (q) => menuPopup.view?.webContents.send('m:show', q),
+});
+// 命令面板(Ctrl+K):与菜单弹层同一生命周期策略
+const palette = makeLazyView({
+  file: 'palette.html', preload: 'palette-preload.js',
+  onBlur: () => closePalette(true),
+  onQueuedLoad: (q) => palette.view?.webContents.send('pt:show', q),
+});
+// 快捷键速查浮层:与命令面板同构
+const shortcutsPopup = makeLazyView({
+  file: 'shortcuts.html', preload: 'shortcuts-preload.js',
+  onBlur: () => closeShortcuts(true),
+  onQueuedLoad: (q) => shortcutsPopup.view?.webContents.send('sc:show', q),
+});
 
 // ---------- 通用深色对话框(替代原生 MessageBox;文件选择仍用原生) ----------
 // 内存优化 P0-3:辅助窗口隐藏后 60s 无复用即销毁,释放渲染进程(打开时按既有路径重建)
@@ -1498,8 +1561,8 @@ function settingsMemInfo() {
     shell: fmtMB(shell),
     dsh: fmtMB(Math.max(0, total - shell)),
     total: fmtMB(total),
-    // 三档评价沿用对话框的分级(基线约 1.4GB),文案键复用 dlg.memLevel*
-    level: total <= 1500 ? t('dlg.memLevelOk') : total <= 2200 ? t('dlg.memLevelHigh') : t('dlg.memLevelVeryHigh'),
+    // 三档评价沿用对话框的分级(memLevelInfo),文案键复用 dlg.memLevel*
+    level: memLevelInfo(total).level,
   };
 }
 
@@ -1667,16 +1730,16 @@ function closeReportWindow() {
   reportWin = null;
 }
 
-// opts: { phase:'boot'|'exit', error, code, buf, actions:[{id,label,style}] }
-function showReport(opts) {
-  closeStatus();
+// 错误报告上下文单一构造点:崩溃处理器与 showReport 各拼过一份 14 字段 ctx,
+// 字段增删只改这里。注意:崩溃处理器只在 app.isReady()(模块级绑定已初始化)后调用本函数
+function buildReportCtx(phase, error, code, buf) {
   const bootSnap = dshProc.getBootSnapshot(); // 最近一次启动的 stdout 尾/参数/时刻(dsh-process 维护)
-  const ctx = {
+  return {
     app, screen,
-    phase: opts.phase,
-    error: opts.error || null,
-    code: opts.code != null ? opts.code : null,
-    buf: opts.buf || bootSnap.buf,
+    phase,
+    error: error || null,
+    code: code != null ? code : null,
+    buf: buf || bootSnap.buf,
     logFile,
     crashFile: crashFilePath(),
     configPath: configPath(),
@@ -1687,6 +1750,12 @@ function showReport(opts) {
     args: bootSnap.args,
     elapsedMs: bootSnap.startedAt ? Date.now() - bootSnap.startedAt : null,
   };
+}
+
+// opts: { phase:'boot'|'exit', error, code, buf, actions:[{id,label,style}] }
+function showReport(opts) {
+  closeStatus();
+  const ctx = buildReportCtx(opts.phase, opts.error || null, opts.code != null ? opts.code : null, opts.buf);
   const rep = (() => {
     try { return diagnostics.buildReport(ctx); }
     catch (e) {
@@ -1788,6 +1857,17 @@ function shellMemMB() {
 function fmtMB(mb) {
   return mb >= 1024 ? (mb / 1024).toFixed(1) + 'GB' : mb + 'MB';
 }
+// 内存三档分级(壳 + dsh 本体总占用,基线约 1.4GB):阈值与分级文案只写这一份,
+// 设置窗「高级」分区(settingsMemInfo)与内存详情对话框(showMemoryInfo)共用
+function memLevelInfo(total) {
+  const key = total <= 1500 ? 'dlg.memLevelOk' : total <= 2200 ? 'dlg.memLevelHigh' : 'dlg.memLevelVeryHigh';
+  return {
+    type: key === 'dlg.memLevelOk' ? 'info' : key === 'dlg.memLevelHigh' ? 'warning' : 'error',
+    key,
+    level: t(key),
+    adviceKey: key === 'dlg.memLevelOk' ? 'dlg.memAdviceOk' : key === 'dlg.memLevelHigh' ? 'dlg.memAdviceHigh' : 'dlg.memAdviceVeryHigh',
+  };
+}
 let cachedTotalMemMB = null; // 壳 + dsh 本体进程树 总内存缓存(按需刷新,见 refreshTotalMemory)
 
 // 枚举 dsh 本体进程树(web 主进程 + 插件子进程如 mcp-proxy)的内存(WorkingSet64 字节)之和。
@@ -1839,24 +1919,16 @@ async function showMemoryInfo() {
   const shell = shellMemMB();
   const tree = Math.round((await dshTreeMemMB()) / 1048576); // 点开详情时精确枚举本体进程树一次
   const total = shell + tree;
-  // 状态评价:总内存(壳 + dsh 本体)分三档,映射对话框图标颜色;实测基线约 1.4GB
-  const level = total <= 1500
-    ? { type: 'info', key: 'dlg.memLevelOk' }
-    : total <= 2200 ? { type: 'warning', key: 'dlg.memLevelHigh' } : { type: 'error', key: 'dlg.memLevelVeryHigh' };
-  const advice = level.key === 'dlg.memLevelOk'
-    ? t('dlg.memAdviceOk')
-    : level.key === 'dlg.memLevelHigh'
-      ? t('dlg.memAdviceHigh')
-      : t('dlg.memAdviceVeryHigh');
+  const info = memLevelInfo(total);
   const detail = [
     t('dlg.memShell', { size: fmtMB(shell) }),
     t('dlg.memDsh', { size: fmtMB(tree) }),
   ];
   if (!dshChild) detail.push(t('dlg.memNoDsh'));
-  detail.push('', t('dlg.memAdvicePrefix', { advice }));
+  detail.push('', t('dlg.memAdvicePrefix', { advice: t(info.adviceKey) }));
   showDialog({
-    type: level.type, title: t('dlg.memoryTitle'), width: 440,
-    message: t('dlg.memoryMsg', { size: fmtMB(total), level: t(level.key) }),
+    type: info.type, title: t('dlg.memoryTitle'), width: 440,
+    message: t('dlg.memoryMsg', { size: fmtMB(total), level: info.level }),
     detail: detail.join('\n'),
     buttons: [{ label: t('dlg.ok'), primary: true }],
   });
@@ -1919,8 +1991,6 @@ function menuItems() {
 // 定位水平居中于内容区、垂直贴命令栏下沿。
 const SC_W = 380;       // 面板宽(6 行键位卡片,行高 38)
 const SC_MARGIN = 12;   // 视图四周留白,容纳阴影(与菜单同款)
-let shortcutsView = null;
-let shortcutsQueued = null; // 视图加载中:载荷待发(did-finish-load 补发)
 let shortcutsH = 0;     // 渲染层回报的真实内容高度(首帧用估算值,回报后回填)
 
 function shortcutsBounds() {
@@ -1935,62 +2005,36 @@ function shortcutsBounds() {
   };
 }
 function syncShortcutsBounds() {
-  if (!mainWindow || !shortcutsView) return;
+  if (!mainWindow || !shortcutsPopup.view) return;
   const b = shortcutsBounds();
   if (!b) return;
-  try { shortcutsView.setBounds(b); } catch { /* 销毁竞态 */ }
-}
-function ensureShortcutsView() {
-  if (!mainWindow) return;
-  if (shortcutsView && !shortcutsView.webContents.isDestroyed()) return;
-  shortcutsView = createAuxView({ file: 'shortcuts.html', preload: 'shortcuts-preload.js' });
-  // 失焦即收起(点面板外 = 关掉),并把键盘焦点还给 dsh 页面(与命令面板同款语义)
-  shortcutsView.webContents.on('blur', () => { if (shortcutsView && shortcutsView.getBounds().width > 0) closeShortcuts(true); });
-  // 首帧加载完成时补发排队载荷(极快打开不会出现空面板)
-  shortcutsView.webContents.on('did-finish-load', () => {
-    if (shortcutsQueued && shortcutsView && shortcutsView.getBounds().width > 0) {
-      const q = shortcutsQueued;
-      shortcutsQueued = null;
-      shortcutsView.webContents.send('sc:show', q);
-    }
-  });
-  mainWindow.contentView.addChildView(shortcutsView);
-  layoutViews();
-}
-function destroyShortcutsView() {
-  if (!shortcutsView) return;
-  const v = shortcutsView;
-  shortcutsView = null;
-  shortcutsQueued = null;
-  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
-  try { v.webContents.close(); } catch { /* 已销毁 */ }
-}
-function closeShortcuts(refocus = false) {
-  if (shortcutsView) {
-    try { shortcutsView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
-    destroyShortcutsView();
-  }
-  shortcutsH = 0; // 高度缓存随视图作废,下次按首帧估算重建
-  if (refocus) dshView?.webContents.focus();
+  try { shortcutsPopup.view.setBounds(b); } catch { /* 销毁竞态 */ }
 }
 function showShortcutsDialog() {
   if (!mainWindow) return;
   closeMenuPopup(); // 与菜单弹层互斥:速查浮层打开时菜单没意义(它由菜单/面板打开)
   const payload = { items: shortcuts.list.map((s) => ({ label: t(s.labelKey), accel: shortcuts.display(s.menu) })) };
-  ensureShortcutsView();
+  shortcutsPopup.open();
   syncShortcutsBounds();
-  const wc = shortcutsView.webContents;
-  if (wc.isLoading()) shortcutsQueued = payload;
-  else { shortcutsQueued = null; wc.send('sc:show', payload); }
-  shortcutsView.webContents.focus();
+  shortcutsPopup.send('sc:show', payload);
+  shortcutsPopup.view?.webContents.focus();
+}
+function destroyShortcutsView() { shortcutsPopup.destroy(); }
+function closeShortcuts(refocus = false) {
+  if (shortcutsPopup.exists()) {
+    try { shortcutsPopup.view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    shortcutsPopup.destroy();
+  }
+  shortcutsH = 0; // 高度缓存随视图作废,下次按首帧估算重建
+  if (refocus) dshView?.webContents.focus();
 }
 ipcMain.on('sc:close', (e) => {
-  if (!fromWin(e, shortcutsView)) return;
+  if (!fromWin(e, shortcutsPopup.view)) return;
   closeShortcuts(true);
 });
 // 高度回报:渲染层量完真实内容高度回填视图(sc:height,与命令面板 pt:height 同模式)
 ipcMain.on('sc:height', (e, h) => {
-  if (!fromWin(e, shortcutsView)) return;
+  if (!fromWin(e, shortcutsPopup.view)) return;
   const n = Number(h) || 0;
   if (n <= 0 || n === shortcutsH) return; // 同值短路:重复回报不重设
   shortcutsH = n;
@@ -2013,33 +2057,9 @@ function menuHeight(items) {
 }
 
 // 菜单弹层懒创建(内存优化 P0-2):菜单平时不可见,点开才创建视图、关闭即销毁,
-// 避免一个 0 尺寸的渲染进程常驻(典型 50-90MB)
-function ensureMenuPopup() {
-  if (!mainWindow) return;
-  if (menuPopupView && !menuPopupView.webContents.isDestroyed()) return;
-  // 菜单弹层:懒创建 + 关闭即销毁(内存优化 P0-2),透明底由 createAuxView 统一设置
-  menuPopupView = createAuxView({ file: 'menu.html', preload: 'menu-preload.js' });
-  // 点击菜单外任意处关闭;blur 时若面板仍展开,把键盘焦点还给 dsh 页面(否则菜单关闭后打字无响应)
-  menuPopupView.webContents.on('blur', () => { if (menuPopupView && menuPopupView.getBounds().width > 0) closeMenuPopup(true); });
-  // 菜单首帧加载完成时补发排队载荷(极快点击不会出现空白菜单)
-  menuPopupView.webContents.on('did-finish-load', () => {
-    if (menuQueued && menuPopupView && menuPopupView.getBounds().width > 0) {
-      const q = menuQueued;
-      menuQueued = null;
-      menuPopupView.webContents.send('m:show', q);
-    }
-  });
-  mainWindow.contentView.addChildView(menuPopupView); // 后 add 的位于最上层
-  layoutViews();
-}
-function destroyMenuPopup() {
-  if (!menuPopupView) return;
-  const v = menuPopupView;
-  menuPopupView = null;
-  menuQueued = null;
-  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
-  try { v.webContents.close(); } catch { /* 已销毁 */ }
-}
+// 避免一个 0 尺寸的渲染进程常驻(典型 50-90MB)。样板与实例见 makeLazyView 小节
+function ensureMenuPopup() { menuPopup.open(); }
+function destroyMenuPopup() { menuPopup.destroy(); }
 
 function showMenuPopup() {
   if (!mainWindow) return;
@@ -2047,32 +2067,29 @@ function showMenuPopup() {
   refreshTotalMemory(); // 菜单 label 要显示内存读数:打开时按需刷新(P2-4,内置 30s 节流)
   const items = menuItems();
   const mh = menuHeight(items);
-  ensureMenuPopup();
+  menuPopup.open();
   // 分组小标题让菜单比"纯分隔线版"高出 6×24px,1366×768 这类屏上会整块顶出屏幕底部
   // (原版 665px 已贴着 768 屏的工作区下沿)。溢出时按工作区剩余高度钳制,由 menu.html 的
   // .panel 内部滚动兜底:高度公式本身不变,只是视图变矮。屏幕够高时这条分支不生效,
   // 尺寸与从前逐像素一致。
   const wa = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
   const h = Math.min(mh, Math.max(200, wa.height - currentBarH - MENU_MARGIN * 2));
-  menuPopupView.setBounds({
+  menuPopup.view.setBounds({
     x: 0,
     y: currentBarH,
     width: MENU_W + MENU_MARGIN * 2,
     height: h + MENU_MARGIN * 2,
   });
-  const wc = menuPopupView.webContents;
-  const payload = { items, w: MENU_W, margin: MENU_MARGIN };
-  if (wc.isLoading()) { menuQueued = payload; } // 首帧未加载完:入队,加载完成后补发
-  else { menuQueued = null; wc.send('m:show', payload); }
+  menuPopup.send('m:show', { items, w: MENU_W, margin: MENU_MARGIN });
   titlebarView?.webContents.send('tb:menu-state', true); // 菜单按点亮起
-  menuPopupView.webContents.focus();
+  menuPopup.view?.webContents.focus();
 }
 
 function closeMenuPopup(refocus = false) {
   menuClosedAt = Date.now();
-  if (menuPopupView) {
-    try { menuPopupView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
-    destroyMenuPopup();
+  if (menuPopup.exists()) {
+    try { menuPopup.view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    menuPopup.destroy();
   }
   titlebarView?.webContents.send('tb:menu-state', false);
   if (refocus) dshView?.webContents.focus();
@@ -2081,7 +2098,7 @@ function closeMenuPopup(refocus = false) {
 // 左上角菜单按钮:点击打开,再点关闭(toggle);blur 自动收起后 350ms 内再点不算重开
 ipcMain.on('tb:menu', (e) => {
   if (!fromWin(e, titlebarView)) return;
-  const open = !!menuPopupView && menuPopupView.getBounds().width > 0;
+  const open = menuPopup.isOpen();
   if (open || Date.now() - menuClosedAt < 350) { closeMenuPopup(true); return; }
   showMenuPopup();
 });
@@ -2137,7 +2154,7 @@ function runCommand(id) {
 }
 
 ipcMain.on('m:action', (e, id) => {
-  if (!fromWin(e, menuPopupView) && !fromWin(e, trayMenuWin)) return;
+  if (!fromWin(e, menuPopup.view) && !fromWin(e, trayMenuWin)) return;
   // 区分来源:主窗口菜单弹层 / 托盘菜单小窗
   const fromTray = trayMenuWin && e.sender === trayMenuWin.webContents;
   if (fromTray) closeTrayMenu();
@@ -2148,7 +2165,7 @@ ipcMain.on('m:action', (e, id) => {
   runCommand(id);
 });
 ipcMain.on('m:close', (e) => {
-  if (!fromWin(e, menuPopupView) && !fromWin(e, trayMenuWin)) return;
+  if (!fromWin(e, menuPopup.view) && !fromWin(e, trayMenuWin)) return;
   if (trayMenuWin && e.sender === trayMenuWin.webContents) closeTrayMenu();
   else closeMenuPopup(true);
 });
@@ -2206,60 +2223,31 @@ function paletteBounds() {
 }
 
 function syncPaletteBounds() {
-  if (!mainWindow || !paletteView) return;
+  if (!mainWindow || !palette.view) return;
   const b = paletteBounds();
   if (!b) return;
-  try { paletteView.setBounds(b); } catch { /* 销毁竞态 */ }
+  try { palette.view.setBounds(b); } catch { /* 销毁竞态 */ }
 }
 
-function ensurePaletteView() {
-  if (!mainWindow) return;
-  if (paletteView && !paletteView.webContents.isDestroyed()) return;
-  // 命令面板:与菜单弹层同策略(懒创建 + 关闭即销毁),透明底由 createAuxView 统一设置
-  paletteView = createAuxView({ file: 'palette.html', preload: 'palette-preload.js' });
-  // 失焦即收起(点面板外 = 关掉),并把键盘焦点还给 dsh 页面——
-  // 焦点留在已销毁的视图上会让用户"关掉面板后打字没反应"
-  paletteView.webContents.on('blur', () => { if (paletteView && paletteView.getBounds().width > 0) closePalette(true); });
-  // 首帧加载完成时补发排队载荷(极快按 Ctrl+K 不会出现空面板)
-  paletteView.webContents.on('did-finish-load', () => {
-    if (paletteQueued && paletteView && paletteView.getBounds().width > 0) {
-      const q = paletteQueued;
-      paletteQueued = null;
-      paletteView.webContents.send('pt:show', q);
-    }
-  });
-  mainWindow.contentView.addChildView(paletteView); // 后 add 的位于最上层
-  layoutViews();
-}
+function destroyPaletteView() { palette.destroy(); }
 
-function destroyPaletteView() {
-  if (!paletteView) return;
-  const v = paletteView;
-  paletteView = null;
-  paletteQueued = null;
-  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
-  try { v.webContents.close(); } catch { /* 已销毁 */ }
-}
-
-function paletteOpen() { return !!paletteView && paletteView.getBounds().width > 0; }
+function paletteOpen() { return palette.isOpen(); }
 
 function showPalette() {
   if (!mainWindow) return;
   closeMenuPopup(); // 与菜单弹层互斥:两个浮层同时挂着会互相盖住且各自抢焦点
   closeTrayMenu();
   paletteH = PALETTE_INPUT_H; // 每次重开从"只有输入行"起步,真实高度由渲染层量完回报
-  ensurePaletteView();
+  palette.open();
   syncPaletteBounds();
-  const payload = palettePayload();
-  const wc = paletteView.webContents;
-  if (wc.isLoading()) { paletteQueued = payload; } else { paletteQueued = null; wc.send('pt:show', payload); }
-  paletteView.webContents.focus();
+  palette.send('pt:show', palettePayload());
+  palette.view?.webContents.focus();
 }
 
 function closePalette(refocus = false) {
-  if (paletteView) {
-    try { paletteView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
-    destroyPaletteView();
+  if (palette.exists()) {
+    try { palette.view.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    palette.destroy();
   }
   if (refocus) dshView?.webContents.focus();
 }
@@ -2287,7 +2275,7 @@ ipcMain.on('tb:palette', (e) => {
   togglePalette(); // 命令栏中段的入口按钮
 });
 ipcMain.on('pt:run', (e, id) => {
-  if (!fromWin(e, paletteView)) return;
+  if (!fromWin(e, palette.view)) return;
   const key = String(id);
   const at = paletteRecent.indexOf(key);
   if (at >= 0) paletteRecent.splice(at, 1); // 已在列表里先摘掉再置顶,避免重复项
@@ -2297,11 +2285,11 @@ ipcMain.on('pt:run', (e, id) => {
   runCommand(key);
 });
 ipcMain.on('pt:close', (e) => {
-  if (!fromWin(e, paletteView)) return;
+  if (!fromWin(e, palette.view)) return;
   closePalette(true);
 });
 ipcMain.on('pt:height', (e, h) => {
-  if (!fromWin(e, paletteView)) return;
+  if (!fromWin(e, palette.view)) return;
   const n = Number(h) || 0;
   if (n <= 0 || n === paletteH) return; // 同值短路:每次击键都会回报,不短路就是每次击键一次 setBounds
   paletteH = n;
@@ -2541,7 +2529,8 @@ function createWindow() {
     } catch (e2) { log(`托盘提示通知失败: ${e2.message}`); }
   });
   mainWindow.on('closed', () => {
-    mainWindow = null; dshView = null; titlebarView = null; revealTabView = null; menuPopupView = null;
+    mainWindow = null; dshView = null; titlebarView = null;
+    // 浮层视图由 makeLazyView 持有实例:主窗销毁时其 webContents 随窗口一并关闭,无需逐项置空
     // 「关闭即退出」模式下主窗口是唯一主载体:直接退出,不等状态窗等辅助窗口也关闭
     if (loadConfig().closeAction === 'quit' && !quitting) app.quit();
   });
@@ -2569,7 +2558,7 @@ ipcMain.on('tb:hide-bar', (e) => {
   dshView?.webContents.focus(); // 收起标题栏后焦点还给页面,避免聊天输入框失焦
 });
 ipcMain.on('tb:show-bar', (e) => {
-  if (!fromWin(e, titlebarView) && !fromWin(e, revealTabView)) return;
+  if (!fromWin(e, titlebarView) && !fromWin(e, revealTab.view)) return;
   toggleTitlebar(true);
   dshView?.webContents.focus();
 });
@@ -2751,7 +2740,6 @@ function showWelcome() {
     });
     welcomeWin.center(); // 主窗尚未创建:屏幕居中
     welcomeWin.webContents.once('did-finish-load', () => welcomeWin?.show());
-    welcomeWin.webContents.once('did-finish-load', () => welcomeWin?.show());
     // Alt+F4 等直接关闭 = 退出(与旧 ensureWorkspace 的取消语义一致)
     welcomeWin.on('closed', () => { welcomeWin = null; finish(null); });
   });
@@ -2877,16 +2865,16 @@ if (!gotLock) {
         get dialogWin() { return dialogWin; },
         get reportWin() { return reportWin; },
         get settingsWin() { return settingsWin; },
-        get menuPopupView() { return menuPopupView; },
+        get menuPopupView() { return menuPopup.view; },
         get trayMenuWin() { return trayMenuWin; },
         // 快捷键速查浮层(第七轮 D-1):与命令面板同构,视图开合创建销毁,走 getter
-        get shortcutsView() { return shortcutsView; },
+        get shortcutsView() { return shortcutsPopup.view; },
         showShortcutsDialog, closeShortcuts,
         SC_W, SC_MARGIN,
         get currentBarH() { return currentBarH; },
-        // S3 首次收起演示:revealTabView 会随收起/展开创建销毁,故走 getter;
+        // S3 首次收起演示:revealTab 视图会随收起/展开创建销毁,故走 getter;
         // 断言面是"提示状态机 + 视图 bounds",不暴露内部计时器
-        get revealTabView() { return revealTabView; },
+        get revealTabView() { return revealTab.view; },
         get handleHintActive() { return handleHintActive; },
         HANDLE_W, HANDLE_H,
         get trayState() { return trayState; },
@@ -2910,9 +2898,9 @@ if (!gotLock) {
         getThemeSource: () => nativeTheme.themeSource,
         applyTheme,
         showMenuPopup, closeMenuPopup, showTrayMenu, closeTrayMenu, showMainWindow,
-        // 命令面板(阶段 2):paletteView 会随开合创建销毁,故走 getter;常量一并暴露,
+        // 命令面板(阶段 2):palette 视图会随开合创建销毁,故走 getter;常量一并暴露,
         // 断言"视图宽 = PALETTE_W + 2×留白"这类契约时不写第二份魔数
-        get paletteView() { return paletteView; },
+        get paletteView() { return palette.view; },
         showPalette, closePalette, paletteOpen,
         PALETTE_W, PALETTE_MARGIN, PALETTE_INPUT_H, PALETTE_ROW_H, PALETTE_MAX_ROWS,
         toggleTitlebar, showSettings, installDshUpdate: updates.installDshUpdate,

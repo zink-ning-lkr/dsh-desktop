@@ -183,8 +183,7 @@ async function acceleratedDownload(info, token) {
         const speed = (p.transferred / dt) * 1000;
         deps.updateStatus({
           mode: 'download', progress: p.percent, __origin: 'desktop',
-          pct: p.percent.toFixed(1) + '%',
-          size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB · ${(speed / 1048576).toFixed(1)} MB/s`,
+          ...buildProgressPayload(p, speed / 1048576),
         });
       },
       isCancelled: () => !!(token && token.isCancelled) || deps.isQuitting(),
@@ -264,6 +263,16 @@ function onUpdateAvailable(info) {
   showResult(true);
 }
 
+// 下载进度载荷统一格式化(加速下载与官方下载共用,曾各写一份、格式漂移):
+// pct 保留 1 位小数;size = 「已传 / 总量 MB」+ 速度段,速度缺失(官方进度早期)时省略
+function buildProgressPayload(p, speedMBs) {
+  const speed = Number.isFinite(speedMBs) && speedMBs > 0 ? ` · ${speedMBs.toFixed(1)} MB/s` : '';
+  return {
+    pct: p.percent.toFixed(1) + '%',
+    size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB${speed}`,
+  };
+}
+
 // 官方下载进度:按 150ms 节流(与自研多线程下载器一致,避免每 chunk 一次 IPC 刷屏)
 function onDownloadProgress(p) {
   if (!deps) return;
@@ -272,12 +281,10 @@ function onDownloadProgress(p) {
   const now = Date.now();
   if (now - state.lastOfficialProgressAt < 150) return;
   state.lastOfficialProgressAt = now;
-  const speed = p.bytesPerSecond ? `${(p.bytesPerSecond / 1048576).toFixed(1)} MB/s` : '';
   deps.updateStatus({
     mode: 'download', __origin: 'desktop',
     progress: p.percent,
-    pct: p.percent.toFixed(1) + '%',
-    size: `${Math.round(p.transferred / 1048576)} / ${Math.round(p.total / 1048576)} MB${speed ? ' · ' + speed : ''}`,
+    ...buildProgressPayload(p, p.bytesPerSecond ? p.bytesPerSecond / 1048576 : null),
   });
 }
 
@@ -392,14 +399,15 @@ function checkForUpdates(manual) {
       }, () => deps.closeStatus());
     }, CHECK_UPDATE_TIMEOUT_MS);
   }
-  // 看门狗:自动检查没有超时弹窗,网络挂起时要留痕(electron-updater 在途请求会被后续检查复用)
+  // 看门狗:自动检查没有超时弹窗,网络挂起时要留痕(electron-updater 在途请求会被后续检查复用);
+  // 请求正常返回后即清除,不留常驻定时器
   state.updateCheckInFlight = true;
-  setTimeout(() => {
+  const watchdog = setTimeout(() => {
     if (state.updateCheckInFlight) log(`更新检查超过 ${UPDATE_CHECK_MAX_MS / 1000} 秒未返回,请检查网络/代理与 GitHub 连通性`);
   }, UPDATE_CHECK_MAX_MS);
   autoUpdater.checkForUpdates()
-    .then(() => { state.updateCheckInFlight = false; })
-    .catch((e) => { state.updateCheckInFlight = false; log(`更新检查失败: ${e.message}`); });
+    .then(() => { clearTimeout(watchdog); state.updateCheckInFlight = false; })
+    .catch((e) => { clearTimeout(watchdog); state.updateCheckInFlight = false; log(`更新检查失败: ${e.message}`); });
 }
 
 // ---------- dsh 本体更新(对接 npm registry,检查流程与桌面端更新保持一致) ----------
@@ -832,6 +840,4 @@ module.exports = {
   quitAndInstallGuarded,
   parseVersion,
   compareVersion,
-  comparePre,
-  fetchLatestDshVersion,
 };

@@ -70,7 +70,6 @@
   --ctl-h-lg: 40px; /* 首启主 CTA */
   --ctl-h-xs: 24px; /* 命令栏状态簇按钮、列表行内 ✕(24px 为最小点击目标下限) */
   --ctl-icon: 16px;    /* 默认图标档(菜单项/行内) */
-  --ctl-icon-lg: 20px; /* 窗口头部图标槽 */
   --focus-ring-w: 2px;      /* 焦点环宽度(此前硬编码在各处 outline 声明里) */
   --focus-ring-offset: 2px; /* 焦点环外扩距离 */
   --btn-min-w: 88px; /* 决策按钮等宽(文案长短不牵动宽度) */
@@ -83,11 +82,6 @@
   --c-elev-1: 0 1px 2px rgba(8, 14, 40, .45);   /* 卡片与窗底分层(任务行) */
   --c-elev-2: 0 14px 44px rgba(8, 14, 40, .55); /* 浮层 */
   --c-elev-3: 0 20px 60px rgba(8, 14, 40, .65); /* 模态 */
-  --z-base: 0;
-  --z-sticky: 10;
-  --z-popup: 100;
-  --z-toast: 1000;
-  --z-modal: 2000;
   --c-accent-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-brand) 80%, transparent);
   --c-ok-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-ok) 80%, transparent);
   --c-danger-glow: 0 2px 12px -3px color-mix(in srgb, var(--c-err) 80%, transparent);
@@ -102,8 +96,6 @@
   --c-hover: rgba(122, 161, 255, .16);
   --c-hover-strong: rgba(122, 161, 255, .26);
   --c-active: rgba(122, 161, 255, .30);
-  --c-selected: var(--c-sel-bg);
-  --c-selected-fg: var(--c-sel-fg);
   --c-disabled-bg: var(--c-bg2);
   --c-disabled-fg: var(--c-fg3);
   --c-disabled-border: var(--c-border);
@@ -123,15 +115,12 @@
      改本值必须同提交改那里,否则菜单底部被裁。 */
   --density-row: 32px;   /* 舒适(默认) */
   --density-gap: 6px;
-  --density-row-compact: 26px; /* 紧凑 */
-  --density-gap-compact: 4px;
 
   /* ---- 动效:三档语义。深澜略放慢,给光晕动效留出感知窗口 ---- */
   --dur-fast: .14s;  /* 悬停/焦点等即时反馈 */
   --dur-mid: .2s;    /* 状态过渡 */
   --dur-slow: .28s;  /* 浮层入场/内容切换 */
   --dur-win: .22s;   /* 窗口入场(保留) */
-  --ease-std: cubic-bezier(.4, 0, .2, 1);       /* 标准:悬停/展开 */
   --ease-out: cubic-bezier(.16, 1, .3, 1);      /* 减速:浮层入场(更强的落定感) */
   --ease-win: cubic-bezier(.2, .9, .3, 1.15);   /* 窗口入场(带轻微回弹,保留) */
   /* 字栈:行距 1.6 为正文基线 */
@@ -224,7 +213,6 @@
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
-.num { font-variant-numeric: tabular-nums; }
 
 /* ---- 公共:无边框窗口外壳(页面可用 --win-bg/--win-radius/--win-shadow 微调) ---- */
 .win {

@@ -25,7 +25,6 @@
    feedback    就地反馈(统一 2200ms)
    focusPrimary 打开即聚焦主按钮(替代 status/dialog/report 三份)
    focusTrap   对话框焦点陷阱(阶段 0 修复 X3 用)
-   srOnly      视觉隐藏但读屏可读的文本节点
    keyedList   按 key 复用节点重建列表(阶段 2 修 C3:150ms 全量重建)
    listNav     列表行 roving tabindex(阶段 2 修 X4:↑↓/Home/End + Enter/Delete)
    winShell    窗口头部三件套(阶段 3 T-5:图标槽 + 标题 + 关闭按钮)
@@ -305,12 +304,7 @@
       }
     }
     root.addEventListener('keydown', onKey);
-    return { sync, rows, destroy: () => root.removeEventListener('keydown', onKey) };
-  }
-
-  // ---------- 视觉隐藏但读屏可读 ----------
-  function srOnly(text) {
-    return el('span', { class: 'sr-only', text: text == null ? '' : String(text) });
+    return { sync, destroy: () => root.removeEventListener('keydown', onKey) };
   }
 
   /* ---------- 窗口头部三件套(阶段 3 T-5):.win-head 的图标槽 + 标题 + 关闭按钮 ----------
@@ -364,6 +358,6 @@
   }
 
   window.UI_KIT = {
-    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, srOnly, keyedList, listNav, winShell,
+    el, buttonRow, progressBar, bigBadge, feedback, focusPrimary, focusTrap, keyedList, listNav, winShell,
   };
 })();

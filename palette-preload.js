@@ -1,6 +1,7 @@
 // 命令面板 IPC 桥(阶段 2):接收条目载荷,回传执行/关闭/高度。
 // 与本项目其余 preload 同构:只用 contextBridge 暴露具名方法,sandbox 内不碰 fs。
-// 文案表与 menu/titlebar/status 同法:sendSync 一次性拉取静态快照,渲染层本地 t()。
+// 文案表与 menu/titlebar/status 同法:sendSync 一次性拉取静态快照,渲染层本地 t();
+// t() 实现收敛在 ui-i18n.js(页面 <head> 引用),preload 只拉数据
 const { contextBridge, ipcRenderer } = require('electron');
 
 let i18nTable = {};
@@ -16,11 +17,4 @@ contextBridge.exposeInMainWorld('__palette', {
   height: (h) => ipcRenderer.send('pt:height', Number(h) || 0),
 });
 
-// 渲染层 t():与主进程 i18n.js 同一取值/占位符约定,表缺失回退 key
-contextBridge.exposeInMainWorld('__i18n', {
-  t: (key, params) => {
-    let s = i18nTable[key] || key;
-    if (params) for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
-    return s;
-  },
-});
+contextBridge.exposeInMainWorld('__i18nTable', i18nTable);

@@ -8,13 +8,8 @@ contextBridge.exposeInMainWorld('__shortcuts', {
   height: (h) => ipcRenderer.send('sc:height', Math.round(Number(h) || 0)),
 });
 
-// 文案表同步拉取(渲染层 i18n,与其余 preload 同一约定):表缺失回退 key
+// 文案表同步拉取(渲染层 i18n,与其余 preload 同一约定):表缺失回退 key;
+// t() 实现收敛在 ui-i18n.js(页面 <head> 引用),preload 只拉数据
 let i18nTable = {};
 try { i18nTable = ipcRenderer.sendSync('i18n:table') || {}; } catch { /* 主进程未就绪:回退 key */ }
-contextBridge.exposeInMainWorld('__i18n', {
-  t: (key, params) => {
-    let s = i18nTable[key] || key;
-    if (params) for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
-    return s;
-  },
-});
+contextBridge.exposeInMainWorld('__i18nTable', i18nTable);

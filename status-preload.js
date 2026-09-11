@@ -1,5 +1,6 @@
 // 状态窗 IPC 桥:接收任务列表载荷,回传后台化/取消/关闭/结果动作/单任务取消与关闭/全部取消;
-// 文案表同步拉取(渲染层 i18n,v0.6.0):sandbox 读不了 fs,经主进程一次性下发静态快照
+// 文案表同步拉取(渲染层 i18n,v0.6.0):sandbox 读不了 fs,经主进程一次性下发静态快照;
+// t() 实现收敛在 ui-i18n.js(页面 <head> 引用),preload 只拉数据
 // P1-1 任务中心:渲染器以任务数组渲染(单任务时退化为旧单视图),动作全部携带任务 id
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -23,11 +24,4 @@ contextBridge.exposeInMainWorld('__status', {
   clearDone: () => ipcRenderer.send('st:clear-done'), // 深澜:清空全部已完成历史(进行中不受影响)
 });
 
-// 渲染层 t():与主进程 i18n.js 同一取值/占位符约定,表缺失回退 key
-contextBridge.exposeInMainWorld('__i18n', {
-  t: (key, params) => {
-    let s = i18nTable[key] || key;
-    if (params) for (const [k, v] of Object.entries(params)) s = s.split(`{${k}}`).join(String(v));
-    return s;
-  },
-});
+contextBridge.exposeInMainWorld('__i18nTable', i18nTable);

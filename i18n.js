@@ -2,8 +2,8 @@
 // 文案表 i18n/zh-CN.json 启动后首次调用时同步加载并缓存;表缺失或键不存在时
 // 回退 key 本身,保证功能不受文案表影响。
 // 渲染层收编状态(阶段 0 收尾 X5):全部页面已完成接入,渲染层不再有中文硬编码。
-// 页面经各自 preload 的 sendSync('i18n:table') 同步拉取 snapshot() 后本地 t()
-// (accel / loading / report / status / titlebar / reveal-tab / welcome / menu / toast);
+// 页面经各自 preload 的 sendSync('i18n:table') 同步拉取快照并暴露 __i18nTable,
+// 由共享脚本 ui-i18n.js 定义 window.__i18n.t()(t() 实现只此一份,改约定不再改十处);
 // dialog.html 是唯一例外——它的标题/正文/按钮文案全部由主进程 payload 逐条下发,
 // 页面自身没有面向用户的固定文案,故不接文案表。
 'use strict';

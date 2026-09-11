@@ -11,47 +11,56 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const i18n = require('./i18n'); // 托盘状态文案断言走文案表,不硬编码中文(文案改动不再误报)
 
 // ---------- SMOKE / DEMO ----------
+// 两模式共用同一段闭环验证(菜单弹层 → 关窗收托盘 → 托盘菜单 → 托盘恢复 → 退出):
+// DEMO 在每个阶段额外写一次窗口坐标(供外部脚本截屏),SMOKE 纯断言。
+// 此前 SMOKE 分支只有「16s 后自动退出」的空操作,与头注释宣称的「窗口/托盘闭环验证」不符
 function runSmokeDemo(d) {
-  if (process.env.DSH_DESKTOP_DEMO) {
-    const demoShot = (name, win = d.mainWindow) => {
-      try {
-        const b = win.getBounds();
-        const disp = d.screen.getDisplayMatching(b);
-        fs.writeFileSync(process.env.DSH_DEMO_BOUNDS, JSON.stringify({
-          name,
-          x: Math.round(b.x * disp.scaleFactor),
-          y: Math.round(b.y * disp.scaleFactor),
-          w: Math.round(b.width * disp.scaleFactor),
-          h: Math.round(b.height * disp.scaleFactor),
-        }));
-        d.log(`DEMO: 阶段 ${name}`);
-      } catch (e) { d.log(`DEMO: 坐标输出失败 ${e.message}`); }
-    };
-    setTimeout(() => demoShot('1-bar'), 9_000);
-    setTimeout(() => { d.showMenuPopup(); setTimeout(() => demoShot('2-menu'), 900); }, 10_500);
+  const isDemo = !!process.env.DSH_DESKTOP_DEMO;
+  const demoShot = (name, win = d.mainWindow) => {
+    if (!isDemo) return;
+    try {
+      const b = win.getBounds();
+      const disp = d.screen.getDisplayMatching(b);
+      fs.writeFileSync(process.env.DSH_DEMO_BOUNDS, JSON.stringify({
+        name,
+        x: Math.round(b.x * disp.scaleFactor),
+        y: Math.round(b.y * disp.scaleFactor),
+        w: Math.round(b.width * disp.scaleFactor),
+        h: Math.round(b.height * disp.scaleFactor),
+      }));
+      d.log(`DEMO: 阶段 ${name}`);
+    } catch (e) { d.log(`DEMO: 坐标输出失败 ${e.message}`); }
+  };
+  // 验证「✕ = 收托盘」需要 closeAction 为 tray:测试期间临时写入,退出前还原用户原配置
+  const prevCloseAction = d.loadConfig().closeAction;
+  const restoreCloseAction = () => {
+    try { d.saveConfig({ ...d.loadConfig(), closeAction: prevCloseAction }); }
+    catch (e) { d.log(`SMOKE: 还原 closeAction 失败 ${e.message}`); }
+  };
+  setTimeout(() => demoShot('1-bar'), 9_000);
+  setTimeout(() => { d.showMenuPopup(); setTimeout(() => demoShot('2-menu'), 900); }, 10_500);
+  setTimeout(() => {
+    d.closeMenuPopup();
+    d.saveConfig({ ...d.loadConfig(), closeAction: 'tray' });
+    d.mainWindow?.close(); // 应被拦截:隐藏到托盘而非退出
     setTimeout(() => {
-      d.closeMenuPopup();
-      d.saveConfig({ ...d.loadConfig(), closeAction: 'tray' });
-      d.mainWindow?.close(); // 应被拦截:隐藏到托盘而非退出
+      d.log(`SMOKE: close 后窗口可见=${d.mainWindow?.isVisible()}(期望 false),进程仍存活`);
+      d.showTrayMenu(); // 此刻外部脚本已把鼠标移到托盘区,菜单在光标处弹出
       setTimeout(() => {
-        d.log(`SMOKE: close 后窗口可见=${d.mainWindow?.isVisible()}(期望 false),进程仍存活`);
-        d.showTrayMenu(); // 此刻外部脚本已把鼠标移到托盘区,菜单在光标处弹出
+        if (d.trayMenuWin) demoShot('3-tray-menu', d.trayMenuWin);
+        d.closeTrayMenu();
+        d.showMainWindow();
         setTimeout(() => {
-          if (d.trayMenuWin) demoShot('3-tray-menu', d.trayMenuWin);
-          d.closeTrayMenu();
-          d.showMainWindow();
-          setTimeout(() => {
-            d.log(`SMOKE: 托盘恢复后窗口可见=${d.mainWindow?.isVisible()}(期望 true)`);
-            d.app.quit();
-          }, 600);
-        }, 900);
-      }, 800);
-    }, 12_300);
-  } else {
-    setTimeout(() => { d.log('SMOKE: 自动退出'); d.app.quit(); }, 16_000);
-  }
+          d.log(`SMOKE: 托盘恢复后窗口可见=${d.mainWindow?.isVisible()}(期望 true)`);
+          restoreCloseAction();
+          d.app.quit();
+        }, 600);
+      }, 900);
+    }, 800);
+  }, 12_300);
 }
 
 // ---------- 全量 UI 冒烟 ----------
@@ -116,7 +125,7 @@ function runUitest(d) {
     const t = (name, cond) => ck.push(`${name}:${cond ? 'ok' : 'FAIL'}`);
     const exported = (src.match(/window\.UI_KIT\s*=\s*\{([^}]*)\}/) || [, ''])[1];
     t('uikit-global', /window\.UI_KIT\s*=/.test(src));
-    t('uikit-apis', ['el', 'buttonRow', 'progressBar', 'bigBadge', 'feedback', 'focusPrimary', 'focusTrap', 'srOnly', 'keyedList', 'listNav']
+    t('uikit-apis', ['el', 'buttonRow', 'progressBar', 'bigBadge', 'feedback', 'focusPrimary', 'focusTrap', 'keyedList', 'listNav']
       .every((k) => new RegExp(`\\b${k}\\b`).test(exported)));
     // 禁用 ES module 的回归锁:页面走 file://,type="module" 会被 Chromium 按 CORS 拒绝
     t('uikit-nomodule', !/^\s*(import|export)\s/m.test(src));
@@ -299,9 +308,10 @@ function runUitest(d) {
     const bar = read('titlebar.html');
     const barPre = read('titlebar-preload.js');
     const files = JSON.parse(read('package.json')).build.files;
-    t('palette-lazy', /function ensurePaletteView\(/.test(main) && /function destroyPaletteView\(/.test(main) && /function syncPaletteBounds\(/.test(main));
-    // 载具必须是主窗内视图:面板要接收鼠标,独立窗会与主窗脱帧;而 toast 必须独立窗才谈得上穿透
-    t('palette-view', /paletteView = createAuxView\(/.test(main) && /addChildView\(paletteView\)/.test(main));
+    t('palette-lazy', /makeLazyView\(/.test(main) && /file: 'palette\.html'/.test(main) && /function destroyPaletteView\(/.test(main) && /function syncPaletteBounds\(/.test(main));
+    // 载具必须是主窗内视图:面板要接收鼠标,独立窗会与主窗脱帧;而 toast 必须独立窗才谈得上穿透。
+    // 重构后四套浮层共用 makeLazyView(内部 createAuxView → addChildView(view)),断言锁「面板走共享工厂」这一契约
+    t('palette-view', /file: 'palette\.html'/.test(main) && /function createAuxView\(/.test(main) && /addChildView\(view\)/.test(main));
     // 常量 ↔ 渲染层严格配对:高度公式的加数/乘数/上限,任一处单改就会错位
     t('palette-consts', /PALETTE_W = 560/.test(main) && /PALETTE_ROW_H = 36/.test(main)
       && /PALETTE_MAX_ROWS = 8/.test(main) && /PALETTE_INPUT_H = 56/.test(main)
@@ -317,7 +327,7 @@ function runUitest(d) {
       .every((c) => main.includes(`'${c}'`) && pre.includes(`'${c}'`)));
     // 身份校验是每个新 IPC handler 的准入门槛;回程三个通道一个都不能漏,
     // 且必须认当前实例(面板视图可能已被销毁重建)——fromWin 内含 trustedEvent + 同一性判定
-    t('palette-trusted', (main.match(/ipcMain\.on\('pt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!fromWin\(e, paletteView\)\) return;/g) || []).length === 3);
+    t('palette-trusted', (main.match(/ipcMain\.on\('pt:[a-z]+',?\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if \(!fromWin\(e, palette\.view\)\) return;/g) || []).length === 3);
     // 命令出口唯一:面板只回传 id,执行仍归 runCommand(与菜单/托盘/命令栏同源)
     t('palette-run-command', /ipcMain\.on\('pt:run'[\s\S]{0,700}?runCommand\(key\)/.test(main));
     // 命令栏中段入口:按钮 + 桥 + 三分支断点(≥1200 全称 / 960–1200 图标 / <960 隐藏)
@@ -611,11 +621,13 @@ function runUitest(d) {
     if (!wl || wl.includes('cmdbar.')) problems.push('工作目录标签=' + wl);
     return problems.length ? 'FAIL ' + problems.join(' ;') : 'PASS svc=' + svc + ' theme="' + tl + '" ws="' + wl + '"';
   })()`, 'cmdbar-dom'), 2650);
-  // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)
+  // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)。
+  //    期望值从 i18n 文案表与当前配置读取,不硬编码中文/具体目录(换文案、换工作目录不误报)
   uiStep(() => {
     const t = d.trayStatusText();
-    const want = { ok: '运行中', boot: '启动中', err: '已停止' }[d.trayState];
-    const ok = !!want && t.includes(want) && t.includes('D:\\Work');
+    const want = { ok: i18n.t('tray.running'), boot: i18n.t('tray.booting'), err: i18n.t('tray.stopped') }[d.trayState];
+    const ws = d.loadConfig().workspace || '';
+    const ok = !!want && t.includes(want) && (!ws || t.includes(ws));
     d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
   }, 2600, 'tray-status');
   // ⑪ 命令面板运行时(阶段 2):开 → 结构 → 筛选 → Esc 关。窗口在 3500 会被状态窗抢焦点,
@@ -924,7 +936,10 @@ function runUitest(d) {
   uiStep(() => d.log(`UITEST a11y-closed win=${!!d.menuPopupView}(期望 false) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 27900, 'a11y-closed-verify');
   // ⑫ 外观主题(P1-2):菜单项存在 → 点击循环(auto→dark→light→auto) → config/themeSource 映射
   //    → 渲染层 data-theme + 令牌覆写 + 鲸鱼 logo 黑白换版;结束恢复原配置
+  // 设置窗测试会经 acc:set 落盘 closeAction/openBrowser:一并捕获原值,收尾时还原
   const theme0 = d.loadConfig().theme;
+  const closeAction0 = d.loadConfig().closeAction;
+  const openBrowser0 = d.loadConfig().openBrowser;
   // v0.6.3 轮询化:真实 dsh SPA 首载与菜单弹层首载会争抢资源,固定间隙的点击/断言可能落空——
   // 全部改为轮询等待(每 350ms 一次,最多 10 次),落空重试而非失败
   const pollFor = async (fn, times = 10, gap = 350) => {
@@ -1160,6 +1175,18 @@ function runUitest(d) {
         d.saveConfig(cfg2);
         d.applyTheme();
         d.log(`UITEST: 已恢复外观主题(${theme0 === undefined ? 'auto 默认' : theme0})`);
+      }
+      // 设置窗测试把 closeAction/openBrowser 落成 tray/false:还原用户原值,不静默改写配置
+      const cfg3 = d.loadConfig();
+      const caNow = cfg3.closeAction;
+      if (closeAction0 === undefined && caNow !== undefined) delete cfg3.closeAction;
+      else if (closeAction0 !== undefined && caNow !== closeAction0) cfg3.closeAction = closeAction0;
+      const obNow = cfg3.openBrowser;
+      if (openBrowser0 === undefined && obNow !== undefined) delete cfg3.openBrowser;
+      else if (openBrowser0 !== undefined && obNow !== openBrowser0) cfg3.openBrowser = openBrowser0;
+      if (cfg3.closeAction !== caNow || cfg3.openBrowser !== obNow) {
+        d.saveConfig(cfg3);
+        d.log(`UITEST: 已恢复关闭行为/自动打开浏览器(closeAction=${closeAction0 ?? '默认'} openBrowser=${openBrowser0 ?? '默认'})`);
       }
     } catch (e) { d.log(`UITEST: 恢复配置失败 ${e.message}`); }
     d.log('UITEST: 完成,自动退出');

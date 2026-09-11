@@ -6,6 +6,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { t } = require('./i18n'); // 诊断分类文案收编(X-2 第二批)
+const { redactToken } = require('./redact'); // token 脱敏单一事实源(与 core.js 共用)
 
 // ---------- 小工具 ----------
 
@@ -33,9 +34,7 @@ function readJson(file) {
 }
 
 // 报告会被用户导出分享:dsh 服务地址带一次性 ?token= 鉴权参数,未消费前可换取会话,落盘前脱敏
-function redactToken(s) {
-  return String(s).replace(/([?&]token=)[^\s&]+/gi, '$1***');
-}
+// (实现见 redact.js,与 core.js 的日志脱敏同源)
 
 function safeStr(v) {
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
@@ -280,10 +279,7 @@ function buildReport(ctx) {
 }
 
 module.exports = {
-  collectDiagnostics,
   classifyError,
-  renderReport,
-  writeReport,
   buildReport,
   tailFile,
 };

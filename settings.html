@@ -11,6 +11,7 @@
 <title>DSH</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-i18n.js"></script>
 <script src="ui-kit.js"></script>
 <style>
   html, body { height: 100%; overflow: hidden; background: transparent; user-select: none;
@@ -493,7 +494,10 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGuarded(); });
 
   A.onShow(apply);
-  A.get().then((p) => { if (p) { apply(p); segN.textContent = p.segments; } }).catch(() => {}); // 异常时不改表单,保持默认值
+  // acc:get 的真正用途是「强制刷新内存读数」(主进程 acc:get 绕过节流重新枚举进程树):
+  // 表单本身已由 onShow 的 apply 渲染过,这里只更新内存分区,不再整表单重刷一遍;
+  // 仅当 onShow 因故未到(cur 仍为空)时才整体 apply 兜底
+  A.get().then((p) => { if (!p) return; if (!cur) apply(p); else renderMem(p.mem); }).catch(() => {}); // 异常时不改表单,保持默认值
   // 兜底回报:即使 A.get() 失败(上面 catch 里不 apply),窗口也至少要按默认表单回填一次高度
   reportH();
 </script>

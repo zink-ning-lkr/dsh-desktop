@@ -193,7 +193,6 @@ module.exports = {
   findDshBinSafe,
   findNode,
   findNodeSafe,
-  nodeUsable,
   dshVersion,
   killTree,
   startDsh,

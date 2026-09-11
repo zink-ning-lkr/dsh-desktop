@@ -9,12 +9,17 @@
 <title>shortcuts</title>
 <link rel="stylesheet" href="ui.css">
 <script src="ui-theme.js"></script>
+<script src="ui-i18n.js"></script>
 <script src="ui-icons.js"></script>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
   body { font: var(--font-ui); color: var(--c-fg1); user-select: none; -webkit-app-region: no-drag; }
   .panel {
-    position: absolute; inset: 0;
+    /* 内容驱动高度:left/right/top 定位 + height 不设,面板自然高度 = 内容高度。
+       此前 inset:0 让面板填满整个视图,sc:height 回报量到的是窗口自身高度,
+       主进程回填后又放大视图——每次打开 24px 跳变,内容超估还会被裁且无法自愈。
+       现在回报量的是真实内容高度,与 palette 的 pt:height 同模式。 */
+    position: absolute; left: 0; right: 0; top: 0;
     background: var(--c-panel-bg);
     border: 1px solid var(--c-border);
     border-radius: var(--radius-l);
@@ -31,8 +36,10 @@
   .head .t { font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); }
   .head .hint { margin-left: auto; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); }
   .sep { flex: none; height: 1px; background: var(--c-bg2); margin: 0 2px 6px; }
-  /* 键位卡片行:键帽组居左(修饰键中性色、主键澜光),功能名居右 */
-  .rows { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  /* 键位卡片行:键帽组居左(修饰键中性色、主键澜光),功能名居右。
+     flex:1 已去掉:行区高度由内容决定,否则面板填满视图后行区会把空余空间全吃掉,
+     「量内容高度」就量不出来了 */
+  .rows { display: flex; flex-direction: column; gap: 2px; }
   .row {
     display: flex; align-items: center; gap: 12px;
     min-height: 38px; padding: 0 10px; border-radius: var(--radius-s);
@@ -100,8 +107,9 @@
       row.append(kbd, lbl);
       rows.appendChild(row);
     });
-    // 高度回报:主进程按真实内容高度回填视图 bounds(与命令面板 pt:height 同模式)
-    S.height(document.querySelector('.panel').getBoundingClientRect().height);
+    // 高度回报:面板高度现在由内容驱动(见 .panel 注释),offsetHeight 即真实内容高度,
+    // 主进程按它回填视图 bounds(与命令面板 pt:height 同模式)
+    S.height(Math.ceil(document.querySelector('.panel').offsetHeight));
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') S.close(); });
 </script>

@@ -7,6 +7,7 @@ const { app } = require('electron');
 const { execSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { redactToken } = require('./redact'); // token 脱敏单一事实源(与 diagnostics.js 共用)
 
 // 下载加速分段数取值区间:accel 设置窗(main.js)与加速下载(updates.js)共用同一份契约
 const ACCEL_SEGMENTS_MIN = 2;
@@ -52,11 +53,8 @@ const crashFilePath = () => {
 // ---------- 日志(内存缓冲 + 定期批量刷盘,避免高频 stdout 把主进程卡在同步 IO 上) ----------
 const logFile = path.join(app.getPath('userData'), 'dsh-web.log');
 // dsh 0.1.2-alpha.2 起服务地址带一次性 ?token= 鉴权参数(换取会话 Cookie),未被消费前
-// 可用于劫持会话。日志文件与导出的错误报告会被用户分享,所有对外落盘的输出统一脱敏;
-// 内存中的 dshWebUrl/启动快照保持原样(加载页面/排障需要完整地址)
-function redactToken(s) {
-  return String(s).replace(/([?&]token=)[^\s&]+/gi, '$1***');
-}
+// 可用于劫持会话。日志文件与导出的错误报告会被用户分享,所有对外落盘的输出统一脱敏
+// (实现见 redact.js);内存中的 dshWebUrl/启动快照保持原样(加载页面/排障需要完整地址)
 let logBuf = [];
 let logTimer = null;
 function flushLog() {

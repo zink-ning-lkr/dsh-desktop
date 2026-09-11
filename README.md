@@ -91,6 +91,7 @@ dsh-desktop/
 ├── main.js                # 主进程:窗口/视图编排、托盘、菜单、辅助窗、应用生命周期
 │                          #  (dsh 子进程域、双通道更新、配置/日志见下方拆分模块)
 ├── core.js                # 主进程基础设施:配置原子读写、日志缓冲与轮转、token 脱敏、限时命令、共享常量
+├── redact.js              # token 脱敏单一事实源(纯函数):core 日志与 diagnostics 报告共用
 ├── dsh-process.js         # dsh 子进程域:定位 node/dsh、启动与地址解析、等待就绪、进程树终止、启动快照
 ├── updates.js             # 双通道更新编排:桌面端(GitHub Releases 加速下载)+ dsh 本体(npm 全局安装),
 │                          #  共享状态集中在 state,UI 能力经 init() 注入,不反向依赖 main.js
@@ -99,6 +100,7 @@ dsh-desktop/
 ├── uitest.js              # 自动化冒烟编排(SMOKE/DEMO/UITEST 三种模式,由环境变量触发,不参与生产路径)
 ├── ui.css                 # 设计令牌与公共组件单一事实源(色板/深浅主题/按钮/头部/关闭按钮/结果圆标)
 ├── ui-theme.js            # 渲染层主题探针:config.theme → matchMedia 自动换肤 + 鲸鱼 logo 黑白换版
+├── ui-i18n.js             # 渲染层文案层:t() 实现单一事实源(preload 只拉 __i18nTable 快照,页面 <head> 引用本文件)
 ├── ui-icons.js            # 共享 SVG 图标常量(结果四态/进行中五态/菜单族,键与命令注册表一一对应,uitest 断言锁漂移)
 ├── commands.js           # 命令注册表(第五个单一事实源):☰ 菜单 / 命令面板 / 托盘菜单共用同一份条目
 ├── ui-kit.js             # 复合组件层(L3):按钮行/进度条/结果圆标/就地反馈/keyedList/listNav/winShell

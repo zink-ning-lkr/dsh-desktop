@@ -323,7 +323,6 @@ function resolveDownloadUrl(rawUrl, mirror) {
 
 module.exports = {
   multiThreadDownload,
-  singleStreamDownload,
   hashFile,
   resolveDownloadUrl,
   DEFAULT_SEGMENTS,
