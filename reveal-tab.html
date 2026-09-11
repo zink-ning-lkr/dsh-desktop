@@ -21,13 +21,17 @@
     cursor: default;
     user-select: none;
     -webkit-app-region: no-drag;
+    /* 淡入/淡出统一由 opacity 过渡承担(第七轮 H-1):出现 = 移除 .fade 过渡到 1,
+       消失 = 加 .fade 过渡到 0 —— 140ms 全程 GPU 合成,比动画+过渡叠加更干净。
+       位移动画只保留首帧的落下感(页面加载时播一次),不参与显隐时序 */
     transition: background var(--dur-fast) ease, color var(--dur-fast) ease, opacity var(--dur-fast) ease;
-    animation: dropIn .18s ease;
+    animation: dropIn var(--dur-fast) ease;
   }
-  /* 退场淡出(H-1):主进程经 tb:handle-fade 切换本类,opacity 过渡结束后才把视图 bounds 归零。
-     reduced-motion 下 --dur-fast 归零(ui.css 令牌层收口),淡出瞬发、无残影 */
+  /* 退场淡出:主进程经 tb:handle-fade 切换本类,过渡结束后才把视图 bounds 归零。
+     归零后主进程**不清除**本类 —— 保留 opacity:0,下次出现时由出现路径移除并触发淡入。
+     reduced-motion 下 --dur-fast 归零(ui.css 令牌层收口),淡入淡出瞬发、无残影 */
   body.fade { opacity: 0; }
-  @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes dropIn { from { transform: translateY(-4px); } to { transform: none; } }
   body:hover { background: var(--c-reveal-bg-hover); color: var(--c-brand-hi); }
   svg { width: 14px; height: 14px; transition: transform var(--dur-fast) ease; }
   body:hover svg { transform: translateY(1px); }

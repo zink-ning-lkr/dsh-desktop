@@ -1,0 +1,109 @@
+<!-- 快捷键速查浮层(第七轮 D-1):从通用对话框的文字列表升级为键位卡片——
+     键帽(kbd 胶囊)+ 功能名 + 图标,数据源仍是 shortcuts.js(主进程拼载荷),不手写第二份。
+     视图与命令面板同构:懒创建 + blur/Esc 关闭 + 关闭即销毁(内存策略 P0-2)。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>shortcuts</title>
+<link rel="stylesheet" href="ui.css">
+<script src="ui-theme.js"></script>
+<script src="ui-icons.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  body { font: var(--font-ui); color: var(--c-fg1); user-select: none; -webkit-app-region: no-drag; }
+  .panel {
+    position: absolute; inset: 0;
+    background: var(--c-panel-bg);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius-l);
+    box-shadow: var(--c-panel-shadow);
+    padding: 14px 12px 12px;
+    display: flex; flex-direction: column;
+    animation: scIn .16s cubic-bezier(.2, .9, .3, 1.1);
+  }
+  @keyframes scIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
+  /* 标题行:键盘图标(ui-icons menu 域同款)+ 标题 + 右侧 Esc 提示 */
+  .head { display: flex; align-items: center; gap: 8px; padding: 0 4px 10px; }
+  .head .ico { width: 16px; height: 16px; flex: none; color: var(--c-brand-hi); display: flex; align-items: center; justify-content: center; }
+  .head .ico svg { width: 15px; height: 15px; }
+  .head .t { font-size: var(--fs-head); font-weight: 600; line-height: var(--lh-head); color: var(--c-fg0); }
+  .head .hint { margin-left: auto; font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--c-fg2); }
+  .sep { flex: none; height: 1px; background: var(--c-bg2); margin: 0 2px 6px; }
+  /* 键位卡片行:键帽组居左(修饰键中性色、主键澜光),功能名居右 */
+  .rows { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    min-height: 38px; padding: 0 10px; border-radius: var(--radius-s);
+    transition: background var(--dur-fast) ease;
+  }
+  .row:hover { background: var(--c-hover); }
+  .row .kbd { display: flex; align-items: center; gap: 3px; flex: none; min-width: 96px; }
+  .row kbd {
+    font-family: var(--font-mono); font-size: var(--fs-ctrl); line-height: 1;
+    padding: 4px 7px; border-radius: var(--radius-ctl);
+    background: var(--c-bg2); border: 1px solid var(--c-border);
+    border-bottom-width: 2px; /* 键帽厚度感:底边加厚模拟实体键 */
+    color: var(--c-fg1);
+    transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+  }
+  .row kbd.hot { color: var(--c-brand-hi); border-color: color-mix(in srgb, var(--c-brand-hi) 40%, transparent); }
+  .row:hover kbd.hot { border-color: color-mix(in srgb, var(--c-brand-hi) 65%, transparent); }
+  .row .plus { color: var(--c-fg3); font-size: var(--fs-micro); }
+  .row .lbl { flex: 1; min-width: 0; font-size: var(--fs-body); line-height: var(--lh-ctrl); color: var(--c-fg1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { .panel { animation: none; } }
+</style>
+</head>
+<body>
+<div class="panel" id="panel" role="dialog" aria-label="">
+  <div class="head">
+    <span class="ico" aria-hidden="true"></span>
+    <span class="t" id="title"></span>
+    <span class="hint" id="hint"></span>
+  </div>
+  <div class="sep"></div>
+  <div class="rows" id="rows"></div>
+</div>
+<script>
+  const T = (k, p) => window.__i18n.t(k, p);
+  const S = window.__shortcuts;
+  // 键盘图标与菜单「键盘快捷键」条目同款(ui-icons menu 域,单一来源)
+  document.querySelector('.head .ico').innerHTML = window.UI_ICONS.menu.shortcuts || '';
+  document.getElementById('panel').setAttribute('aria-label', T('dlg.shortcutsTitle'));
+  document.getElementById('title').textContent = T('dlg.shortcutsTitle');
+  document.getElementById('hint').textContent = T('dlg.escHint');
+  S.onShow(({ items }) => {
+    const rows = document.getElementById('rows');
+    rows.textContent = '';
+    items.forEach((it) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const kbd = document.createElement('span');
+      kbd.className = 'kbd';
+      const keys = String(it.accel || '').split('+').filter(Boolean);
+      keys.forEach((k, i) => {
+        if (i > 0) {
+          const p = document.createElement('span');
+          p.className = 'plus';
+          p.textContent = '+';
+          kbd.appendChild(p);
+        }
+        const k2 = document.createElement('kbd');
+        k2.textContent = k;
+        if (i === keys.length - 1) k2.className = 'hot'; // 最后一个键是触发键:澜光高亮
+        kbd.appendChild(k2);
+      });
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = it.label;
+      row.append(kbd, lbl);
+      rows.appendChild(row);
+    });
+    // 高度回报:主进程按真实内容高度回填视图 bounds(与命令面板 pt:height 同模式)
+    S.height(document.querySelector('.panel').getBoundingClientRect().height);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') S.close(); });
+</script>
+</body>
+</html>

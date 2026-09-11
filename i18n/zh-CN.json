@@ -145,7 +145,8 @@
     "memNoDsh": "(提示:当前未运行 dsh 服务进程)",
     "memAdvicePrefix": "建议:{advice}",
     "shortcutsTitle": "键盘快捷键",
-    "shortcutsMsg": "以下快捷键在任何界面可用:"
+    "shortcutsMsg": "以下快捷键在任何界面可用:",
+    "escHint": "Esc 关闭"
   },
   "workspace": {
     "changeTitle": "切换工作目录(将重启 dsh 服务)",

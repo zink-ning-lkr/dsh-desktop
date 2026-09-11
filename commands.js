@@ -70,7 +70,9 @@ const list = [
   { id: 'log', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.openLog') },
   // 内存详情对话框:数据已并入设置窗「高级」分区,这里只保留面板直达(不入菜单)
   { id: 'memory-info', group: 'diagnostics', kind: 'nav', menu: false, label: (c) => c.t('menu.memoryInfo', { n: c.mem }) },
-  { id: 'settings-advanced', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.settingsAdvanced') },
+  // 「高级」分区(路径/内存)是低频诊断入口(第七轮 M-1):菜单只留「更新与下载」「外观与行为」
+  // 两个常用深链,高级分区只在命令面板可达 —— 菜单是常用入口,不是全量清单
+  { id: 'settings-advanced', group: 'diagnostics', kind: 'nav', menu: false, label: (c) => c.t('menu.settingsAdvanced') },
   { id: 'shortcuts', group: 'diagnostics', kind: 'nav', label: (c) => c.t('menu.shortcuts') },
 
   // 注意:这里不显示 Alt+F4 快捷键。默认「关闭时最小化到托盘」下,Alt+F4 只隐藏窗口而非退出,

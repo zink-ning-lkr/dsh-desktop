@@ -219,6 +219,8 @@ let handleFadeTimer = null; // 退场淡出未决定时器(出现路径取消它
 // 与出现路径(取消未决淡出 + 恢复完整尺寸)对称,进出一样平滑,不再「啪」地截断。
 // 定时器回调做双重检查:淡出期间重新出现(handleShown 为真)或视图已销毁时直接放弃,
 // 由对应路径接管,不会出现「淡出到一半又把消失的把手拉回来」的竞态。
+// 注意:归零后**不清除**渲染层的 .fade(保持 opacity:0)——下次出现时由 cancelHandleFade
+// 移除 .fade 触发 140ms 淡入;若此处清除,出现路径就没有淡入过渡了。
 function beginHandleFade() {
   if (handleFadeTimer || !revealTabView || revealTabView.webContents.isDestroyed()) return;
   try { revealTabView.webContents.send('tb:handle-fade', true); } catch { /* 竞态 */ }
@@ -226,13 +228,12 @@ function beginHandleFade() {
     handleFadeTimer = null;
     if (handleShown || !revealTabView || revealTabView.webContents.isDestroyed()) return;
     try { revealTabView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
-    try { revealTabView.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
   }, HANDLE_FADE_MS);
 }
+// 出现路径统一入口:清除未决淡出定时器 + 渲染层 .fade(触发淡入)。
+// 无论淡出是否未决都必须 send false —— 残留的 .fade(上次淡出完成未清)不除则把手透明不可见
 function cancelHandleFade() {
-  if (!handleFadeTimer) return;
-  clearTimeout(handleFadeTimer);
-  handleFadeTimer = null;
+  if (handleFadeTimer) { clearTimeout(handleFadeTimer); handleFadeTimer = null; }
   try { revealTabView?.webContents.send('tb:handle-fade', false); } catch { /* 竞态 */ }
 }
 
@@ -258,6 +259,7 @@ function beginHandleHint() {
   if (handleHintActive || !mainWindow || !revealTabView) return;
   handleHintActive = true;
   handleShown = true; // 与轮询共用同一份"已上浮"记忆:演示结束交回轮询时不会先闪一下
+  cancelHandleFade(); // 清除可能的残留 .fade(上次淡出完成未清):演示把手必须立即可见
   const [w] = mainWindow.getContentSize();
   // 演示期间由本函数独占 bounds:轮询看到 handleHintActive 会直接跳过(见 startHandlePolling),
   // 否则鼠标一移开就会被 80ms 轮询收走,3s 驻留根本走不完
@@ -284,8 +286,13 @@ function endHandleHint() {
 function ensureRevealTab() {
   if (!mainWindow) return;
   if (revealTabView && !revealTabView.webContents.isDestroyed()) return;
-  // 下拉把手:懒创建 + 收起即销毁(内存优化 P0-1);与标题栏共用 preload
-  revealTabView = createAuxView({ file: 'reveal-tab.html', preload: 'titlebar-preload.js' });
+  // 下拉把手:懒创建 + 收起即销毁(内存优化 P0-1);与标题栏共用 preload。
+  // backgroundThrottling:false —— 收起态把手是 0 尺寸视图,渲染被 Chromium 后台节流后,
+  // setBounds 恢复 96×26 的首帧会掉帧,「出现那一下卡」(第七轮 H-1)
+  revealTabView = createAuxView({
+    file: 'reveal-tab.html', preload: 'titlebar-preload.js',
+    props: { webPreferences: { backgroundThrottling: false } },
+  });
   // S3:首次收起与把手视图创建是同一时刻发生的,提示可能在 document 就绪前就置位了 ——
   // 加载完成补发一次(捕获局部引用:此间视图可能已被销毁重建)
   const v = revealTabView;
@@ -1615,6 +1622,9 @@ function applyThemeChange(next) {
   if (!saveConfig(cfg)) return { ok: false, error: t('settings.errSaveFail') };
   applyTheme();
   applyChromeBg(); // 画布底色随主题(与 nativeTheme 'updated' 同一路径,P0-5)
+  // 标题栏底色跟随 dsh 页面采样色(T-1):等 dsh 页面自身换色完成后主动采样一次,
+  // 不再只靠页面主题钩子(150ms 去抖)的被动链路 —— 切主题时标题栏不再慢主界面一步
+  setTimeout(() => syncTitleBarTheme(), 250);
   const label = t(commands.THEME_KEYS[cfg.theme]);
   log(`外观已切换为: ${label}`);
   notify(t('menu.appearance', { mode: label }));
@@ -1903,17 +1913,89 @@ function menuItems() {
   return items;
 }
 
-// 快捷键速查浮层(P2-2):数据源与菜单弹层/应用菜单同源(shortcuts.js),不手写第二份
-// 文案走 labelKey → i18n(阶段 0 修 X5),与主菜单同名条目取到同一句话
-function showShortcutsDialog() {
-  const lines = shortcuts.list.map((s) => `${t(s.labelKey)} · ${shortcuts.display(s.menu)}`);
-  showDialog({
-    type: 'info', title: t('dlg.shortcutsTitle'), width: 420,
-    message: t('dlg.shortcutsMsg'),
-    detail: lines.join('\n'),
-    buttons: [{ label: t('dlg.ok'), primary: true }],
-  });
+// ---------- 快捷键速查浮层(第七轮 D-1) ----------
+// 数据源与菜单弹层/应用菜单同源(shortcuts.js),不手写第二份;文案走 labelKey → i18n。
+// 视图与命令面板同构:懒创建 + blur/Esc 关闭 + 关闭即销毁(P0-2 内存策略);
+// 定位水平居中于内容区、垂直贴命令栏下沿。
+const SC_W = 380;       // 面板宽(6 行键位卡片,行高 38)
+const SC_MARGIN = 12;   // 视图四周留白,容纳阴影(与菜单同款)
+let shortcutsView = null;
+let shortcutsQueued = null; // 视图加载中:载荷待发(did-finish-load 补发)
+let shortcutsH = 0;     // 渲染层回报的真实内容高度(首帧用估算值,回报后回填)
+
+function shortcutsBounds() {
+  if (!mainWindow) return null;
+  const [w] = mainWindow.getContentSize();
+  const width = SC_W + SC_MARGIN * 2;
+  return {
+    x: Math.max(0, Math.floor((w - width) / 2)),
+    y: currentBarH,
+    width,
+    height: Math.max(200, shortcutsH || 290) + SC_MARGIN * 2,
+  };
 }
+function syncShortcutsBounds() {
+  if (!mainWindow || !shortcutsView) return;
+  const b = shortcutsBounds();
+  if (!b) return;
+  try { shortcutsView.setBounds(b); } catch { /* 销毁竞态 */ }
+}
+function ensureShortcutsView() {
+  if (!mainWindow) return;
+  if (shortcutsView && !shortcutsView.webContents.isDestroyed()) return;
+  shortcutsView = createAuxView({ file: 'shortcuts.html', preload: 'shortcuts-preload.js' });
+  // 失焦即收起(点面板外 = 关掉),并把键盘焦点还给 dsh 页面(与命令面板同款语义)
+  shortcutsView.webContents.on('blur', () => { if (shortcutsView && shortcutsView.getBounds().width > 0) closeShortcuts(true); });
+  // 首帧加载完成时补发排队载荷(极快打开不会出现空面板)
+  shortcutsView.webContents.on('did-finish-load', () => {
+    if (shortcutsQueued && shortcutsView && shortcutsView.getBounds().width > 0) {
+      const q = shortcutsQueued;
+      shortcutsQueued = null;
+      shortcutsView.webContents.send('sc:show', q);
+    }
+  });
+  mainWindow.contentView.addChildView(shortcutsView);
+  layoutViews();
+}
+function destroyShortcutsView() {
+  if (!shortcutsView) return;
+  const v = shortcutsView;
+  shortcutsView = null;
+  shortcutsQueued = null;
+  try { mainWindow.contentView.removeChildView(v); } catch { /* 窗口销毁中 */ }
+  try { v.webContents.close(); } catch { /* 已销毁 */ }
+}
+function closeShortcuts(refocus = false) {
+  if (shortcutsView) {
+    try { shortcutsView.setBounds({ x: 0, y: 0, width: 0, height: 0 }); } catch { /* 销毁竞态 */ }
+    destroyShortcutsView();
+  }
+  shortcutsH = 0; // 高度缓存随视图作废,下次按首帧估算重建
+  if (refocus) dshView?.webContents.focus();
+}
+function showShortcutsDialog() {
+  if (!mainWindow) return;
+  closeMenuPopup(); // 与菜单弹层互斥:速查浮层打开时菜单没意义(它由菜单/面板打开)
+  const payload = { items: shortcuts.list.map((s) => ({ label: t(s.labelKey), accel: shortcuts.display(s.menu) })) };
+  ensureShortcutsView();
+  syncShortcutsBounds();
+  const wc = shortcutsView.webContents;
+  if (wc.isLoading()) shortcutsQueued = payload;
+  else { shortcutsQueued = null; wc.send('sc:show', payload); }
+  shortcutsView.webContents.focus();
+}
+ipcMain.on('sc:close', (e) => {
+  if (!fromWin(e, shortcutsView)) return;
+  closeShortcuts(true);
+});
+// 高度回报:渲染层量完真实内容高度回填视图(sc:height,与命令面板 pt:height 同模式)
+ipcMain.on('sc:height', (e, h) => {
+  if (!fromWin(e, shortcutsView)) return;
+  const n = Number(h) || 0;
+  if (n <= 0 || n === shortcutsH) return; // 同值短路:重复回报不重设
+  shortcutsH = n;
+  syncShortcutsBounds();
+});
 
 const MENU_W = 288; // 深澜(v1.0.0):264→288,图标+标签+快捷键更舒展(托盘菜单保持 264,见 showTrayMenu)
 const MENU_MARGIN = 12; // 视图四周留白,容纳阴影
@@ -2290,7 +2372,10 @@ function applyChromeBg() {
     titlebarView?.setBackgroundColor(lastTitlebarTheme || bg);
   } catch { /* 窗口销毁竞态等,忽略 */ }
 }
-nativeTheme.on('updated', applyChromeBg);
+nativeTheme.on('updated', () => {
+  applyChromeBg(); // 画布底色随系统主题(与菜单切换同一路径,P0-5)
+  setTimeout(() => syncTitleBarTheme(), 250); // 标题栏采样主动补一次(T-1):系统切主题不再慢一步
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -2794,6 +2879,10 @@ if (!gotLock) {
         get settingsWin() { return settingsWin; },
         get menuPopupView() { return menuPopupView; },
         get trayMenuWin() { return trayMenuWin; },
+        // 快捷键速查浮层(第七轮 D-1):与命令面板同构,视图开合创建销毁,走 getter
+        get shortcutsView() { return shortcutsView; },
+        showShortcutsDialog, closeShortcuts,
+        SC_W, SC_MARGIN,
         get currentBarH() { return currentBarH; },
         // S3 首次收起演示:revealTabView 会随收起/展开创建销毁,故走 getter;
         // 断言面是"提示状态机 + 视图 bounds",不暴露内部计时器

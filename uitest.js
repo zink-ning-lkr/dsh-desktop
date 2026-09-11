@@ -997,13 +997,14 @@ function runUitest(d) {
   }, 33850, 'welcome-size');
   uiStep(() => { d.abortWelcome(); }, 33900, 'welcome-abort');
   uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 34100, 'welcome-closed-verify');
-  // ⑭ 快捷键速查(P2-2):菜单「键盘快捷键…」→ 速查对话框,内容与菜单 accel 同源(shortcuts.js)
+  // ⑭ 快捷键速查(D-1):菜单「键盘快捷键…」→ 速查浮层(第七轮起不再是对话框),
+  //    键位卡片与 shortcuts.js 数据源同源;Esc 关闭,关闭即销毁
   uiStep(() => { d.showMenuPopup(); }, 34250, 'sc-menu-open');
   uiStep(() => d.menuPopupView?.webContents.executeJavaScript('(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("键盘快捷键"));if(!it)return "FAIL no-item";it.parentElement.click();return "ok"})()')
     .then((v) => d.log(`UITEST sc-click ${v}`)).catch((e) => d.log(`UITEST sc-click ✗ ${e.message}`)), 34450, 'sc-click');
-  uiStep(() => readDom(d.dialogWin, '(()=>{const t=document.getElementById("title").textContent;const det=document.getElementById("detail").textContent;return (t==="键盘快捷键"&&det.includes("Ctrl+O")&&det.includes("F11")&&det.includes("Ctrl+Shift+B"))?"PASS 速查内容同源":"FAIL t="+t+" det="+det.slice(0,40)})()', 'sc-dom'), 34700);
-  uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 34850, 'sc-close');
-  uiStep(() => { const ok = d.dialogWin && !d.dialogWin.isVisible(); d.log(`UITEST sc-closed hidden=${d.dialogWin ? !d.dialogWin.isVisible() : 'win-gone'}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`); }, 35050, 'sc-closed-verify');
+  uiStep(() => readDom(d.shortcutsView, `(()=>{const rows=[...document.querySelectorAll(".row")];const lbls=rows.map(r=>r.querySelector(".lbl").textContent);const kbd=rows.map(r=>r.querySelector(".kbd").textContent);const ok=rows.length===6&&lbls.some(l=>l.includes("打开工作目录"))&&kbd.some(k=>k.includes("Ctrl")&&k.includes("O"))&&kbd.some(k=>k.includes("F11"))&&kbd.some(k=>k.includes("Shift")&&k.includes("B"));return ok?"PASS 键位卡片="+rows.length:"FAIL rows="+rows.length+" kbd="+kbd.join("|")+" lbl="+lbls.join("|")})()`, 'sc-dom'), 34700);
+  uiStep(() => { d.shortcutsView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 34850, 'sc-close');
+  uiStep(() => { const ok = !d.shortcutsView; d.log(`UITEST sc-closed destroyed=${!d.shortcutsView}(期望 true,关闭即销毁) → ${ok ? 'PASS' : 'FAIL'}`); }, 35050, 'sc-closed-verify');
   // ⑪''' 错误级通知(阶段 1 X1 路由 ③):必须常驻、带动作按钮、并点亮托盘红角标,
   //        直到用户处理——"更新失败"不能像"已复制"那样 2.2 秒自己消失。
   //        动作点击后条目、队列与角标要同时复位(否则红点永远亮着,用户再也分不清真假)。

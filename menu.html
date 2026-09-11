@@ -38,11 +38,12 @@
     overflow-x: hidden;
   }
   @keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(.98); } to { opacity: 1; transform: none; } }
-  /* 滚动条「悬停显现」(第六轮):菜单是纯鼠标浮层,矮屏钳制出的长滚动条默认接近隐形,
-     鼠标在菜单内时才清晰——滚动条只在需要时打扰,不再是一整条深色竖轨 */
+  /* 滚动条「滚动/悬停才显现,静止自动隐藏」(第七轮 R-1):矮屏钳制出的长 thumb 静止时
+     完全不可见——「太长」的观感来自存在本身,让它静止时不存在。点亮/熄灭由 JS 的
+     .sb-visible 类控制(见下方脚本),过渡走时长令牌。 */
   .panel::-webkit-scrollbar-thumb { background: transparent; }
-  .panel:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--c-border) 55%, transparent); }
-  .panel:hover::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
+  .panel.sb-visible::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--c-border) 55%, transparent); }
+  .panel.sb-visible::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
   /* 行高 32px(--ctl-h + 2):菜单是纯点击目标,命中区不小于标准按钮;
      .item /.sec /.sep 三种行高与主进程 menuHeight() 的 MENU_ITEM_H / MENU_SEC_H / MENU_SEP_H
      严格对应,改此处必须同步改那里(单改一处只有"菜单最后一项点不到"这一种表现,极难归因) */
@@ -127,6 +128,18 @@
   const panel = document.getElementById('panel');
   panel.setAttribute('aria-label', T('menu.ariaLabel')); // 面板名同样入表(原为中文字面量属性)
   let navRows = []; // 可交互条目的 DOM 行(与 sel 下标一致;禁用行/分隔线不在内)
+
+  // 滚动条自动隐藏(R-1):滚动/悬停点亮,静止 1.2s 熄灭。thumb 长条只在交互瞬间存在,
+  // 菜单打开时右侧干净——「太长」的观感根除
+  let sbHideTimer = null;
+  const sbShow = () => {
+    panel.classList.add('sb-visible');
+    clearTimeout(sbHideTimer);
+    sbHideTimer = setTimeout(() => panel.classList.remove('sb-visible'), 1200);
+  };
+  panel.addEventListener('scroll', sbShow, { passive: true });
+  panel.addEventListener('mouseenter', sbShow);
+  panel.addEventListener('mouseleave', () => { clearTimeout(sbHideTimer); panel.classList.remove('sb-visible'); });
 
   function render(items) {
     panel.innerHTML = '';

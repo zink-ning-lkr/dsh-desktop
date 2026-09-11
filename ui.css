@@ -199,14 +199,13 @@
 /* ---- 公共:盒模型重置(各窗口页面原本各自重复同一段) ---- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* ---- 公共:滚动条(第六轮降噪) ----
-   6px 细条 + 半透明 thumb:可滚动区(菜单/命令面板/设置/日志/任务列表)的滚动条退为
-   「淡色细线」,不再用 8px 实色整轨抢占内容区视觉;悬停 thumb 加深。
-   菜单等纯鼠标浮层在此基础上做「悬停菜单才显现」(见 menu.html)。 */
-::-webkit-scrollbar { width: 6px; }
+/* ---- 公共:滚动条(第七轮再降噪) ----
+   4px 细条 + 半透明 thumb:可滚动区(菜单/命令面板/设置/日志/任务列表)的滚动条退为
+   「近乎不可见的淡色细线」;菜单在此基础上做「滚动/悬停才显现,静止自动隐藏」(见 menu.html)。 */
+::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--c-border) 55%, transparent);
-  border-radius: 3px;
+  border-radius: 2px;
   transition: background var(--dur-fast);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--c-border-hover); }
@@ -256,22 +255,36 @@
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: var(--ctl-h); padding: 0 var(--btn-pad-x);
   border: 1px solid var(--c-border); border-radius: var(--radius-m);
-  background: var(--c-bg2); color: var(--c-fg1);
+  /* 质感(第七轮 B-1):微渐变底(顶亮底暗)+ 顶部内高光(受光)+ 1px 投影分层。
+     全部令牌 color-mix 派生,浅色主题自动成立 */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-bg1) 55%, var(--c-bg2)), var(--c-bg2));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-fg0) 7%, transparent), var(--c-elev-1);
+  color: var(--c-fg1);
   font-family: inherit; font-size: var(--fs-ctrl); line-height: 1;
   cursor: default; white-space: nowrap;
   transition: background var(--dur-mid), border-color var(--dur-mid), color var(--dur-mid),
-    transform .08s, box-shadow var(--dur-mid);
+    transform .08s, box-shadow var(--dur-mid), filter var(--dur-mid);
 }
-.btn:hover { background: var(--c-border); border-color: var(--c-border-hover); color: var(--c-fg0); }
-.btn:active { transform: scale(.97); }
+.btn:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c-border) 45%, var(--c-bg1)), var(--c-border));
+  border-color: var(--c-border-hover); color: var(--c-fg0);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--c-fg0) 10%, transparent),
+    0 3px 10px -3px color-mix(in srgb, var(--c-brand) 30%, transparent);
+  transform: translateY(-1px); /* 悬浮上浮:transform 不占布局,行内小按钮不挤行高 */
+}
+.btn:active {
+  transform: translateY(0) scale(.97);
+  box-shadow: inset 0 2px 5px rgba(8, 14, 40, .28), var(--c-elev-1); /* 按压下沉:内阴影 */
+  filter: brightness(.96);
+}
 .btn.primary { background: linear-gradient(180deg, var(--c-brand-vio), var(--c-brand) 55%, var(--c-brand-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-accent-glow); }
 .btn.primary:hover { filter: brightness(1.1); color: #fff; }
-.btn.primary:active { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-brand) 30%, transparent); }
+.btn.primary:active { box-shadow: inset 0 2px 5px rgba(8, 14, 40, .32); filter: brightness(.95); }
 .btn.success { background: linear-gradient(180deg, var(--c-ok-strong), var(--c-ok-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-ok-glow); }
 .btn.success:hover { filter: brightness(1.1); color: #fff; }
 .btn.danger { background: linear-gradient(180deg, var(--c-err-strong), var(--c-err-deep)); border-color: transparent; color: #fff; box-shadow: var(--c-danger-glow); }
 .btn.danger:hover { filter: brightness(1.1); color: #fff; }
-.btn.danger:active { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-err) 30%, transparent); }
+.btn.danger:active { box-shadow: inset 0 2px 5px rgba(8, 14, 40, .32); filter: brightness(.95); }
 /* 幽灵文字钮(深澜新增):透明底 + 状态色文字;aria-pressed=true = 按下态(澜光描边) */
 .btn.ghost { background: transparent; border-color: transparent; color: var(--c-brand-hi); box-shadow: none; }
 .btn.ghost:hover { background: color-mix(in srgb, var(--c-brand-hi) 12%, transparent); color: var(--c-brand-hi); }
