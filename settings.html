@@ -240,8 +240,11 @@
   const A = window.__accel;
   // 复合构件走共享层(阶段 0):就地反馈;头部三件套由 winShell 构造(T-5)
   const K = window.UI_KIT;
-  // 文案表(X-2 第二批):渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <i> 标签),用 innerHTML
+  // 文案表:渲染层 t();segHint/mirrorHint 值为仓库内受控文案(仅含 <i> 标签),用 innerHTML
   const T = (k, p) => window.__i18n.t(k, p);
+  // 主题三态 → 文案键:与 titlebar.html 的 THEME_KEY / main.js commands.THEME_KEYS 同源,
+  // 显式映射而非字符串拼接(改键名漏改时表现为回退 auto,而不是裸键)
+  const THEME_KEY = { auto: 'menu.appearanceAuto', dark: 'menu.appearanceDark', light: 'menu.appearanceLight' };
   // 头部三件套(齿轮图标 + 标题 + ✕):结构与接线单一来源。关闭走 closeGuarded(未保存的镜像
   // 输入先落盘再关)——函数声明提升,此处引用安全;可访问名入表(common.close)
   const shell = K.winShell(document.querySelector('.win-head'), {
@@ -288,9 +291,10 @@
     document.getElementById('segHint').innerHTML = T('settings.segHint');
     document.getElementById('mirrorHint').innerHTML = T('settings.mirrorHint');
     document.getElementById('seg').setAttribute('aria-label', T('settings.segAria'));
-    // 三档主题按钮:文案与菜单「外观」同表(commands.js THEME_KEYS),不另写一份
+    // 三档主题按钮:文案与菜单「外观」同表(commands.js THEME_KEYS),不另写一份。
+    // 键映射与 titlebar.html 同一写法(显式表而非字符串拼接,改键名漏改风险更低)
     for (const b of document.querySelectorAll('#themeChoice .btn')) {
-      b.textContent = T('menu.appearance' + b.dataset.theme.charAt(0).toUpperCase() + b.dataset.theme.slice(1));
+      b.textContent = T(THEME_KEY[b.dataset.theme] || 'menu.appearanceAuto');
     }
     // 分区切换条的可访问名入表(aria-label 也是面向读屏的文案,不能硬编码中文)
     document.getElementById('tabs').setAttribute('aria-label', T('settings.tablistAria'));
@@ -459,7 +463,7 @@
       });
     }
   }
-  const themeLabel = (v) => T('menu.appearance' + v.charAt(0).toUpperCase() + v.slice(1));
+  const themeLabel = (v) => T(THEME_KEY[v] || 'menu.appearanceAuto');
   chooseGroup('themeChoice', 'theme', 'theme', (v) => T('settings.toastTheme', { mode: themeLabel(v) }));
   chooseGroup('closeChoice', 'close', 'closeAction', () => T('settings.toastClose'));
   chooseGroup('browserChoice', 'browser', 'openBrowser', () => T('settings.toastBrowser'));

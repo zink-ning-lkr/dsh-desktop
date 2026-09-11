@@ -67,3 +67,34 @@
 
 - package.json / package-lock.json 版本 1.0.5 → 1.0.6
 - 提交信息以 `v1.0.6:` 开头,按批次可分多个 commit
+
+---
+
+# 第二批(Review Cleanup 续,v1.0.7)
+
+承接第一批评审中「留待后续」的项与渲染层中低危项,风险逐一控制。
+
+| # | 问题定位 | 措施 | 预期效果 |
+|---|---|---|---|
+| 21 | downloader.js 四个网络路径(resolveFinalUrl:27-58 / probe:65-104 / fetchRangeSegment:109-169 / singleStreamDownload:172-249)各写一份「settled 幂等 + clearTimeout + req.abort」三件套 | 抽 `requestGuard(timeoutMs)` 守卫(attach/settle/arm),四路径只留各自的结束动作 | 并发样板只写一份;行为逐行等价(超时语义、shared.failed 广播、背压均不变) |
+| 22 | diagnostics.js:200-245 报告模板硬编码中文(与「文案收编」自我声明不符,报告会被用户导出分享) | zh-CN.json 新增 `repfile.*` 键组(文案与现硬编码串逐字相同,产物内容零变化),renderReport 全部走 t() | 报告模板进入文案表,改术语只改表 |
+| 23 | toast.html:90-101 手写 keyed-diff,与 ui-kit.keyedList(214-234)重复实现 | toast.html 引入 ui-kit.js,render() 改用 K.keyedList | keyed-diff 行为只剩共享层一份,toast 复用节流/焦点/动画语义 |
+| 24 | reveal-tab 复用 titlebar-preload:每次创建白做两次 sendSync(sc:display/i18n:table),且把 17 成员桥暴露给无输入小窗 | 新建极简 reveal-tab-preload.js(仅 showTitlebar/onHandleHint/onHandleFade + __i18nTable);main.js revealTab 实例与 package.json 改指向 | 暴露面与用途匹配,每次收起/展开少两次同步 IPC |
+| 25 | main.js:463/698 循环变量 t 遮蔽 i18n.t(被迫走 i18n.t 绕行) | 循环变量改名 task,两处恢复直接 t() | 消除遮蔽气味 |
+| 26 | settings.html:292/461 主题键用字符串拼接,titlebar.html:251 用显式映射,两种风格并存 | settings.html 同样引入显式 THEME_KEY 映射 | 键构造一处一种写法,改键名漏改风险消除 |
+| 27 | ui-kit.js:33-34「field 待消费方出现」注释已过时(三分区表单已落地) | 更新注释口径(明确不落地原因:页面结构差异大) | 失效注释修正 |
+| 28 | uitest.js 阶段编号混乱(⑨ 排 ⑪ 后、⑧ ⑬ 各用两次) | 重排注释序号,与执行顺序一致 | 按编号定位步骤不再错乱 |
+
+明确不做(维持第一批结论):uitest 魔法毫秒时序重构(回归成本高)、trayStatusText/trayMenuStatusLabel 文案重叠(格式语义不同)、menu/palette/dialog 三处键盘导航收编(语义差异大,收益/风险不足)。
+
+验证方式同第一批:node --check、残留引用 grep、UITEST 与基线对照、SMOKE。
+
+### 第二批验证结果(2026-09-11,v1.0.7)
+
+- 全部改动文件 node --check 通过;zh-CN.json JSON 合法性 + repfile 键组 15 键就位
+- 报告模板直测(node 跑 buildReport):章节/字段文案全部命中 repfile 键,无裸键残留,产物内容与硬编码版逐字一致
+- UITEST 全量回归:静态断言组全部 PASS(toast/s3/palette/downloader 侧);**downloaders 冒烟 dl-* 四步全过**(requestGuard 重构验证)、**toast 运行时全过**(keyedList 收编验证)、**s3 把手演示/淡出全过**(reveal-tab 新 preload 验证)、tray-status/欢迎页/快捷键浮层/任务中心 keydiff 主链路通过
+- 失败集合与基线(v1.0.6)对照**完全一致、零新增**(theme-1/2 no-item、i18n-a11y landmark、toast-dom、settings-size/resize、welcome-size、tc-narrow —— 均为既有环境性抖动)
+- SMOKE 闭环通过(退出码 0)
+
+版本:package.json / package-lock.json 1.0.6 → 1.0.7,提交信息以 `v1.0.7:` 开头。

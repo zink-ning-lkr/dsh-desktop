@@ -588,7 +588,8 @@ function runUitest(d) {
     const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
     const main = read('main.js');
     const rv = read('reveal-tab.html');
-    const pre = read('titlebar-preload.js');
+    // 把手自 v1.0.7 起用独立极简 preload(reveal-tab-preload.js),hint/fade 桥只在那里
+    const pre = read('reveal-tab-preload.js');
     t('s3-const', /const HANDLE_HINT_MS = 3000;/.test(main));
     t('s3-state', /function beginHandleHint\(/.test(main) && /function endHandleHint\(/.test(main));
     // 配置项记忆:没有它就会每次收起都演示
@@ -621,7 +622,7 @@ function runUitest(d) {
     if (!wl || wl.includes('cmdbar.')) problems.push('工作目录标签=' + wl);
     return problems.length ? 'FAIL ' + problems.join(' ;') : 'PASS svc=' + svc + ' theme="' + tl + '" ws="' + wl + '"';
   })()`, 'cmdbar-dom'), 2650);
-  // ⑩ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)。
+  // ⑤ 托盘状态(P0-3):tooltip 必须跟随运行态且含工作目录(不依赖启动耗时,慢启动下也稳定)。
   //    期望值从 i18n 文案表与当前配置读取,不硬编码中文/具体目录(换文案、换工作目录不误报)
   uiStep(() => {
     const t = d.trayStatusText();
@@ -630,7 +631,7 @@ function runUitest(d) {
     const ok = !!want && t.includes(want) && (!ws || t.includes(ws));
     d.log(`UITEST tray-status state=${d.trayState} tip="${t}" → ${ok ? 'PASS' : 'FAIL'}`);
   }, 2600, 'tray-status');
-  // ⑪ 命令面板运行时(阶段 2):开 → 结构 → 筛选 → Esc 关。窗口在 3500 会被状态窗抢焦点,
+  // ⑥ 命令面板运行时(阶段 2):开 → 结构 → 筛选 → Esc 关。窗口在 3500 会被状态窗抢焦点,
   //    而面板是"失焦即收起",故整段必须赶在 3500 之前跑完。
   uiStep(() => {
     d.showPalette();
@@ -703,7 +704,7 @@ function runUitest(d) {
     ).then((v) => d.log(`UITEST badge-restored visible=${back} badge=${v}(期望 true/1) → ${back && v === '1' ? 'PASS' : 'FAIL'}`))
       .catch((e) => d.log(`UITEST badge-restored ✗ ${e.message}`));
   }, 4120, 'badge-restored');
-  // ⑨ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
+  // ⑦ 首帧布局断言:视图 bounds 与页面视口(innerWidth/Height)必须一致。
   //    不一致 = WebContentsView surface 未按 DPR 换算(Windows 高 DPI 首帧右侧/底部黑块的根因)
   uiStep(() => {
     try {
@@ -748,7 +749,7 @@ function runUitest(d) {
   uiStep(() => d.log(`UITEST bar-collapsed h=${d.currentBarH}(期望 0) → ${d.currentBarH === 0 ? 'PASS' : 'FAIL'}`), 8900, 'bar-verify0');
   uiStep(() => d.toggleTitlebar(true), 9200, 'bar-expand');
   uiStep(() => d.log(`UITEST bar-expanded h=${d.currentBarH}(期望 ${d.TITLEBAR_H},PASS=${d.currentBarH === d.TITLEBAR_H}) viewH=${d.titlebarView?.getBounds().height}(期望 ${d.TITLEBAR_H},栏高即视图高,无重叠)`), 9700, 'bar-verify30');
-  // ⑮ 首次收起演示(S3 阶段 1):把手自己浮出、呼吸 3s 后隐去,并把"已演示"落盘(只做一次)。
+  // ⑧ 首次收起演示(S3 阶段 1):把手自己浮出、呼吸 3s 后隐去,并把"已演示"落盘(只做一次)。
   //    用非动画路径收起(toggleTitlebar(false,false)):动画有 240ms,提示的开始时刻会随帧率漂移,
   //    断言窗口就不好卡;这条路径此前无覆盖,顺带补上。
   //    旗标先清空再测、测完还原 —— 否则第二次运行永远走不到"首次"分支。
@@ -779,7 +780,7 @@ function runUitest(d) {
     if (s3Orig === undefined) delete cfg.handleHintShown; else cfg.handleHintShown = s3Orig;
     d.saveConfig(cfg);
   }, 13120, 's3-flag-restore');
-  // ③ 对话框队列化(P2-1):D1 在屏期间调 D2 → D2 入队不顶掉;D1 回程后接续展示 D2
+  // ⑨ 对话框队列化(P2-1):D1 在屏期间调 D2 → D2 入队不顶掉;D1 回程后接续展示 D2
   uiStep(() => { d.showDialog({ type: 'info', title: 'D1', message: '第一个对话框', buttons: [{ label: '好', primary: true }] }); hookWin(d.dialogWin, 'dialog'); }, 10200, 'd1');
   // P0-7:dialog 打开即聚焦主按钮(键盘 Enter 直达,与状态窗结果视图一致)
   uiStep(() => readDom(d.dialogWin, '(()=>{const ae=document.activeElement;return (ae&&ae.classList.contains("primary")&&ae.closest("#foot"))?"PASS focus=主按钮":"FAIL ae="+(ae?ae.className:"none")})()', 'd1-focus'), 10500);
@@ -798,7 +799,7 @@ function runUitest(d) {
   // 时机不一,主进程已显式 releaseDialogModal 兜底。本断言防的正是"对话框关掉、主窗永久点不动"
   // 这类不可自愈状态(禁用则本项 FAIL)。
   uiStep(() => d.log(`UITEST dialog-unmodal mainEnabled=${d.mainWindow?.isEnabled?.()}(期望 true) → ${d.mainWindow?.isEnabled?.() === true ? 'PASS' : 'FAIL'}`), 11750, 'dialog-unmodal');
-  // ④ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
+  // ⑩ 报告窗复用(启动失败自动弹出后,再次 showReport 仍要更新内容)
   uiStep(() => d.showReport({ phase: 'boot', error: new Error('等待 dsh web 输出服务地址超时(90s)'), code: null, buf: '[i] dsh web: 正在启动…', actions: [{ id: 'retry', label: '重试', style: 'primary' }] }), 11800, 'report2');
   // P2-3 Mica 试点:reportWin 的 .win.mica 类必须与 Win11 判定一致(Win10 回落实色)
   uiStep(() => {
@@ -806,14 +807,14 @@ function runUitest(d) {
     readDom(d.reportWin, `(()=>{const m=document.querySelector(".win").classList.contains("mica");return (m===${want})?"PASS mica="+m:"FAIL mica="+m+" want=${want}"})()`, 'mica-flag');
   }, 12050);
   uiStep(() => readDom(d.reportWin, 'document.getElementById("name").textContent', 'report'), 12400);
-  // ⑤ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
+  // ⑪ 菜单 toggle:打开 → 点击按钮关闭 → 再点打开
   uiStep(() => d.showMenuPopup(), 13200, 'menu-open'); // +200ms:s3-restore(13090)先完成,菜单不再被 toggleTitlebar 的 closeMenuPopup 误关
   uiStep(() => d.log(`UITEST menu-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 13500, 'menu-open-verify');
   uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 13700, 'menu-toggle-close');
   uiStep(() => d.log(`UITEST menu-toggled-close destroyed=${!d.menuPopupView}(期望 true,P0-2 关闭即销毁) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 13950, 'menu-close-verify');
   uiStep(() => { d.titlebarView?.webContents.executeJavaScript('document.getElementById("menuBtn").click()').catch(() => {}); }, 14100, 'menu-toggle-open');
   uiStep(() => d.log(`UITEST menu-toggled-open w=${d.menuPopupView?.getBounds().width}(期望 ${d.MENU_W + d.MENU_MARGIN * 2}) → ${d.menuPopupView?.getBounds().width > 0 ? 'PASS' : 'FAIL'}`), 14350, 'menu-reopen-verify');
-  // ⑤' 对话框高度自适应:长 detail(下载加速设置)必须加高窗口,按钮不被推出
+  // ⑪' 对话框高度自适应:长 detail(下载加速设置)必须加高窗口,按钮不被推出
   uiStep(() => d.showDialog({
     type: 'info', title: '下载加速设置', width: 540,
     message: '桌面端更新已默认启用多线程分段下载;仍慢时可配置镜像源,或为 npm 切换国内镜像。',
@@ -830,7 +831,7 @@ function runUitest(d) {
   // (桌面端空白而浏览器正常的回归锁);若仍在 file:// 启动页(慢启动), 容忍跳过
   uiStep(() => readDom(d.dshView, '(()=>{const h=location.href;const bl=document.body?document.body.innerHTML.length:0;if(h.startsWith("file:"))return "PASS 尚在启动页(容忍)";return bl>500?"PASS 服务页已挂载 bodyLen="+bl:"FAIL 服务页空白 bodyLen="+bl+" href="+h.slice(0,60)})()', 'svc-mount'), 9500);
   uiStep(() => { d.dialogWin?.webContents.executeJavaScript('document.querySelector("#foot button").click()').catch(() => {}); }, 15050, 'accel-close');
-  // ⑥ dsh 本体安装(修复点:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
+  // ⑫ dsh 本体安装(修复点:Windows spawn .cmd 抛 EINVAL → 状态窗永远"请稍后")
   //    成功路径:假 npm 输出两行后正常退出 0 → 应出现"dsh 更新完成"结果窗
   fs.writeFileSync(path.join(d.app.getPath('userData'), 'fake-npm-ok.js'),
     "process.stdout.write('fetching dsh metadata...\\n');setTimeout(()=>{process.stdout.write('added 1 package in 2s\\n');process.exit(0);},900);");
@@ -848,7 +849,7 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, 'document.getElementById("rtitle").textContent', 'install-timeout'), 23000);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('Array.from(document.querySelectorAll("#btns button")).find(b=>b.textContent==="好的").click()').catch(() => {}); }, 23150, 'install-okbtn');
   uiStep(() => d.log(`UITEST install-timeout win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 23300, 'install-okbtn-verify');
-  // ⑪ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流(瞬时提示已改由 X1 通知宿主承载)
+  // ⑬ 任务中心(P1-1):双流任务并存列表化 + 行级取消不误伤另一流(瞬时提示已改由 X1 通知宿主承载)
   uiStep(() => { d.showStatus({ mode: 'download', title: '正在下载 v9.9.9…', detail: '当前 v0.0.0', pct: '0%', size: '', __origin: 'desktop' }); }, 23450, 'tc-dl');
   uiStep(() => { d.showStatus({ mode: 'install', title: '正在安装 dsh 本体 v9.9.9…', detail: 'npm install -g', spin: true, __origin: 'dsh' }); }, 23600, 'tc-install');
   uiStep(() => readDom(d.statusWin, '(()=>{const rows=[...document.querySelectorAll("#tlist .trow")];const act=rows.filter(r=>!r.classList.contains("done")).length;const t=document.querySelector(".win-head .t").textContent;return (rows.length===2&&act===2&&t.includes("2 项进行中"))?"PASS":"FAIL rows="+rows.length+" act="+act+" t="+t})()', 'tc-list'), 23950);
@@ -862,7 +863,7 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, '(()=>{const ts=[...document.querySelectorAll("#tlist .trow .ltitle")].map(e=>e.textContent);const hasDl=ts.some(s=>s.includes("下载"));const hasDsh=ts.some(s=>s.includes("dsh 本体"));return (hasDl&&!hasDsh)?"PASS":"FAIL "+ts.join("|")})()', 'tc-narrow'), 24500);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 24700, 'tc-close');
   uiStep(() => d.log(`UITEST tc-close win=${!!d.statusWin}(期望 false) → ${!d.statusWin ? 'PASS' : 'FAIL'}`), 24900, 'tc-close-verify');
-  // ⑪' 通知宿主(阶段 1 X1):状态窗已卸下 toast 职责,瞬时提示改由独立的透明窗承载。
+  // ⑬' 通知宿主(阶段 1 X1):状态窗已卸下 toast 职责,瞬时提示改由独立的透明窗承载。
   //     这一组把三件事一起锁住:①窗口按需创建且条目渲染正确;②悬停真的延长了驻留
   //     (600ms 的条目在 650ms 后仍活着 ⇒ forward:true 的鼠标事件确实到达了渲染层);
   //     ③队列清空即收窗,不留常驻渲染进程(约束 8)。
@@ -884,7 +885,7 @@ function runUitest(d) {
     const ok = !d.toastWin && d.toastItems.length === 0;
     d.log(`UITEST toast-destroy win=${!!d.toastWin} items=${d.toastItems.length}(期望 false/0) → ${ok ? 'PASS' : 'FAIL'}`);
   }, 25750, 'toast-destroy');
-  // ⑪'' 全部关闭语义(P0-1 回归锁):列表模式 ✕ = 逐个取消全部未完成任务再收窗——
+  // ⑬'' 全部关闭语义(P0-1 回归锁):列表模式 ✕ = 逐个取消全部未完成任务再收窗——
   //    旧实现 st:close 直接清注册表,运行中的任务成为不可见且不可取消的孤儿
   uiStep(() => {
     d.updatesState.manualCheckDropped = false;      // 复位旗标:仅观察本轮取消效果
@@ -897,7 +898,7 @@ function runUitest(d) {
     const ok = !d.statusWin && d.updatesState.manualCheckDropped && d.updatesState.dshManualCheckDropped;
     d.log(`UITEST cancel-all win=${!!d.statusWin}(期望 false) desktopDrop=${d.updatesState.manualCheckDropped} dshDrop=${d.updatesState.dshManualCheckDropped}(期望 true) → ${ok ? 'PASS' : 'FAIL'}`);
   }, 26250, 'cancel-all-verify');
-  // ⑪''' Esc 语义梯度(P1-4):活动任务存在时 Esc = 挂后台(安全离开);仅剩结果时 Esc = 关窗
+  // ⑬''' Esc 语义梯度(P1-4):活动任务存在时 Esc = 挂后台(安全离开);仅剩结果时 Esc = 关窗
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 26400, 'esc-active-prep');
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 26550, 'esc-active');
   uiStep(() => { const w = d.statusWin; const ok = !!w && w.isMinimized(); d.log(`UITEST esc-active minimized=${!!(w && w.isMinimized())}(期望 true,Esc=后台) → ${ok ? 'PASS' : 'FAIL'}`); }, 26700, 'esc-active-verify');
@@ -905,7 +906,7 @@ function runUitest(d) {
   uiStep(() => { d.showStatusResult({ type: 'success', title: '更新就绪', detail: 'v9.9.9 已下载完成', buttons: [{ id: 'ok', label: '好的' }], __origin: 'desktop' }, () => {}); }, 26800, 'esc-result-prep');
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 26950, 'esc-result');
   uiStep(() => { const ok = !d.statusWin; d.log(`UITEST esc-result win=${!!d.statusWin}(期望 false,Esc=关窗) → ${ok ? 'PASS' : 'FAIL'}`); }, 27100, 'esc-result-verify');
-  // ⑪'''' 被动结果不丢弃(P1-5):nonIntrusive 结果撞上进行中流程且状态窗已开 → 入列不抢焦点,
+  // ⑬'''' 被动结果不丢弃(P1-5):nonIntrusive 结果撞上进行中流程且状态窗已开 → 入列不抢焦点,
   //      行内按钮回调仍然可达(旧实现直接丢弃,只能靠日志追踪)
   let niActionFired = false;
   uiStep(() => { d.showStatus({ mode: 'check', title: '正在检查更新…', detail: '当前 v0.0.0', spin: true, __origin: 'desktop' }); }, 27200, 'ni-prep');
@@ -913,14 +914,14 @@ function runUitest(d) {
   uiStep(() => readDom(d.statusWin, '(()=>{const l=document.getElementById("tlist");const rows=[...l.querySelectorAll(".trow")];const doneRow=rows.find(r=>r.classList.contains("done"));const t=doneRow&&doneRow.querySelector(".ltitle").textContent;return (l.style.display!=="none"&&rows.length===2&&t==="被动结果")?"PASS 被动结果入列":"FAIL rows="+rows.length+" done="+(t||"none")+" shown="+l.style.display})()', 'ni-enqueue'), 27650);
   uiStep(() => { d.statusWin?.webContents.executeJavaScript('document.querySelector("#tlist .trow.done .lbtns button").click()').catch(() => {}); }, 27800, 'ni-click');
   uiStep(() => { d.log(`UITEST ni-action fired=${niActionFired}(期望 true) → ${niActionFired ? 'PASS' : 'FAIL'}`); }, 27950, 'ni-action-verify');
-  // ⑨ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
+  // ⑭ 加载页慢启动自助行(P0-2):dshBoot 桥按协议条件暴露——file:// 页必须有,http(s) 服务页必须零暴露
   //    (断言不变量本身,不依赖"检查瞬间 dshView 停在哪一页",慢启动时序下稳定)
   uiStep(() => d.dshView.webContents.executeJavaScript('(()=>{const f=location.protocol==="file:";const has=typeof window.dshBoot==="object";return (f===has)?"PASS protocol="+location.protocol+" has="+has:"FAIL protocol="+location.protocol+" has="+has})()')
     .then((v) => d.log(`UITEST boot-bridge-remote ${v}`))
     .catch((e) => d.log(`UITEST boot-bridge-remote ✗ ${e.message}`)), 25100, 'boot-bridge-remote');
   uiStep(() => { d.dshView.webContents.loadFile(path.join(__dirname, 'loading.html')).catch(() => {}); }, 25400, 'loading-reload');
   uiStep(() => readDom(d.dshView, '(()=>{const s=document.getElementById("slow");const v0=getComputedStyle(s).display==="none";showSlowActions();const v1=getComputedStyle(s).display!=="none";const n=document.querySelectorAll("#slow button").length;const b=typeof window.dshBoot==="object"&&typeof window.dshBoot.action==="function";return (v0&&v1&&n===3&&b)?"PASS":"FAIL v0="+v0+" v1="+v1+" btns="+n+" bridge="+b})()', 'boot-slow'), 26000);
-  // ⑧ a11y(P1-3):菜单角色标注(menu/menuitem/menuitemcheckbox+aria-checked)、
+  // ⑮ a11y(P1-3):菜单角色标注(menu/menuitem/menuitemcheckbox+aria-checked)、
   //    键盘导航(aria-activedescendant 跟随)与 typeahead(前缀匹配跳转),Escape 关闭
   uiStep(() => { d.showMenuPopup(); }, 26300, 'a11y-menu-open');
   // P0-7:菜单焦点落在 role=menu 容器(panel)上,aria-activedescendant 才对读屏器生效
@@ -934,7 +935,7 @@ function runUitest(d) {
   uiStep(() => readDom(d.menuPopupView, '(()=>{const before=document.querySelector(".item.sel");document.dispatchEvent(new KeyboardEvent("keydown",{key:"重"}));const after=document.querySelector(".item.sel");return (after&&after!==before&&after.textContent.includes("重"))?"PASS → "+after.textContent.trim().slice(0,10):"FAIL before="+(before&&before.textContent.trim().slice(0,10))+" after="+(after&&after.textContent.trim().slice(0,10))})()', 'a11y-typeahead'), 27300);
   uiStep(() => { d.menuPopupView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 27600, 'a11y-esc');
   uiStep(() => d.log(`UITEST a11y-closed win=${!!d.menuPopupView}(期望 false) → ${!d.menuPopupView ? 'PASS' : 'FAIL'}`), 27900, 'a11y-closed-verify');
-  // ⑫ 外观主题(P1-2):菜单项存在 → 点击循环(auto→dark→light→auto) → config/themeSource 映射
+  // ⑯ 外观主题(P1-2):菜单项存在 → 点击循环(auto→dark→light→auto) → config/themeSource 映射
   //    → 渲染层 data-theme + 令牌覆写 + 鲸鱼 logo 黑白换版;结束恢复原配置
   // 设置窗测试会经 acc:set 落盘 closeAction/openBrowser:一并捕获原值,收尾时还原
   const theme0 = d.loadConfig().theme;
@@ -989,7 +990,7 @@ function runUitest(d) {
   }, 31400, 'theme-3');
   uiStep(() => { d.reportWin?.webContents.executeJavaScript('document.querySelector(".win-head .win-close").click()').catch(() => {}); }, 32700, 'theme-report-close');
   uiStep(() => d.log(`UITEST theme-report-closed win=${!!d.reportWin}(期望 false) → ${!d.reportWin ? 'PASS' : 'FAIL'}`), 32950, 'theme-report-close-verify');
-  // ⑬ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
+  // ⑰ 首启欢迎页(P1-6):窗口创建/文案/按钮/桥接齐备;abortWelcome 吞掉 resolve 不触发退出分支
   uiStep(() => { d.showWelcome(); }, 33100, 'welcome-open');
   uiStep(() => readDom(d.welcomeWin, '(()=>{const c=document.getElementById("wlChoose");const q=document.getElementById("wlQuit");const h=document.body.textContent;const bridge=typeof window.__welcome==="object"&&typeof window.__welcome.choose==="function";const ok=!!c&&!!q&&h.includes("欢迎使用 DSH Desktop")&&h.includes("收进系统托盘")&&h.includes("会话、文件、设置、插件")&&bridge;return ok?"PASS 欢迎页齐备":"FAIL choose="+!!c+" quit="+!!q+" bridge="+bridge})()', 'welcome-dom'), 33700);
   // WEL-2 验证项:欢迎页首帧焦点应落在「选择工作目录」(脚本解析期 focus() 在 show() 前执行,
@@ -1012,7 +1013,7 @@ function runUitest(d) {
   }, 33850, 'welcome-size');
   uiStep(() => { d.abortWelcome(); }, 33900, 'welcome-abort');
   uiStep(() => d.log(`UITEST welcome-closed win=${!!d.welcomeWin}(期望 false) → ${!d.welcomeWin ? 'PASS' : 'FAIL'}`), 34100, 'welcome-closed-verify');
-  // ⑭ 快捷键速查(D-1):菜单「键盘快捷键…」→ 速查浮层(第七轮起不再是对话框),
+  // ⑱ 快捷键速查(D-1):菜单「键盘快捷键…」→ 速查浮层(第七轮起不再是对话框),
   //    键位卡片与 shortcuts.js 数据源同源;Esc 关闭,关闭即销毁
   uiStep(() => { d.showMenuPopup(); }, 34250, 'sc-menu-open');
   uiStep(() => d.menuPopupView?.webContents.executeJavaScript('(()=>{const it=[...document.querySelectorAll(".item .lbl")].find(e=>e.textContent.startsWith("键盘快捷键"));if(!it)return "FAIL no-item";it.parentElement.click();return "ok"})()')
@@ -1020,7 +1021,7 @@ function runUitest(d) {
   uiStep(() => readDom(d.shortcutsView, `(()=>{const rows=[...document.querySelectorAll(".row")];const lbls=rows.map(r=>r.querySelector(".lbl").textContent);const kbd=rows.map(r=>r.querySelector(".kbd").textContent);const ok=rows.length===6&&lbls.some(l=>l.includes("打开工作目录"))&&kbd.some(k=>k.includes("Ctrl")&&k.includes("O"))&&kbd.some(k=>k.includes("F11"))&&kbd.some(k=>k.includes("Shift")&&k.includes("B"));return ok?"PASS 键位卡片="+rows.length:"FAIL rows="+rows.length+" kbd="+kbd.join("|")+" lbl="+lbls.join("|")})()`, 'sc-dom'), 34700);
   uiStep(() => { d.shortcutsView?.webContents.executeJavaScript('document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))').catch(() => {}); }, 34850, 'sc-close');
   uiStep(() => { const ok = !d.shortcutsView; d.log(`UITEST sc-closed destroyed=${!d.shortcutsView}(期望 true,关闭即销毁) → ${ok ? 'PASS' : 'FAIL'}`); }, 35050, 'sc-closed-verify');
-  // ⑪''' 错误级通知(阶段 1 X1 路由 ③):必须常驻、带动作按钮、并点亮托盘红角标,
+  // ⑲ 错误级通知(阶段 1 X1 路由 ③):必须常驻、带动作按钮、并点亮托盘红角标,
   //        直到用户处理——"更新失败"不能像"已复制"那样 2.2 秒自己消失。
   //        动作点击后条目、队列与角标要同时复位(否则红点永远亮着,用户再也分不清真假)。
   let errActFired = false;
@@ -1034,7 +1035,7 @@ function runUitest(d) {
     const ok = errActFired && !d.toastWin && d.toastItems.length === 0 && d.notifyErrPending === false;
     d.log(`UITEST toast-err-verify fired=${errActFired} win=${!!d.toastWin} items=${d.toastItems.length} errPending=${d.notifyErrPending}(期望 true/false/0/false) → ${ok ? 'PASS' : 'FAIL'}`);
   }, 35470, 'toast-err-verify');
-  // ⑦ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
+  // ⑳ 多线程下载器冒烟:本地 HTTP 服务(支持 Range)提供 2MB 随机文件,
   //    验证分段并发下载、sha512 校验、镜像 URL 拼接
   setTimeout(async () => {
     const http = require('node:http');
@@ -1067,7 +1068,7 @@ function runUitest(d) {
       server.close();
       try { fs.unlinkSync(dest); } catch { /* ignore */ }
     }
-    // ⑧ 设置窗冒烟(阶段 3):深链落到「外观与行为」→ 三分区结构 → 三个字段落盘 →
+    // ㉑ 设置窗冒烟(阶段 3):深链落到「外观与行为」→ 三分区结构 → 三个字段落盘 →
     //    回到「更新与下载」验证分段数/镜像源(含非法值校验)→ 尺寸自适应 → 关闭
     try {
       d.showSettings('appearance');
@@ -1131,7 +1132,7 @@ function runUitest(d) {
       d.log(`UITEST settings-win ✗ ${err.stack || err}`);
     }
   }, 24200);
-  // ⑬ 任务列表 keyed diff 的运行锁(阶段 2 v0.7.14 · 修 C3)。
+  // ㉒ 任务列表 keyed diff 的运行锁(阶段 2 v0.7.14 · 修 C3)。
   //    出口标准原文:"10+ 任务下滚动位置与折叠态在进度帧中不丢"。旧实现每 150ms 全量重建
   //    (list.innerHTML=''),行节点被整批换掉 → scrollTop 归零、焦点蒸发。
   //    本组用「节点身份」而非像素判据:把首行打上 JS 标记,跨若干进度帧后它必须还是同一个

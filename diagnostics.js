@@ -196,48 +196,49 @@ function renderReport(diag, cls, ctx = {}) {
   const push = (s = '') => L.push(s);
   const table = (obj) => { for (const k of Object.keys(obj || {})) push(`- **${k}**: ${safeStr(obj[k])}`); };
 
-  push('# DSH Desktop 错误报告');
+  // 章节标题与字段标签走文案表(repfile 域):报告会被用户导出分享,文案不允许埋在代码里
+  push(t('repfile.title'));
   push('');
-  push(`生成时间: ${diag.timestamp || new Date().toISOString()}`);
-  push(`阶段: ${diag.phase || 'unknown'}`);
+  push(`${t('repfile.generated')}${diag.timestamp || new Date().toISOString()}`);
+  push(`${t('repfile.phase')}${diag.phase || 'unknown'}`);
   push('');
-  push('## 错误归类');
-  push(`- 判定: ${cls.title}`);
-  push(`- 原因: ${cls.cause}`);
-  push('- 建议:');
+  push(t('repfile.classify'));
+  push(`${t('repfile.judgment')}${cls.title}`);
+  push(`${t('repfile.cause')}${cls.cause}`);
+  push(t('repfile.suggestions'));
   for (const s of cls.suggestions) push(`  - ${s}`);
   push('');
-  push('## 运行时环境');
+  push(t('repfile.runtime'));
   table(diag.runtime);
   push('');
-  if (diag.workspace) { push('## 工作目录'); push(`- ${diag.workspace}`); push(''); }
-  if (diag.config) { push('## 应用配置'); push('```json'); push(safeStr(diag.config)); push('```'); push(''); }
+  if (diag.workspace) { push(t('repfile.workspace')); push(`- ${diag.workspace}`); push(''); }
+  if (diag.config) { push(t('repfile.config')); push('```json'); push(safeStr(diag.config)); push('```'); push(''); }
   if (diag.dsh) {
-    push('## dsh 本体');
+    push(t('repfile.dsh'));
     table(diag.dsh);
     push('');
   }
-  push('## 启动过程');
+  push(t('repfile.boot'));
   table(diag.boot);
   push('');
 
   const err = ctx.error;
   if (err) {
-    push('## 原始错误');
+    push(t('repfile.rawError'));
     push('```');
     push(String((err && err.stack) || err || ''));
     push('```');
     push('');
   }
   if (diag.crashTxt) {
-    push('## 崩溃记录 (CRASH.txt)');
+    push(t('repfile.crash'));
     push('```');
     push(diag.crashTxt);
     push('```');
     push('');
   }
   if (diag.logTail) {
-    push('## 日志尾部 (最近 200 行)');
+    push(t('repfile.logTail'));
     push('```');
     push(diag.logTail);
     push('```');

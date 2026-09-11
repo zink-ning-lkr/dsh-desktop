@@ -432,12 +432,12 @@ let notifyErrPending = false;
 function trayStatusText() {
   const st = trayState === 'ok' ? t('tray.running') : trayState === 'boot' ? t('tray.booting') : t('tray.stopped');
   let dl = '';
-  for (const t of statusTasks.values()) { // 任一进行中下载任务(任务中心模型,P1-1)
-    if (!t.done && t.mode === 'download' && t.pct) {
+  for (const task of statusTasks.values()) { // 任一进行中下载任务(任务中心模型,P1-1)
+    if (!task.done && task.mode === 'download' && task.pct) {
       // 进度取整到整数百分点:tooltip 按 1% 粒度变化,配合 refreshTray 同值短路,
       // 下载期间不再以 ~150ms 一次的频率重设托盘(0.1% 级的字符串抖动穿透不了缓存)
-      const n = parseFloat(t.pct);
-      dl = i18n.t('tray.downloadingPct', { n: Number.isFinite(n) ? Math.round(n) : t.pct }); // 循环变量 t 遮蔽文案函数,此处走 i18n.t
+      const n = parseFloat(task.pct);
+      dl = t('tray.downloadingPct', { n: Number.isFinite(n) ? Math.round(n) : task.pct });
       break;
     }
   }
@@ -671,8 +671,8 @@ function statusHeight() {
 
 function statusWinTitle(tasks) {
   if (tasks.length === 1) return tasks[0].title || 'DSH';
-  const act = tasks.filter((t) => !t.done).length;
-  return act ? i18n.t('status.titleActive', { n: act }) : i18n.t('status.title'); // 过滤参数 t 遮蔽文案函数,此处走 i18n.t
+  const act = tasks.filter((task) => !task.done).length;
+  return act ? t('status.titleActive', { n: act }) : t('status.title');
 }
 
 // 推送整帧任务数组给渲染器(渲染器单任务时退化为旧单视图,多任务渲染列表)
@@ -1260,10 +1260,12 @@ function makeLazyView({ file, preload, props = {}, onBlur = null, onQueuedLoad =
 }
 
 // 下拉把手:收起标题栏才需要,展开时销毁(内存优化 P0-1,见 ensureRevealTab)。
+// 用自带的最小 preload(reveal-tab-preload.js):把手是常建常毁的小窗,
+// 复用 titlebar-preload 会白做同步 IPC 且把 17 成员桥暴露给无输入页面。
 // backgroundThrottling:false —— 收起态把手是 0 尺寸视图,渲染被 Chromium 后台节流后,
 // setBounds 恢复 96×26 的首帧会掉帧,「出现那一下卡」(第七轮 H-1)
 const revealTab = makeLazyView({
-  file: 'reveal-tab.html', preload: 'titlebar-preload.js',
+  file: 'reveal-tab.html', preload: 'reveal-tab-preload.js',
   props: { webPreferences: { backgroundThrottling: false } },
 });
 // 主菜单弹层:点开才创建、关闭即销毁

@@ -243,6 +243,23 @@
     "logShowAll": "显示全部",
     "logMeta": "{shown}/{total} 行"
   },
+  "repfile": {
+    "title": "# DSH Desktop 错误报告",
+    "generated": "生成时间: ",
+    "phase": "阶段: ",
+    "classify": "## 错误归类",
+    "judgment": "- 判定: ",
+    "cause": "- 原因: ",
+    "suggestions": "- 建议:",
+    "runtime": "## 运行时环境",
+    "workspace": "## 工作目录",
+    "config": "## 应用配置",
+    "dsh": "## dsh 本体",
+    "boot": "## 启动过程",
+    "rawError": "## 原始错误",
+    "crash": "## 崩溃记录 (CRASH.txt)",
+    "logTail": "## 日志尾部 (最近 200 行)"
+  },
   "settings": {
     "title": "设置",
     "segTitle": "多线程分段下载",

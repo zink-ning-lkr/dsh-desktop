@@ -29,8 +29,9 @@
    listNav     列表行 roving tabindex(阶段 2 修 X4:↑↓/Home/End + Enter/Delete)
    winShell    窗口头部三件套(阶段 3 T-5:图标槽 + 标题 + 关闭按钮)
 
-   ---- 明确暂不提供(避免死代码,待消费方出现时再落地) ----
-   field    : 表单行属阶段 3(accel → settings 三分区)。 */
+   ---- 明确暂不提供 ----
+   field    : 表单行。settings 三分区表单已落地但结构差异大(滑杆/选项组/文本框混排),
+             单一构件收益不抵抽象成本,待出现第二个同构表单行再落地。 */
 (function () {
   'use strict';
 

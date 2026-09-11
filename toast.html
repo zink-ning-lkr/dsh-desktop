@@ -16,6 +16,7 @@
 <script src="ui-theme.js"></script>
 <script src="ui-i18n.js"></script>
 <script src="ui-icons.js"></script>
+<script src="ui-kit.js"></script>
 <style>
   /* 宿主：整页透明、无滚动条。条目留白与阴影都不做——透明窗会裁掉外阴影(裁完是硬边,
      比无阴影更难看),而留白会让"点击穿透区"与实际可视区错位。浮起感由 ui.css §5
@@ -86,18 +87,12 @@
     if (txt.textContent !== (it.text || '')) txt.textContent = it.text || '';
   }
 
-  // keyed 复用(按 data-id):节点身份稳定 ⇒ 悬停中收到新条目时,鼠标底下那条不会被换掉,
-  // 也就不会出现"mouseleave 永远不来、计时被永久暂停"的死锁
+  // keyed 复用(按 data-k,id 同源):节点身份稳定 ⇒ 悬停中收到新条目时,鼠标底下那条不会被换掉,
+  // 也就不会出现"mouseleave 永远不来、计时被永久暂停"的死锁。
+  // 实现收编共享层 ui-kit.keyedList(与 status/palette 同一份 diff 语义,不再各写一份)
+  const K = window.UI_KIT;
   function render(items) {
-    const alive = new Set(items.map((it) => it.id));
-    for (const row of [...host.children]) if (!alive.has(row.dataset.id)) row.remove();
-    items.forEach((it, i) => {
-      let row = null;
-      for (const c of host.children) if (c.dataset.id === it.id) { row = c; break; }
-      if (!row) row = build(it);
-      else syncRow(row, it);
-      if (host.children[i] !== row) host.insertBefore(row, host.children[i] || null);
-    });
+    K.keyedList(host, items.map((it) => ({ k: it.id, it })), (spec) => build(spec.it), (row, spec) => syncRow(row, spec.it));
     report();
   }
 
